@@ -13,8 +13,36 @@ public final class ChatService {
         this.gateway = gateway;
     }
 
+    public ChatGateway gateway() {
+        return gateway;
+    }
+
+    public boolean isServerConnected() {
+        return gateway.isServerConnected();
+    }
+
+    public void setOnRealtimeUpdate(Runnable callback) {
+        gateway.setOnRealtimeUpdate(callback);
+    }
+
+    public UserProfile updateProfile(UserProfile user) {
+        return gateway.updateProfile(user);
+    }
+
+    public byte[] downloadAttachment(String messageId, String fileName) {
+        return gateway.downloadAttachment(messageId, fileName);
+    }
+
     public List<Conversation> conversations() {
         return gateway.listConversations();
+    }
+
+    public List<UserProfile> listUsers() {
+        return gateway.listUsers();
+    }
+
+    public Conversation openDirectMessage(String peerId) {
+        return gateway.openDirectMessage(peerId);
     }
 
     public List<ChatMessage> messages(String conversationId) {

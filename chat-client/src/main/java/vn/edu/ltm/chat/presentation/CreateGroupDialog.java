@@ -74,6 +74,19 @@ public final class CreateGroupDialog extends JDialog {
     }
 
     private void initCandidates() {
+        List<vn.edu.ltm.chat.domain.UserProfile> serverUsers = chatService != null ? chatService.listUsers() : List.of();
+        if (serverUsers != null && !serverUsers.isEmpty()) {
+            for (vn.edu.ltm.chat.domain.UserProfile u : serverUsers) {
+                String role = (u.bio() != null && !u.bio().isBlank()) ? u.bio() : u.statusLabel();
+                candidates.add(new FriendCandidate(u.id(), u.displayName(), u.initials(), role));
+            }
+            for (int i = 0; i < Math.min(2, candidates.size()); i++) {
+                selectedIds.add(candidates.get(i).id());
+            }
+            updateSummary();
+            return;
+        }
+
         candidates.add(new FriendCandidate("1", "Trần Ngọc Linh", "LN", "Đang hoạt động"));
         candidates.add(new FriendCandidate("2", "Nguyễn Minh Khoa", "MK", "Thiết kế sản phẩm"));
         candidates.add(new FriendCandidate("3", "Lê Bảo Anh", "BA", "Lần cuối hoạt động hôm nay"));

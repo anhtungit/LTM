@@ -137,6 +137,31 @@ public final class InMemoryChatGateway implements ChatGateway {
     }
 
     @Override
+    public synchronized List<UserProfile> listUsers() {
+        List<UserProfile> users = new ArrayList<>();
+        for (Conversation c : conversations.values()) {
+            if (!c.isGroup()) {
+                users.add(new UserProfile(c.id(), c.displayName(), c.id() + "@example.com",
+                        "@" + c.id().replace("-", ""), c.about(), c.online() ? "online" : "offline", null));
+            }
+        }
+        return users;
+    }
+
+    @Override
+    public synchronized Conversation openDirectMessage(String peerId) {
+        if (peerId == null || peerId.isBlank()) return null;
+        Conversation existing = conversations.get(peerId);
+        if (existing != null) {
+            return existing;
+        }
+        String initials = peerId.length() >= 2 ? peerId.substring(0, 2).toUpperCase() : peerId.toUpperCase();
+        Conversation created = new Conversation(peerId, peerId, initials, "Trò chuyện trực tiếp", true);
+        addConversation(created);
+        return created;
+    }
+
+    @Override
     public synchronized List<ChatMessage> loadMessages(String conversationId, String channel) {
         String key = makeKey(conversationId, channel);
         List<ChatMessage> history = messages.get(key);

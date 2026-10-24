@@ -133,7 +133,7 @@ public final class LoginPanel extends JPanel {
         row = addRow(content, loginButton(), row, 8);
         row = addRow(content, createAccountButton(), row, 16);
         row = addRow(content, separator(), row, 12);
-        addRow(content, centeredLabel("Chế độ demo · chưa kết nối máy chủ chat", 12,
+        addRow(content, centeredLabel("Kết nối tự động · đồng bộ thời gian thực qua TCP/SQLite", 12,
                 DiscordTheme.TEXT_MUTED), row, 0);
         return content;
     }
@@ -201,7 +201,7 @@ public final class LoginPanel extends JPanel {
 
     private JComponent emailFieldInput() {
         emailField.setName("email");
-        emailField.setToolTipText("Nhập email bất kỳ có định dạng hợp lệ để vào demo.");
+        emailField.setToolTipText("Nhập email đã đăng ký trên máy chủ.");
         emailField.putClientProperty("JTextField.placeholderText", "ten@vi-du.com");
         emailField.setPreferredSize(new Dimension(CONTENT_WIDTH, FIELD_HEIGHT));
         emailField.setMinimumSize(new Dimension(120, FIELD_HEIGHT));
@@ -239,7 +239,7 @@ public final class LoginPanel extends JPanel {
         box.setLayout(new BorderLayout());
 
         passwordField.setName("password");
-        passwordField.setToolTipText("Nhập mật khẩu bất kỳ; mật khẩu chỉ được kiểm tra cục bộ.");
+        passwordField.setToolTipText("Nhập mật khẩu tài khoản.");
         passwordField.putClientProperty("JPasswordField.placeholderText", "Nhập mật khẩu");
         passwordField.setBorder(null);
         passwordField.setOpaque(false);
@@ -267,17 +267,17 @@ public final class LoginPanel extends JPanel {
         notice.setLayout(new BorderLayout(10, 0));
         notice.setBorder(BorderFactory.createEmptyBorder(11, 12, 11, 12));
 
-        JLabel infoIcon = new JLabel(IconFactory.phosphor("info.svg", 16, DiscordTheme.WARNING));
+        JLabel infoIcon = new JLabel(IconFactory.phosphor("info.svg", 16, DiscordTheme.SUCCESS));
         infoIcon.setVerticalAlignment(SwingConstants.TOP);
         notice.add(infoIcon, BorderLayout.WEST);
 
         WrappedTextArea text = new WrappedTextArea(
-                "Chế độ demo · tin nhắn chỉ lưu trong phiên này.", CONTENT_WIDTH - 52);
+                "Đăng nhập bằng tài khoản máy chủ. Nếu chưa có, bấm 'Tạo tài khoản'.", CONTENT_WIDTH - 52);
         text.setFont(DiscordTheme.font(12f));
         text.setForeground(DiscordTheme.TEXT_SECONDARY);
         notice.add(text, BorderLayout.CENTER);
         notice.getAccessibleContext().setAccessibleName(
-                "Lưu ý: đây là phiên demo cục bộ, không có xác thực máy chủ.");
+                "Hệ thống yêu cầu tài khoản đã đăng ký trên máy chủ.");
         return notice;
     }
 

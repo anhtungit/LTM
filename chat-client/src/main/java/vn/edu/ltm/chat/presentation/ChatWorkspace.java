@@ -107,6 +107,7 @@ public final class ChatWorkspace extends JPanel {
     private final JPanel headerAvatarHolder = new JPanel(new BorderLayout());
     private final JPanel infoPane = new JPanel();
     private final JButton sendButton = new JButton();
+    private final JLabel connectionBadgeLabel = new JLabel();
 
     private final JPanel accountFooterDm = new JPanel(new BorderLayout());
     private final JPanel accountFooterGroup = new JPanel(new BorderLayout());
@@ -139,6 +140,34 @@ public final class ChatWorkspace extends JPanel {
 
         if (!conversations.isEmpty()) {
             selectConversation(conversations.getFirst());
+        } else {
+            rebuildConversationButtons();
+            renderEmptyWorkspaceState();
+        }
+
+        this.chatService.setOnRealtimeUpdate(this::handleServerBroadcast);
+    }
+
+    private void handleServerBroadcast() {
+        refreshConnectionBadge();
+        List<Conversation> latest = chatService.conversations();
+        conversations.clear();
+        conversations.addAll(latest);
+        rebuildRail();
+        rebuildConversationButtons();
+        if (selectedConversationId == null && !conversations.isEmpty()) {
+            selectConversation(conversations.getFirst());
+            return;
+        }
+        Conversation conv = currentConversation();
+        if (conv != null) {
+            if (conv.isGroup()) {
+                rebuildGroupChannels(conv);
+            }
+            rebuildInfoPane(conv);
+            rebuildTranscript();
+        } else {
+            renderEmptyWorkspaceState();
         }
     }
 
@@ -340,7 +369,21 @@ public final class ChatWorkspace extends JPanel {
         content.add(groupMessagesList);
 
         content.add(Box.createVerticalStrut(14));
-        content.add(sectionLabel("TIN NHẮN TRỰC TIẾP"));
+
+        JPanel dmSectionHeader = new JPanel(new BorderLayout());
+        dmSectionHeader.setOpaque(false);
+        dmSectionHeader.setAlignmentX(LEFT_ALIGNMENT);
+        dmSectionHeader.add(sectionLabel("TIN NHẮN TRỰC TIẾP"), BorderLayout.WEST);
+
+        JButton plusDm = new JButton(IconFactory.phosphor("plus.svg", 14, DiscordTheme.TEXT_MUTED));
+        plusDm.setContentAreaFilled(false);
+        plusDm.setBorderPainted(false);
+        plusDm.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        plusDm.setToolTipText("Bắt đầu tin nhắn trực tiếp mới");
+        plusDm.addActionListener(e -> openStartDmDialog());
+        dmSectionHeader.add(plusDm, BorderLayout.EAST);
+
+        content.add(dmSectionHeader);
         content.add(Box.createVerticalStrut(4));
 
         directMessagesList.setLayout(new BoxLayout(directMessagesList, BoxLayout.Y_AXIS));
@@ -893,14 +936,21 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private JComponent connectionBadge() {
-        JLabel badge = new JLabel("DEMO CỤC BỘ");
-        badge.setFont(DiscordTheme.extrabold(9f));
-        badge.setForeground(DiscordTheme.ACCENT_SOFT);
-        badge.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(0x4A, 0x50, 0x99)),
+        connectionBadgeLabel.setFont(DiscordTheme.extrabold(9f));
+        refreshConnectionBadge();
+        return connectionBadgeLabel;
+    }
+
+    private void refreshConnectionBadge() {
+        boolean online = chatService.isServerConnected();
+        connectionBadgeLabel.setText(online ? "TRỰC TUYẾN" : "DEMO CỤC BỘ");
+        connectionBadgeLabel.setForeground(online ? DiscordTheme.SUCCESS : DiscordTheme.ACCENT_SOFT);
+        connectionBadgeLabel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(online ? DiscordTheme.SUCCESS : new Color(0x4A, 0x50, 0x99)),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)));
-        badge.setToolTipText("Tin nhắn chỉ được ghi vào bộ nhớ của ứng dụng này.");
-        return badge;
+        connectionBadgeLabel.setToolTipText(online
+                ? "Đã tự động kết nối tới máy chủ chat (TCP/SQLite)."
+                : "Đang chạy chế độ ngoại tuyến; sẽ tự kết nối khi phát hiện máy chủ.");
     }
 
     private JComponent buildTranscriptArea() {
@@ -1030,7 +1080,7 @@ public final class ChatWorkspace extends JPanel {
                 File file = chooser.getSelectedFile();
                 Conversation c = currentConversation();
                 String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-                chatService.sendAttachment(selectedConversationId, chan, user, file.getName(), file.length(), false);
+                chatService.sendAttachment(selectedConversationId, chan, user, file.getAbsolutePath(), file.length(), false);
                 rebuildTranscript();
             }
         });
@@ -1293,11 +1343,25 @@ public final class ChatWorkspace extends JPanel {
         }
 
         if (directMessagesList.getComponentCount() == 0 && groupMessagesList.getComponentCount() == 0) {
-            JLabel empty = new JLabel("Không có hội thoại phù hợp.");
+            JLabel empty = new JLabel(conversations.isEmpty()
+                    ? "Chưa có cuộc trò chuyện nào."
+                    : "Không có hội thoại phù hợp.");
             empty.setFont(DiscordTheme.font(11f));
             empty.setForeground(DiscordTheme.TEXT_MUTED);
-            empty.setBorder(BorderFactory.createEmptyBorder(8, 6, 8, 6));
+            empty.setBorder(BorderFactory.createEmptyBorder(8, 6, 4, 6));
             directMessagesList.add(empty);
+
+            if (conversations.isEmpty()) {
+                JButton startDmBtn = new JButton("+ Nhắn tin mới");
+                startDmBtn.setFont(DiscordTheme.semibold(11f));
+                startDmBtn.setForeground(DiscordTheme.ACCENT_SOFT);
+                startDmBtn.setContentAreaFilled(false);
+                startDmBtn.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+                startDmBtn.setHorizontalAlignment(SwingConstants.LEFT);
+                startDmBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                startDmBtn.addActionListener(e -> openStartDmDialog());
+                directMessagesList.add(startDmBtn);
+            }
         }
 
         directMessagesList.revalidate();
@@ -1379,7 +1443,58 @@ public final class ChatWorkspace extends JPanel {
                 .orElse(null);
     }
 
+    private void renderEmptyWorkspaceState() {
+        conversationTitle.setText("Chào mừng, " + user.displayName() + "!");
+        conversationSubtitle.setText("Bấm dấu (+) ở mục Tin nhắn trực tiếp hoặc Tạo nhóm để bắt đầu trò chuyện.");
+        headerAvatarHolder.removeAll();
+        headerAvatarHolder.revalidate();
+        headerAvatarHolder.repaint();
+
+        infoPane.removeAll();
+        infoPane.revalidate();
+        infoPane.repaint();
+
+        transcript.removeAll();
+        JLabel welcome = new JLabel("Tài khoản của bạn hiện chưa có cuộc trò chuyện nào.");
+        welcome.setFont(DiscordTheme.semibold(14f));
+        welcome.setForeground(DiscordTheme.TEXT_PRIMARY);
+        welcome.setBorder(BorderFactory.createEmptyBorder(24, 0, 8, 0));
+        transcript.add(welcome);
+
+        JLabel sub = new JLabel("Hãy chọn người dùng để nhắn tin 1-1 hoặc tạo nhóm trò chuyện mới.");
+        sub.setFont(DiscordTheme.font(12f));
+        sub.setForeground(DiscordTheme.TEXT_MUTED);
+        sub.setBorder(BorderFactory.createEmptyBorder(0, 0, 14, 0));
+        transcript.add(sub);
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        actions.setOpaque(false);
+
+        JButton newDmBtn = new JButton("Nhắn tin trực tiếp mới (+)");
+        DiscordTheme.stylePrimaryButton(newDmBtn);
+        newDmBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        newDmBtn.addActionListener(e -> openStartDmDialog());
+        actions.add(newDmBtn);
+
+        JButton newGroupBtn = new JButton("Tạo nhóm mới (+)");
+        newGroupBtn.setFont(DiscordTheme.bold(12f));
+        newGroupBtn.setForeground(Color.WHITE);
+        newGroupBtn.setBackground(new Color(0x35, 0x37, 0x3D));
+        newGroupBtn.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 14));
+        newGroupBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        newGroupBtn.addActionListener(e -> openCreateGroupDialog());
+        actions.add(newGroupBtn);
+
+        transcript.add(actions);
+        transcript.revalidate();
+        transcript.repaint();
+    }
+
     private void rebuildTranscript() {
+        if (selectedConversationId == null || currentConversation() == null) {
+            renderEmptyWorkspaceState();
+            return;
+        }
         transcript.removeAll();
         transcript.add(buildIntroRow());
 
@@ -1418,6 +1533,11 @@ public final class ChatWorkspace extends JPanel {
                 public void onResend(ChatMessage message) {
                     chatService.sendAttachment(selectedConversationId, chan, user, message.attachmentName(), message.attachmentSize(), false);
                     rebuildTranscript();
+                }
+
+                @Override
+                public void onDownload(ChatMessage message) {
+                    downloadAttachmentToFile(message);
                 }
             };
 
@@ -1493,7 +1613,9 @@ public final class ChatWorkspace extends JPanel {
             chatService.send(selectedConversationId, chan, user, content);
             drafts.put(selectedConversationId, "");
             composer.clear();
-            showHint("Đã ghi vào phiên demo cục bộ · chưa gửi qua mạng", DiscordTheme.SUCCESS);
+            showHint(chatService.isServerConnected()
+                    ? "Đã gửi qua máy chủ TCP & lưu vào SQLite"
+                    : "Đã ghi vào phiên demo cục bộ · chưa gửi qua mạng", DiscordTheme.SUCCESS);
             adjustComposerHeight();
             rebuildTranscript();
             composer.requestFocusInWindow();
@@ -1525,10 +1647,70 @@ public final class ChatWorkspace extends JPanel {
         dialog.setVisible(true);
     }
 
+    private void openStartDmDialog() {
+        List<UserProfile> users = chatService.listUsers();
+        List<UserProfile> candidates = new ArrayList<>();
+        if (users != null) {
+            for (UserProfile u : users) {
+                if (u != null && !u.id().equals(user.id())) {
+                    candidates.add(u);
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "Hiện chưa có người dùng nào khác trên máy chủ.",
+                    "Tin nhắn trực tiếp mới",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String[] options = new String[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            UserProfile u = candidates.get(i);
+            options[i] = u.displayName() + " (" + u.username() + ")";
+        }
+
+        String chosen = (String) JOptionPane.showInputDialog(
+                this,
+                "Chọn người dùng để bắt đầu trò chuyện 1-1:",
+                "Tin nhắn trực tiếp mới",
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                options,
+                options[0]
+        );
+        if (chosen == null) {
+            return;
+        }
+        for (int i = 0; i < options.length; i++) {
+            if (options[i].equals(chosen)) {
+                UserProfile target = candidates.get(i);
+                Conversation dm = chatService.openDirectMessage(target.id());
+                if (dm != null) {
+                    boolean exists = false;
+                    for (int j = 0; j < conversations.size(); j++) {
+                        if (conversations.get(j).id().equals(dm.id())) {
+                            conversations.set(j, dm);
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists) {
+                        conversations.add(dm);
+                    }
+                    selectConversation(dm);
+                    showChatView();
+                }
+                break;
+            }
+        }
+    }
+
     private void openProfileDialog() {
         JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(this);
         ProfileDialog dialog = new ProfileDialog(frame, user, updatedUser -> {
-            this.user = updatedUser;
+            this.user = chatService.updateProfile(updatedUser);
             rebuildAccountFooters();
             rebuildConversationButtons();
             Conversation conv = currentConversation();
@@ -1538,5 +1720,25 @@ public final class ChatWorkspace extends JPanel {
             showHint("Đã cập nhật hồ sơ cá nhân (" + user.displayName() + ")", DiscordTheme.SUCCESS);
         });
         dialog.setVisible(true);
+    }
+
+    private void downloadAttachmentToFile(ChatMessage message) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Lưu tệp đính kèm");
+        chooser.setSelectedFile(new File(message.attachmentName()));
+        int res = chooser.showSaveDialog(this);
+        if (res == JFileChooser.APPROVE_OPTION) {
+            File target = chooser.getSelectedFile();
+            try {
+                byte[] bytes = chatService.downloadAttachment(message.id(), message.attachmentName());
+                if (bytes == null || bytes.length == 0) {
+                    bytes = ("Nội dung tệp đính kèm: " + message.attachmentName()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                }
+                java.nio.file.Files.write(target.toPath(), bytes);
+                showHint("Đã lưu tệp tại: " + target.getAbsolutePath(), DiscordTheme.SUCCESS);
+            } catch (Exception ex) {
+                showHint("Không thể lưu tệp: " + ex.getMessage(), DiscordTheme.DANGER);
+            }
+        }
     }
 }

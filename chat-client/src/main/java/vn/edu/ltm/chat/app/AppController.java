@@ -1,8 +1,9 @@
 package vn.edu.ltm.chat.app;
 
+import vn.edu.ltm.chat.application.ChatGateway;
 import vn.edu.ltm.chat.application.ChatService;
 import vn.edu.ltm.chat.application.LoginService;
-import vn.edu.ltm.chat.infrastructure.demo.InMemoryChatGateway;
+import vn.edu.ltm.chat.infrastructure.network.TcpChatGateway;
 import vn.edu.ltm.chat.domain.UserProfile;
 import vn.edu.ltm.chat.presentation.ChatWorkspace;
 import vn.edu.ltm.chat.presentation.LoginPanel;
@@ -10,6 +11,7 @@ import vn.edu.ltm.chat.theme.DiscordTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import java.awt.CardLayout;
 import java.awt.Dimension;
@@ -21,8 +23,9 @@ public final class AppController {
     private static final String LOGIN_VIEW = "login";
     private static final String CHAT_VIEW = "chat";
 
-    private final LoginService loginService = new LoginService();
-    private final ChatService chatService = new ChatService(new InMemoryChatGateway());
+    private final ChatGateway gateway = new TcpChatGateway();
+    private final LoginService loginService = new LoginService(gateway);
+    private final ChatService chatService = new ChatService(gateway);
     private final CardLayout viewLayout = new CardLayout();
     private final JPanel viewHost = new JPanel(viewLayout);
     private final JFrame frame = new JFrame("Chat đa luồng");
@@ -49,7 +52,8 @@ public final class AppController {
             chatWorkspace = new ChatWorkspace(activeUser, chatService, this::logout);
             viewHost.add(chatWorkspace, CHAT_VIEW);
             viewLayout.show(viewHost, CHAT_VIEW);
-            frame.setTitle("Chat đa luồng — " + activeUser.displayName() + " · demo cục bộ");
+            String modeLabel = chatService.isServerConnected() ? "máy chủ TCP:8888" : "demo cục bộ";
+            frame.setTitle("Chat đa luồng — " + activeUser.displayName() + " · " + modeLabel);
         } catch (IllegalArgumentException exception) {
             loginPanel.showError(exception.getMessage());
         } finally {
@@ -67,12 +71,29 @@ public final class AppController {
     }
 
     private void showLogin() {
-        frame.setTitle("Chat đa luồng — đăng nhập demo");
+        frame.setTitle("Chat đa luồng — đăng nhập");
         viewLayout.show(viewHost, LOGIN_VIEW);
         loginPanel.requestEmailFocus();
     }
 
     private void showUnavailableAction(String action) {
-        loginPanel.showNotice(action + " chưa có trong bản demo cục bộ.");
+        if ("Tạo tài khoản".equals(action)) {
+            promptRegister();
+            return;
+        }
+        loginPanel.showNotice(action + " chưa có trong bản hiện tại.");
+    }
+
+    private void promptRegister() {
+        vn.edu.ltm.chat.presentation.RegisterDialog dialog = new vn.edu.ltm.chat.presentation.RegisterDialog(
+                frame, loginService, user -> {
+            activeUser = user;
+            chatWorkspace = new ChatWorkspace(activeUser, chatService, this::logout);
+            viewHost.add(chatWorkspace, CHAT_VIEW);
+            viewLayout.show(viewHost, CHAT_VIEW);
+            String modeLabel = chatService.isServerConnected() ? "máy chủ TCP:8888" : "demo cục bộ";
+            frame.setTitle("Chat đa luồng — " + activeUser.displayName() + " · " + modeLabel);
+        });
+        dialog.setVisible(true);
     }
 }

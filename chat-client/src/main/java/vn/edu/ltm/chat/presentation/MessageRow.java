@@ -37,6 +37,7 @@ final class MessageRow extends JPanel {
         void onRecall(ChatMessage message);
         void onDelete(ChatMessage message);
         void onResend(ChatMessage message);
+        default void onDownload(ChatMessage message) {}
     }
 
     private final ChatMessage message;
@@ -342,6 +343,9 @@ final class MessageRow extends JPanel {
             dlBtn.setContentAreaFilled(false);
             dlBtn.setBorderPainted(false);
             dlBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            dlBtn.addActionListener(e -> {
+                if (listener != null) listener.onDownload(message);
+            });
             rightActions.add(dlBtn);
 
             card.add(rightActions, BorderLayout.EAST);

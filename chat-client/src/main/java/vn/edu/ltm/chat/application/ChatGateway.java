@@ -8,7 +8,38 @@ import java.util.List;
 
 /** Boundary for chat data. */
 public interface ChatGateway {
+    default UserProfile login(String email, String password) {
+        throw new UnsupportedOperationException("Gateway does not support network login");
+    }
+
+    default UserProfile register(String email, String password, String displayName) {
+        throw new UnsupportedOperationException("Gateway does not support network register");
+    }
+
+    default UserProfile updateProfile(UserProfile user) {
+        return user;
+    }
+
+    default boolean isServerConnected() {
+        return false;
+    }
+
+    default void setOnRealtimeUpdate(Runnable callback) {
+    }
+
+    default byte[] downloadAttachment(String messageId, String fileName) {
+        return null;
+    }
+
     List<Conversation> listConversations();
+
+    default List<UserProfile> listUsers() {
+        return List.of();
+    }
+
+    default Conversation openDirectMessage(String peerId) {
+        return null;
+    }
 
     default List<ChatMessage> loadMessages(String conversationId) {
         return loadMessages(conversationId, "");

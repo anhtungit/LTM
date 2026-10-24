@@ -1,0 +1,449 @@
+package vn.edu.ltm.chat.server.network;
+
+import vn.edu.ltm.chat.server.dal.DatabaseManager;
+import vn.edu.ltm.chat.server.protocol.Packet;
+import vn.edu.ltm.chat.server.protocol.ProtocolDtos.ConversationDto;
+import vn.edu.ltm.chat.server.protocol.ProtocolDtos.MessageDto;
+import vn.edu.ltm.chat.server.protocol.ProtocolDtos.UserDto;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Worker thread handling a single TCP client socket connection.
+ */
+public final class ClientHandler implements Runnable {
+    private final Socket socket;
+    private final ChatServer server;
+    private final DatabaseManager db;
+    private PrintWriter out;
+    private UserDto currentUser;
+
+    public ClientHandler(Socket socket, ChatServer server, DatabaseManager db) {
+        this.socket = socket;
+        this.server = server;
+        this.db = db;
+    }
+
+    public UserDto getCurrentUser() {
+        return currentUser;
+    }
+
+    public synchronized void sendPacket(Packet packet) {
+        if (out != null) {
+            out.println(packet.toJsonLine());
+            out.flush();
+        }
+    }
+
+    public void closeSocket() {
+        try {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
+    @Override
+    public void run() {
+        try (socket;
+             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+             PrintWriter writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
+
+            this.out = writer;
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.isBlank()) continue;
+                try {
+                    Packet req = Packet.fromJsonLine(line);
+                    handleRequest(req);
+                } catch (Exception e) {
+                    System.err.println("[ClientHandler] Error processing packet: " + e.getMessage());
+                }
+            }
+        } catch (IOException ignored) {
+            // Client disconnected
+        } finally {
+            server.unregisterHandler(this);
+            if (currentUser != null && server.isRunning()) {
+                db.updateUserOnlineStatus(currentUser.id(), false);
+                server.broadcastExcept(this, Packet.broadcast("USER_STATUS_BROADCAST")
+                        .put("userId", currentUser.id())
+                        .put("online", false)
+                        .put("status", "offline"));
+            }
+        }
+    }
+
+    private void handleRequest(Packet req) {
+        String type = req.getType();
+        String reqId = req.getRequestId();
+        if (type == null) return;
+
+        try {
+            switch (type) {
+                case "LOGIN_REQ" -> handleAuth(req, reqId, false);
+                case "REGISTER_REQ" -> handleAuth(req, reqId, true);
+                case "UPDATE_PROFILE_REQ" -> handleUpdateProfile(req, reqId);
+                case "LIST_CONVERSATIONS_REQ" -> handleListConversations(req, reqId);
+                case "LIST_USERS_REQ" -> handleListUsers(req, reqId);
+                case "OPEN_DM_REQ" -> handleOpenDirectMessage(req, reqId);
+                case "GET_CHAT_HISTORY_REQ" -> handleGetHistory(req, reqId);
+                case "SEND_MSG_REQ" -> handleSendMessage(req, reqId);
+                case "EDIT_MSG_REQ" -> handleEditMessage(req, reqId);
+                case "RECALL_MSG_REQ" -> handleRecallMessage(req, reqId);
+                case "DELETE_MSG_REQ" -> handleDeleteMessage(req, reqId);
+                case "FILE_UPLOAD_REQ" -> handleFileUpload(req, reqId);
+                case "FILE_DOWNLOAD_REQ" -> handleFileDownload(req, reqId);
+                case "CREATE_GROUP_REQ" -> handleCreateGroup(req, reqId);
+                case "ADD_CHANNEL_REQ" -> handleModifyChannel(req, reqId, true, false);
+                case "REMOVE_CHANNEL_REQ" -> handleModifyChannel(req, reqId, false, false);
+                case "ADD_VOICE_CHANNEL_REQ" -> handleModifyChannel(req, reqId, true, true);
+                case "REMOVE_VOICE_CHANNEL_REQ" -> handleModifyChannel(req, reqId, false, true);
+                case "TYPING_REQ" -> handleTyping(req);
+                default -> sendPacket(Packet.error(type + "_RES", reqId, "Loại gói tin không hỗ trợ: " + type));
+            }
+        } catch (IllegalArgumentException ex) {
+            String resType = type.endsWith("_REQ") ? type.substring(0, type.length() - 4) + "_RES" : type + "_RES";
+            sendPacket(Packet.error(resType, reqId, ex.getMessage()));
+        } catch (Exception ex) {
+            String resType = type.endsWith("_REQ") ? type.substring(0, type.length() - 4) + "_RES" : type + "_RES";
+            sendPacket(Packet.error(resType, reqId, "Lỗi máy chủ: " + ex.getMessage()));
+        }
+    }
+
+    private void handleAuth(Packet req, String reqId, boolean isRegister) {
+        String email = req.getString("email", "");
+        String password = req.getString("password", "");
+        String displayName = req.getString("displayName", null);
+
+        UserDto user = db.authenticateOrRegister(email, password, isRegister, displayName);
+        this.currentUser = user;
+        server.registerOnlineUser(user.id(), this);
+        db.updateUserOnlineStatus(user.id(), true);
+
+        String resType = isRegister ? "REGISTER_RES" : "LOGIN_RES";
+        sendPacket(Packet.response(resType, reqId).putObj("user", user));
+
+        // Broadcast user online presence to all other clients
+        server.broadcastExcept(this, Packet.broadcast("USER_STATUS_BROADCAST")
+                .put("userId", user.id())
+                .put("displayName", user.displayName())
+                .put("online", true)
+                .put("status", user.status()));
+    }
+
+    private void handleUpdateProfile(Packet req, String reqId) {
+        UserDto user = req.getObj("user", UserDto.class);
+        if (user == null) {
+            throw new IllegalArgumentException("Dữ liệu hồ sơ không hợp lệ.");
+        }
+        UserDto updated = db.updateProfile(user);
+        this.currentUser = updated;
+        sendPacket(Packet.response("UPDATE_PROFILE_RES", reqId).putObj("user", updated));
+
+        server.broadcastExcept(this, Packet.broadcast("USER_STATUS_BROADCAST")
+                .put("userId", updated.id())
+                .put("displayName", updated.displayName())
+                .put("online", !"offline".equals(updated.status()))
+                .put("status", updated.status()));
+    }
+
+    private void handleListConversations(Packet req, String reqId) {
+        String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
+        List<ConversationDto> conversations = db.listConversationsForUser(userId);
+        sendPacket(Packet.response("LIST_CONVERSATIONS_RES", reqId)
+                .putObj("conversations", conversations));
+    }
+
+    private void handleListUsers(Packet req, String reqId) {
+        String excludeUserId = req.getString("excludeUserId", currentUser != null ? currentUser.id() : null);
+        List<UserDto> users = db.listUsers(excludeUserId);
+        sendPacket(Packet.response("LIST_USERS_RES", reqId)
+                .putObj("users", users));
+    }
+
+    private void handleOpenDirectMessage(Packet req, String reqId) {
+        String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
+        String peerId = req.getString("peerId", "");
+        ConversationDto conv = db.openDirectMessage(userId, peerId);
+        sendPacket(Packet.response("OPEN_DM_RES", reqId)
+                .putObj("conversation", conv));
+    }
+
+    private void handleGetHistory(Packet req, String reqId) {
+        String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
+        String convId = req.getString("conversationId", "");
+        String channel = req.getString("channel", "");
+        List<MessageDto> messages = db.loadMessagesForUser(userId, convId, channel);
+        sendPacket(Packet.response("CHAT_HISTORY_RES", reqId)
+                .put("conversationId", convId)
+                .put("channel", channel)
+                .putObj("messages", messages));
+    }
+
+    private void handleSendMessage(Packet req, String reqId) {
+        String convId = req.getString("conversationId", "");
+        String channel = req.getString("channel", "");
+        String senderId = req.getString("senderId", currentUser != null ? currentUser.id() : "user");
+        String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Người dùng");
+        String senderInitials = req.getString("senderInitials", DatabaseManager.computeInitials(senderName));
+        String content = req.getString("content", "");
+
+        MessageDto msg = new MessageDto(
+                UUID.randomUUID().toString(),
+                convId,
+                channel,
+                senderId,
+                senderName,
+                senderInitials,
+                content,
+                LocalDateTime.now().toString(),
+                false,
+                false,
+                null,
+                0L,
+                false
+        );
+        db.saveMessage(msg);
+
+        sendPacket(Packet.response("SEND_MSG_RES", reqId).putObj("message", msg));
+        broadcastNewMessage(convId, senderId, msg);
+    }
+
+    private void broadcastNewMessage(String convId, String senderId, MessageDto msg) {
+        if (db.isGroupConversation(convId)) {
+            server.broadcastExcept(this, Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", msg));
+            return;
+        }
+        // 1-1 Direct Message between senderId and peerId (convId)
+        String peerId = convId;
+        ConversationDto senderConv = db.getConversation(senderId);
+        for (ClientHandler h : server.getActiveHandlers()) {
+            if (h == this) continue;
+            UserDto targetUser = h.getCurrentUser();
+            if (targetUser == null) continue;
+            if (targetUser.id().equals(peerId)) {
+                if (senderConv != null) {
+                    h.sendPacket(Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
+                            .putObj("conversation", senderConv));
+                }
+                MessageDto forPeer = withConversationId(msg, senderId);
+                h.sendPacket(Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", forPeer));
+            } else if (targetUser.id().equals(senderId)) {
+                h.sendPacket(Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", msg));
+            }
+        }
+    }
+
+    private void handleEditMessage(Packet req, String reqId) {
+        String msgId = req.getString("messageId", "");
+        String newContent = req.getString("newContent", "");
+        MessageDto updated = db.editMessage(msgId, newContent);
+        String callerId = currentUser != null ? currentUser.id() : updated.senderId();
+        MessageDto callerView = withConversationId(updated, resolveClientConversationId(updated.conversationId(), callerId));
+
+        sendPacket(Packet.response("EDIT_MSG_RES", reqId).putObj("message", callerView));
+        broadcastMessageUpdate("EDIT", updated);
+    }
+
+    private void handleRecallMessage(Packet req, String reqId) {
+        String msgId = req.getString("messageId", "");
+        MessageDto recalled = db.recallMessage(msgId);
+        String callerId = currentUser != null ? currentUser.id() : recalled.senderId();
+        MessageDto callerView = withConversationId(recalled, resolveClientConversationId(recalled.conversationId(), callerId));
+
+        sendPacket(Packet.response("RECALL_MSG_RES", reqId).putObj("message", callerView));
+        broadcastMessageUpdate("RECALL", recalled);
+    }
+
+    private void broadcastMessageUpdate(String action, MessageDto rawUpdated) {
+        String rawConvId = rawUpdated.conversationId();
+        if (rawConvId != null && rawConvId.startsWith("dm:")) {
+            String[] pair = rawConvId.substring(3).split("::", 2);
+            if (pair.length == 2) {
+                for (ClientHandler h : server.getActiveHandlers()) {
+                    if (h == this) continue;
+                    UserDto u = h.getCurrentUser();
+                    if (u == null) continue;
+                    if (u.id().equals(pair[0]) || u.id().equals(pair[1])) {
+                        String peerId = u.id().equals(pair[0]) ? pair[1] : pair[0];
+                        MessageDto view = withConversationId(rawUpdated, peerId);
+                        h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
+                                .put("action", action)
+                                .putObj("message", view));
+                    }
+                }
+                return;
+            }
+        }
+        server.broadcastExcept(this, Packet.broadcast("MSG_UPDATED_BROADCAST")
+                .put("action", action)
+                .putObj("message", rawUpdated));
+    }
+
+    private static String resolveClientConversationId(String rawConvId, String viewerUserId) {
+        if (rawConvId != null && rawConvId.startsWith("dm:")) {
+            String[] parts = rawConvId.substring(3).split("::", 2);
+            if (parts.length == 2) {
+                if (viewerUserId != null && viewerUserId.equals(parts[0])) {
+                    return parts[1];
+                }
+                return parts[0];
+            }
+        }
+        return rawConvId;
+    }
+
+    private static MessageDto withConversationId(MessageDto m, String newConvId) {
+        if (m == null || (m.conversationId() != null && m.conversationId().equals(newConvId))) {
+            return m;
+        }
+        return new MessageDto(
+                m.id(), newConvId, m.channel(), m.senderId(), m.senderName(),
+                m.senderInitials(), m.content(), m.sentAt(), m.edited(), m.recalled(),
+                m.attachmentName(), m.attachmentSize(), m.attachmentFailed()
+        );
+    }
+
+    private void handleDeleteMessage(Packet req, String reqId) {
+        String convId = req.getString("conversationId", "");
+        String msgId = req.getString("messageId", "");
+        db.deleteMessage(msgId);
+
+        sendPacket(Packet.response("DELETE_MSG_RES", reqId)
+                .put("conversationId", convId)
+                .put("messageId", msgId));
+        if (db.isGroupConversation(convId)) {
+            server.broadcastExcept(this, Packet.broadcast("MSG_UPDATED_BROADCAST")
+                    .put("action", "DELETE")
+                    .put("conversationId", convId)
+                    .put("messageId", msgId));
+        } else {
+            String senderId = currentUser != null ? currentUser.id() : "";
+            for (ClientHandler h : server.getActiveHandlers()) {
+                if (h == this) continue;
+                UserDto u = h.getCurrentUser();
+                if (u == null) continue;
+                if (u.id().equals(convId)) {
+                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
+                            .put("action", "DELETE")
+                            .put("conversationId", senderId)
+                            .put("messageId", msgId));
+                } else if (u.id().equals(senderId)) {
+                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
+                            .put("action", "DELETE")
+                            .put("conversationId", convId)
+                            .put("messageId", msgId));
+                }
+            }
+        }
+    }
+
+    private void handleFileUpload(Packet req, String reqId) {
+        String convId = req.getString("conversationId", "");
+        String channel = req.getString("channel", "");
+        String senderId = req.getString("senderId", currentUser != null ? currentUser.id() : "user");
+        String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Người dùng");
+        String senderInitials = req.getString("senderInitials", DatabaseManager.computeInitials(senderName));
+        String fileName = req.getString("fileName", "attachment.dat");
+        long fileSize = req.getLong("fileSize", 0L);
+        boolean failed = req.getBoolean("failed", false);
+        String base64Data = req.getString("base64Data", null);
+
+        String msgId = UUID.randomUUID().toString();
+        if (!failed && base64Data != null && !base64Data.isBlank()) {
+            db.storePhysicalFile(msgId, fileName, base64Data);
+        }
+
+        MessageDto msg = new MessageDto(
+                msgId,
+                convId,
+                channel,
+                senderId,
+                senderName,
+                senderInitials,
+                "Đã gửi tệp: " + fileName,
+                LocalDateTime.now().toString(),
+                false,
+                false,
+                fileName,
+                fileSize,
+                failed
+        );
+        db.saveMessage(msg);
+
+        sendPacket(Packet.response("FILE_UPLOAD_RES", reqId).putObj("message", msg));
+        broadcastNewMessage(convId, senderId, msg);
+    }
+
+    private void handleFileDownload(Packet req, String reqId) {
+        String msgId = req.getString("messageId", "");
+        String fileName = req.getString("fileName", "");
+        String base64Data = db.readPhysicalFileBase64(msgId, fileName);
+
+        sendPacket(Packet.response("FILE_DOWNLOAD_RES", reqId)
+                .put("messageId", msgId)
+                .put("fileName", fileName)
+                .put("base64Data", base64Data != null ? base64Data : ""));
+    }
+
+    private void handleCreateGroup(Packet req, String reqId) {
+        String creatorId = req.getString("creatorId", currentUser != null ? currentUser.id() : null);
+        String creatorName = req.getString("creatorName", currentUser != null ? currentUser.displayName() : null);
+        String groupName = req.getString("groupName", "Nhóm mới");
+        String[] membersArr = req.getObj("members", String[].class);
+        List<String> members = membersArr != null ? Arrays.asList(membersArr) : List.of();
+
+        ConversationDto created = db.createGroup(creatorId, creatorName, groupName, members);
+        sendPacket(Packet.response("CREATE_GROUP_RES", reqId).putObj("conversation", created));
+        for (ClientHandler h : server.getActiveHandlers()) {
+            if (h == this) continue;
+            UserDto u = h.getCurrentUser();
+            if (u != null && created.members() != null && created.members().stream()
+                    .anyMatch(m -> m.equalsIgnoreCase(u.id()) || m.equalsIgnoreCase(u.displayName()))) {
+                h.sendPacket(Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
+                        .putObj("conversation", created));
+            }
+        }
+    }
+
+    private void handleModifyChannel(Packet req, String reqId, boolean isAdd, boolean isVoice) {
+        String convId = req.getString("conversationId", "");
+        String chanName = req.getString("channelName", "");
+        ConversationDto updated = isAdd
+                ? db.addChannel(convId, chanName, isVoice)
+                : db.removeChannel(convId, chanName, isVoice);
+
+        String resType = req.getType().replace("_REQ", "_RES");
+        sendPacket(Packet.response(resType, reqId).putObj("conversation", updated));
+        if (updated != null) {
+            server.broadcastExcept(this, Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
+                    .putObj("conversation", updated));
+        }
+    }
+
+    private void handleTyping(Packet req) {
+        String convId = req.getString("conversationId", "");
+        String channel = req.getString("channel", "");
+        String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Ai đó");
+        boolean typing = req.getBoolean("typing", true);
+
+        server.broadcastExcept(this, Packet.broadcast("TYPING_BROADCAST")
+                .put("conversationId", convId)
+                .put("channel", channel)
+                .put("senderName", senderName)
+                .put("typing", typing));
+    }
+}
+

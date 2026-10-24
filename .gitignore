@@ -18,3 +18,9 @@ Thumbs.db
 *.log
 *.tmp
 *~
+
+# Runtime database & physical file storage
+data/
+server_storage/
+!data/.gitkeep
+!server_storage/.gitkeep
