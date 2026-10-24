@@ -50,20 +50,28 @@ public final class DiscordTheme {
     private DiscordTheme() {
     }
 
+    public static int scale(int value) {
+        return com.formdev.flatlaf.util.UIScale.scale(value);
+    }
+
+    public static float scale(float value) {
+        return com.formdev.flatlaf.util.UIScale.scale(value);
+    }
+
     public static Font font(float size) {
-        return FONT.deriveFont(size);
+        return FONT.deriveFont(scale(size));
     }
 
     public static Font semibold(float size) {
-        return SEMIBOLD.deriveFont(size);
+        return SEMIBOLD.deriveFont(scale(size));
     }
 
     public static Font bold(float size) {
-        return BOLD.deriveFont(size);
+        return BOLD.deriveFont(scale(size));
     }
 
     public static Font extrabold(float size) {
-        return EXTRABOLD.deriveFont(size);
+        return EXTRABOLD.deriveFont(scale(size));
     }
 
     public static void install() {

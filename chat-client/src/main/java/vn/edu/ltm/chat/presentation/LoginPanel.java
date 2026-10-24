@@ -42,9 +42,9 @@ import java.util.function.Consumer;
  * and pushed them to the right edge, which also cut off the subtitle.</p>
  */
 public final class LoginPanel extends JPanel {
-    private static final int CONTENT_WIDTH = 368;
-    private static final int FIELD_HEIGHT = 42;
-    private static final int SIDE_PADDING = 40;
+    private static final int CONTENT_WIDTH = DiscordTheme.scale(368);
+    private static final int FIELD_HEIGHT = DiscordTheme.scale(42);
+    private static final int SIDE_PADDING = DiscordTheme.scale(40);
 
     private final BiConsumer<String, char[]> onLogin;
     private final Consumer<String> onUnavailableAction;

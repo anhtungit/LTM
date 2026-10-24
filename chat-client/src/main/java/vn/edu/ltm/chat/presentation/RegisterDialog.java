@@ -62,7 +62,7 @@ public final class RegisterDialog extends JDialog {
         container.add(buildActions(), BorderLayout.SOUTH);
 
         setContentPane(container);
-        setSize(420, 480);
+        setSize(DiscordTheme.scale(420), DiscordTheme.scale(480));
         setLocationRelativeTo(parent);
     }
 

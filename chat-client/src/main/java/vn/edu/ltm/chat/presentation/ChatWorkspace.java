@@ -63,11 +63,11 @@ import java.util.Map;
  * - Games panel (Canvas 10)
  */
 public final class ChatWorkspace extends JPanel {
-    private static final int MAX_CONTENT_WIDTH = 780;
-    private static final int AVATAR_SIZE = 34;
-    private static final int AVATAR_GAP = 12;
-    private static final int SIDEBAR_WIDTH = 240;
-    private static final int INFO_WIDTH = 220;
+    private static final int MAX_CONTENT_WIDTH = DiscordTheme.scale(780);
+    private static final int AVATAR_SIZE = DiscordTheme.scale(34);
+    private static final int AVATAR_GAP = DiscordTheme.scale(12);
+    private static final int SIDEBAR_WIDTH = DiscordTheme.scale(240);
+    private static final int INFO_WIDTH = DiscordTheme.scale(220);
 
     private UserProfile user;
     private final ChatService chatService;
@@ -201,7 +201,7 @@ public final class ChatWorkspace extends JPanel {
         rail.setLayout(new BoxLayout(rail, BoxLayout.Y_AXIS));
         rail.setBackground(DiscordTheme.RAIL);
         rail.setBorder(BorderFactory.createEmptyBorder(14, 6, 14, 6));
-        rail.setPreferredSize(new Dimension(72, 0));
+        rail.setPreferredSize(new Dimension(DiscordTheme.scale(72), 0));
 
         rebuildRail();
         return rail;
@@ -268,21 +268,21 @@ public final class ChatWorkspace extends JPanel {
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setAlignmentX(CENTER_ALIGNMENT);
-        row.setMaximumSize(new Dimension(60, 48));
+        row.setMaximumSize(new Dimension(DiscordTheme.scale(60), DiscordTheme.scale(48)));
 
         JComponent pill = new JPanel();
         pill.setOpaque(false);
         if (active) {
-            RoundedPanel marker = new RoundedPanel(4);
+            RoundedPanel marker = new RoundedPanel(DiscordTheme.scale(4));
             marker.setBackground(DiscordTheme.TEXT_PRIMARY);
             pill = marker;
         }
-        Dimension pillSize = new Dimension(4, 32);
+        Dimension pillSize = new Dimension(DiscordTheme.scale(4), DiscordTheme.scale(32));
         pill.setPreferredSize(pillSize);
         pill.setMinimumSize(pillSize);
         pill.setMaximumSize(pillSize);
         row.add(pill);
-        row.add(Box.createHorizontalStrut(8));
+        row.add(Box.createHorizontalStrut(DiscordTheme.scale(8)));
         row.add(tile);
         return row;
     }
@@ -1316,6 +1316,42 @@ public final class ChatWorkspace extends JPanel {
             @Override
             public void actionPerformed(ActionEvent event) {
                 searchField.requestFocusInWindow();
+            }
+        });
+
+        // Zoom shortcuts: Ctrl + '=', Ctrl + '+', Ctrl + '-', Ctrl + '0'
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, KeyEvent.CTRL_DOWN_MASK), "zoom-in");
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_PLUS, KeyEvent.CTRL_DOWN_MASK), "zoom-in");
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_ADD, KeyEvent.CTRL_DOWN_MASK), "zoom-in");
+        getActionMap().put("zoom-in", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                com.formdev.flatlaf.util.UIScale.zoomIn();
+            }
+        });
+
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, KeyEvent.CTRL_DOWN_MASK), "zoom-out");
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_SUBTRACT, KeyEvent.CTRL_DOWN_MASK), "zoom-out");
+        getActionMap().put("zoom-out", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                com.formdev.flatlaf.util.UIScale.zoomOut();
+            }
+        });
+
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_0, KeyEvent.CTRL_DOWN_MASK), "zoom-reset");
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0, KeyEvent.CTRL_DOWN_MASK), "zoom-reset");
+        getActionMap().put("zoom-reset", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                com.formdev.flatlaf.util.UIScale.zoomReset();
             }
         });
     }

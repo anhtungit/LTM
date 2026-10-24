@@ -50,14 +50,14 @@ final class AvatarBadge extends JComponent {
         int index = Math.floorMod(seed == null ? this.initials.hashCode() : seed.hashCode(), PALETTE.length);
         this.background = PALETTE[index][0];
         this.foreground = PALETTE[index][1];
-        this.size = size;
+        this.size = DiscordTheme.scale(size);
         this.presence = presence;
         this.presenceRing = presenceRing;
         this.presenceRingVisible = drawRing;
         setOpaque(false);
-        setPreferredSize(new Dimension(size, size));
-        setMinimumSize(new Dimension(size, size));
-        setMaximumSize(new Dimension(size, size));
+        setPreferredSize(new Dimension(this.size, this.size));
+        setMinimumSize(new Dimension(this.size, this.size));
+        setMaximumSize(new Dimension(this.size, this.size));
         getAccessibleContext().setAccessibleName("Ảnh đại diện " + this.initials);
     }
 

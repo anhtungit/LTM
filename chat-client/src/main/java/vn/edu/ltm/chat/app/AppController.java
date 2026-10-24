@@ -36,8 +36,12 @@ public final class AppController {
     public void start() {
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         Rectangle usableBounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
-        frame.setMinimumSize(new Dimension(Math.min(980, usableBounds.width), Math.min(620, usableBounds.height)));
-        frame.setSize(Math.min(1360, usableBounds.width), Math.min(900, usableBounds.height));
+        int minW = DiscordTheme.scale(980);
+        int minH = DiscordTheme.scale(620);
+        int prefW = DiscordTheme.scale(1360);
+        int prefH = DiscordTheme.scale(900);
+        frame.setMinimumSize(new Dimension(Math.min(minW, usableBounds.width), Math.min(minH, usableBounds.height)));
+        frame.setSize(Math.min(prefW, usableBounds.width), Math.min(prefH, usableBounds.height));
         frame.setLocationRelativeTo(null);
         viewHost.setBorder(BorderFactory.createEmptyBorder());
         viewHost.add(loginPanel, LOGIN_VIEW);

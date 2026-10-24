@@ -24,15 +24,15 @@ final class RailTile extends JButton {
         this.icon = icon;
         this.active = active;
         this.rounded = rounded;
-        this.size = size;
+        this.size = DiscordTheme.scale(size);
         setOpaque(false);
         setContentAreaFilled(false);
         setBorderPainted(false);
         setFocusPainted(false);
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        setPreferredSize(new Dimension(size, size));
-        setMinimumSize(new Dimension(size, size));
-        setMaximumSize(new Dimension(size, size));
+        setPreferredSize(new Dimension(this.size, this.size));
+        setMinimumSize(new Dimension(this.size, this.size));
+        setMaximumSize(new Dimension(this.size, this.size));
         if (label != null) {
             setToolTipText(label);
         }
