@@ -11,6 +11,13 @@ public final class ServerMain {
 
     public static void main(String[] args) throws Exception {
         int port = ChatServer.DEFAULT_PORT;
+        String envPort = System.getenv("PORT");
+        if (envPort != null && !envPort.isBlank()) {
+            try {
+                port = Integer.parseInt(envPort.trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
         if (args.length > 0) {
             try {
                 port = Integer.parseInt(args[0]);

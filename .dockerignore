@@ -1,0 +1,8 @@
+.git
+.vscode
+.kombai
+chat-client
+chat-server/target
+data/
+server_storage/
+*.docx
