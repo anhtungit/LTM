@@ -21,3 +21,4 @@ EXPOSE 8888
 ENV PORT=8888
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
+
