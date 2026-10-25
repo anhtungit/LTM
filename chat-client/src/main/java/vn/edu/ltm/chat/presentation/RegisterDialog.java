@@ -241,15 +241,30 @@ public final class RegisterDialog extends JDialog {
             return;
         }
 
-        try {
-            UserProfile user = loginService.register(email, pass, name.isEmpty() ? null : name);
+        final char[] passCopy = java.util.Arrays.copyOf(pass, pass.length);
+        java.util.Arrays.fill(pass, '\0');
+        errorLabel.setForeground(DiscordTheme.WARNING);
+        errorLabel.setText("Đang đăng ký tài khoản trên máy chủ...");
+
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                return loginService.register(email, passCopy, name.isEmpty() ? null : name);
+            } finally {
+                java.util.Arrays.fill(passCopy, '\0');
+            }
+        }).whenComplete((user, throwable) -> javax.swing.SwingUtilities.invokeLater(() -> {
+            if (throwable != null) {
+                Throwable cause = throwable instanceof java.util.concurrent.CompletionException && throwable.getCause() != null
+                        ? throwable.getCause() : throwable;
+                errorLabel.setForeground(DiscordTheme.DANGER);
+                errorLabel.setText(cause.getMessage() != null ? cause.getMessage() : "Đăng ký thất bại.");
+                return;
+            }
             if (onRegistered != null) {
                 onRegistered.accept(user);
             }
             dispose();
-        } catch (Exception ex) {
-            errorLabel.setText(ex.getMessage());
-        }
+        }));
     }
 }
 

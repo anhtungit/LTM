@@ -55,6 +55,7 @@ public final class DatabaseManager {
     private final String dbPassword;
     private final boolean isPostgres;
     private final Path storageDir;
+    private Connection sharedPostgresConn;
 
     public DatabaseManager(String rawPgUrl, String storagePath, boolean isPostgres) {
         this.isPostgres = isPostgres;
@@ -91,7 +92,7 @@ public final class DatabaseManager {
             this.dbUser = parsedUser;
             this.dbPassword = parsedPassword;
 
-            this.jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path + "?sslmode=require";
+            this.jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path + "?sslmode=require&prepareThreshold=0&tcpKeepAlive=true";
             initSchemaAndSeed();
             System.out.println("[DatabaseManager] Đã kết nối Supabase PostgreSQL (" + host + ":" + port + ") thành công!");
         } catch (Exception e) {
@@ -179,6 +180,48 @@ public final class DatabaseManager {
     }
 
     private Connection connect() throws SQLException {
+        if (isPostgres && dbUser != null && dbPassword != null) {
+            boolean needReconnect = (sharedPostgresConn == null);
+            if (!needReconnect) {
+                try {
+                    needReconnect = sharedPostgresConn.isClosed() || !sharedPostgresConn.isValid(2);
+                } catch (SQLException e) {
+                    needReconnect = true;
+                }
+            }
+            if (needReconnect) {
+                if (sharedPostgresConn != null) {
+                    try {
+                        sharedPostgresConn.close();
+                    } catch (SQLException ignored) {
+                    }
+                }
+                sharedPostgresConn = DriverManager.getConnection(jdbcUrl, dbUser, dbPassword);
+            }
+            final Connection delegate = sharedPostgresConn;
+            return (Connection) java.lang.reflect.Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[]{Connection.class},
+                    (proxy, method, args) -> {
+                        if ("close".equals(method.getName())) {
+                            return null;
+                        }
+                        try {
+                            return method.invoke(delegate, args);
+                        } catch (java.lang.reflect.InvocationTargetException ite) {
+                            Throwable cause = ite.getTargetException();
+                            if (cause instanceof SQLException) {
+                                try {
+                                    delegate.close();
+                                } catch (SQLException ignored) {
+                                }
+                                sharedPostgresConn = null;
+                            }
+                            throw cause;
+                        }
+                    }
+            );
+        }
         if (dbUser != null && dbPassword != null) {
             return DriverManager.getConnection(jdbcUrl, dbUser, dbPassword);
         }

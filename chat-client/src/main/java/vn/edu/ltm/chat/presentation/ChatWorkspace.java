@@ -127,7 +127,9 @@ public final class ChatWorkspace extends JPanel {
         this.user = user;
         this.chatService = chatService;
         this.onLogout = onLogout;
-        this.conversations = new ArrayList<>(chatService.conversations());
+        this.conversations = new ArrayList<>(chatService.isServerConnected()
+                ? Collections.emptyList()
+                : chatService.conversations());
 
         setLayout(new BorderLayout());
         setBackground(DiscordTheme.TRANSCRIPT);
@@ -153,6 +155,9 @@ public final class ChatWorkspace extends JPanel {
         }
 
         this.chatService.setOnRealtimeUpdate(this::handleServerBroadcast);
+        if (chatService.isServerConnected()) {
+            handleServerBroadcast();
+        }
     }
 
     private void handleServerBroadcast() {

@@ -47,20 +47,32 @@ public final class AppController {
     }
 
     private void login(String email, char[] password) {
-        try {
-            activeUser = loginService.login(email, password);
+        final char[] passCopy = password != null ? Arrays.copyOf(password, password.length) : new char[0];
+        if (password != null) {
+            Arrays.fill(password, '\0');
+        }
+        loginPanel.showNotice("Đang kết nối máy chủ...");
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                return loginService.login(email, passCopy);
+            } finally {
+                Arrays.fill(passCopy, '\0');
+            }
+        }).whenComplete((user, throwable) -> javax.swing.SwingUtilities.invokeLater(() -> {
+            if (throwable != null) {
+                Throwable cause = throwable instanceof java.util.concurrent.CompletionException && throwable.getCause() != null
+                        ? throwable.getCause() : throwable;
+                String msg = cause.getMessage();
+                loginPanel.showError(msg != null && !msg.isBlank() ? msg : "Không thể đăng nhập vào máy chủ.");
+                return;
+            }
+            activeUser = user;
             chatWorkspace = new ChatWorkspace(activeUser, chatService, this::logout);
             viewHost.add(chatWorkspace, CHAT_VIEW);
             viewLayout.show(viewHost, CHAT_VIEW);
             String modeLabel = chatService.isServerConnected() ? "máy chủ TCP:8888" : "demo cục bộ";
             frame.setTitle("Chat đa luồng — " + activeUser.displayName() + " · " + modeLabel);
-        } catch (IllegalArgumentException exception) {
-            loginPanel.showError(exception.getMessage());
-        } finally {
-            if (password != null) {
-                Arrays.fill(password, '\0');
-            }
-        }
+        }));
     }
 
     private void logout() {

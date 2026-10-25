@@ -154,16 +154,25 @@ public final class TcpChatGateway implements ChatGateway {
             out.flush();
         }
         try {
-            TcpPacket res = future.get(5, TimeUnit.SECONDS);
+            TcpPacket res = future.get(15, TimeUnit.SECONDS);
             if (!res.isOk()) {
                 throw new IllegalArgumentException(res.getError() != null ? res.getError() : "Yêu cầu thất bại.");
             }
             return res;
         } catch (IllegalArgumentException e) {
             throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            pendingRequests.remove(req.getRequestId());
+            throw new IllegalArgumentException("Máy chủ phản hồi quá thời gian chờ (Timeout). Vui lòng thử lại.", e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            pendingRequests.remove(req.getRequestId());
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            String msg = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+            throw new IllegalArgumentException("Lỗi giao tiếp máy chủ: " + msg, cause);
         } catch (Exception e) {
             pendingRequests.remove(req.getRequestId());
-            throw new RuntimeException("Lỗi giao tiếp máy chủ: " + e.getMessage(), e);
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            throw new IllegalArgumentException("Lỗi giao tiếp máy chủ: " + msg, e);
         }
     }
 

@@ -130,17 +130,19 @@ public final class ClientHandler implements Runnable {
         UserDto user = db.authenticateOrRegister(email, password, isRegister, displayName);
         this.currentUser = user;
         server.registerOnlineUser(user.id(), this);
-        db.updateUserOnlineStatus(user.id(), true);
 
         String resType = isRegister ? "REGISTER_RES" : "LOGIN_RES";
         sendPacket(Packet.response(resType, reqId).putObj("user", user));
 
-        // Broadcast user online presence to all other clients
-        server.broadcastExcept(this, Packet.broadcast("USER_STATUS_BROADCAST")
-                .put("userId", user.id())
-                .put("displayName", user.displayName())
-                .put("online", true)
-                .put("status", user.status()));
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            db.updateUserOnlineStatus(user.id(), true);
+            // Broadcast user online presence to all other clients
+            server.broadcastExcept(this, Packet.broadcast("USER_STATUS_BROADCAST")
+                    .put("userId", user.id())
+                    .put("displayName", user.displayName())
+                    .put("online", true)
+                    .put("status", user.status()));
+        });
     }
 
     private void handleUpdateProfile(Packet req, String reqId) {
