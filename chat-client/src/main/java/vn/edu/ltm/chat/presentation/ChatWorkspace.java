@@ -1663,12 +1663,36 @@ public final class ChatWorkspace extends JPanel {
 
                 @Override
                 public void onRecall(ChatMessage message) {
+                    // Optimistic recall: instantly reflect in cache and UI
+                    String cacheKey = transcriptCacheKey(selectedConversationId, chan);
+                    List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                    synchronized (currentList) {
+                        for (int i = 0; i < currentList.size(); i++) {
+                            ChatMessage m = currentList.get(i);
+                            if (m.id().equals(message.id())) {
+                                currentList.set(i, new ChatMessage(
+                                        m.id(), m.conversationId(), m.channel(), m.senderId(),
+                                        m.senderName(), m.senderInitials(), "Tin nhắn đã được thu hồi",
+                                        m.sentAt(), m.fromCurrentUser(), false, true, null, 0L, false
+                                ));
+                                break;
+                            }
+                        }
+                        renderTranscriptRows(new ArrayList<>(currentList), chan);
+                    }
                     CompletableFuture.runAsync(() -> chatService.recall(selectedConversationId, message.id()))
                             .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
                 }
 
                 @Override
                 public void onDelete(ChatMessage message) {
+                    // Optimistic delete: instantly reflect in cache and UI
+                    String cacheKey = transcriptCacheKey(selectedConversationId, chan);
+                    List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                    synchronized (currentList) {
+                        currentList.removeIf(m -> m.id().equals(message.id()));
+                        renderTranscriptRows(new ArrayList<>(currentList), chan);
+                    }
                     CompletableFuture.runAsync(() -> chatService.delete(selectedConversationId, message.id()))
                             .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
                 }
@@ -1771,41 +1795,15 @@ public final class ChatWorkspace extends JPanel {
         final String convId = selectedConversationId;
         Conversation conv = currentConversation();
         final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
-        final String displayName = (fileName != null && !fileName.isBlank()) ? fileName : new File(filePath).getName();
 
-        // 1. Optimistic UI update: immediately append attachment to transcript
-        String optId = "opt_" + UUID.randomUUID();
-        ChatMessage optimisticMsg = new ChatMessage(
-                optId,
-                convId,
-                chan,
-                user.id(),
-                user.displayName(),
-                user.initials(),
-                "Đã gửi tệp: " + displayName,
-                java.time.LocalDateTime.now(),
-                true,
-                false,
-                false,
-                displayName,
-                fileSize,
-                failed
-        );
-        String key = transcriptCacheKey(convId, chan);
-        List<ChatMessage> list = messageCache.computeIfAbsent(key, k -> new ArrayList<>());
-        synchronized (list) {
-            list.add(optimisticMsg);
-        }
-        renderTranscriptRows(new ArrayList<>(list), chan);
         showHint("Đang tải tệp lên máy chủ...", DiscordTheme.WARNING);
 
-        // 2. Send over TCP in background thread
+        // Send over TCP in background thread directly without creating optimistic placeholder
         CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, filePath, fileSize, failed))
                 .thenAccept(confirmed -> SwingUtilities.invokeLater(() -> {
                     String cacheKey = transcriptCacheKey(convId, chan);
                     List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
                     synchronized (currentList) {
-                        currentList.removeIf(m -> m.id().equals(optId));
                         boolean alreadyThere = currentList.stream().anyMatch(m -> m.id().equals(confirmed.id()));
                         if (!alreadyThere) {
                             currentList.add(confirmed);
@@ -1818,14 +1816,6 @@ public final class ChatWorkspace extends JPanel {
                 }))
                 .exceptionally(ex -> {
                     SwingUtilities.invokeLater(() -> {
-                        String cacheKey = transcriptCacheKey(convId, chan);
-                        List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
-                        synchronized (currentList) {
-                            currentList.removeIf(m -> m.id().equals(optId));
-                        }
-                        if (convId.equals(selectedConversationId)) {
-                            renderTranscriptRows(new ArrayList<>(currentList), chan);
-                        }
                         showHint("Lỗi gửi tệp: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()), DiscordTheme.DANGER);
                     });
                     return null;

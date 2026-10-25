@@ -15,6 +15,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -71,11 +72,6 @@ final class MessageRow extends JPanel {
         body.setOpaque(false);
         if (beginsSenderGroup) {
             body.add(buildAuthorRow(message), BorderLayout.NORTH);
-        } else if (isMe && !message.recalled()) {
-            JPanel compactToolbarHolder = new JPanel(new BorderLayout());
-            compactToolbarHolder.setOpaque(false);
-            compactToolbarHolder.add(actionToolbar, BorderLayout.WEST);
-            body.add(compactToolbarHolder, BorderLayout.NORTH);
         }
 
         contentHolder.setOpaque(false);
@@ -83,7 +79,7 @@ final class MessageRow extends JPanel {
         body.add(contentHolder, BorderLayout.CENTER);
         add(body, BorderLayout.CENTER);
 
-        // Populate actionToolbar for message from current user
+        // Setup actionToolbar buttons
         if (isMe && !message.recalled()) {
             actionToolbar.setOpaque(false);
             actionToolbar.setVisible(false);
@@ -116,7 +112,8 @@ final class MessageRow extends JPanel {
 
             @Override
             public void mouseExited(MouseEvent e) {
-                if (!contains(e.getPoint())) {
+                java.awt.Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), MessageRow.this);
+                if (!contains(p)) {
                     actionToolbar.setVisible(false);
                     actionToolbar.revalidate();
                     actionToolbar.repaint();
@@ -152,7 +149,6 @@ final class MessageRow extends JPanel {
             right.add(author);
 
             authorRow.add(right, BorderLayout.EAST);
-            authorRow.add(actionToolbar, BorderLayout.WEST);
         } else {
             JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
             left.setOpaque(false);
@@ -208,28 +204,36 @@ final class MessageRow extends JPanel {
             holder.add(bubble);
             contentHolder.add(holder, BorderLayout.NORTH);
         } else {
+            JComponent mainContentComp = null;
             String text = message.content();
             if (text != null && text.startsWith("[Sticker:") && text.endsWith("]")) {
                 String inner = text.substring(9, text.length() - 1).trim();
-                JPanel holder = new JPanel(new FlowLayout(flowAlign, 0, 0));
-                holder.setOpaque(false);
-                holder.add(buildStickerCard(inner));
-                contentHolder.add(holder, BorderLayout.NORTH);
+                mainContentComp = buildStickerCard(inner);
             } else if (text != null && EmojiAssets.hasEmoji(text.trim())) {
                 ImageIcon jumbo = EmojiAssets.getIcon(text.trim(), 44);
                 if (jumbo != null) {
                     JLabel emoLabel = new JLabel(jumbo);
                     emoLabel.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
                     emoLabel.setToolTipText(text.trim());
-                    JPanel holder = new JPanel(new FlowLayout(flowAlign, 0, 0));
-                    holder.setOpaque(false);
-                    holder.add(emoLabel);
-                    contentHolder.add(holder, BorderLayout.NORTH);
+                    mainContentComp = emoLabel;
                 } else {
-                    addNormalText(text, isMe, flowAlign);
+                    mainContentComp = createBubbleText(text, isMe);
                 }
             } else {
-                addNormalText(text, isMe, flowAlign);
+                mainContentComp = createBubbleText(text, isMe);
+            }
+
+            if (isMe) {
+                JPanel rowWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+                rowWrapper.setOpaque(false);
+                rowWrapper.add(actionToolbar);
+                rowWrapper.add(mainContentComp);
+                contentHolder.add(rowWrapper, BorderLayout.NORTH);
+            } else {
+                JPanel rowWrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+                rowWrapper.setOpaque(false);
+                rowWrapper.add(mainContentComp);
+                contentHolder.add(rowWrapper, BorderLayout.NORTH);
             }
 
             if (message.hasAttachment()) {
@@ -243,7 +247,7 @@ final class MessageRow extends JPanel {
         contentHolder.repaint();
     }
 
-    private void addNormalText(String text, boolean isMe, int flowAlign) {
+    private JComponent createBubbleText(String text, boolean isMe) {
         RoundedPanel bubble = new RoundedPanel(14);
         bubble.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
         if (isMe) {
@@ -269,11 +273,7 @@ final class MessageRow extends JPanel {
             normalText.setBorder(null);
             bubble.add(normalText);
         }
-
-        JPanel holder = new JPanel(new FlowLayout(flowAlign, 0, 0));
-        holder.setOpaque(false);
-        holder.add(bubble);
-        contentHolder.add(holder, BorderLayout.NORTH);
+        return bubble;
     }
 
     private JComponent buildStickerCard(String query) {
