@@ -60,6 +60,10 @@ public final class EmojiAssets {
         return EMOJI_TO_HEX.containsKey(emoji);
     }
 
+    public static java.util.Set<String> allEmojis() {
+        return EMOJI_TO_HEX.keySet();
+    }
+
     public static ImageIcon getIconByHex(String hex, int size) {
         if (hex == null || hex.isEmpty()) {
             return null;

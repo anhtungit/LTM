@@ -24,6 +24,7 @@ import java.awt.event.KeyEvent;
 /** Text composer with real inline Twemoji icons and smart Enter/Shift+Enter key bindings. */
 public final class RichComposerPane extends JTextPane {
     private final Runnable onSendAction;
+    private boolean insertingIcon = false;
 
     public RichComposerPane(Runnable onSendAction) {
         this.onSendAction = onSendAction;
@@ -40,6 +41,10 @@ public final class RichComposerPane extends JTextPane {
             @Override
             public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr)
                     throws BadLocationException {
+                if (insertingIcon) {
+                    fb.insertString(offset, string, attr);
+                    return;
+                }
                 if (string != null && EmojiAssets.containsEmoji(string)) {
                     insertWithEmojis(fb, offset, string, cleanTextAttrs(attr));
                 } else {
@@ -50,6 +55,10 @@ public final class RichComposerPane extends JTextPane {
             @Override
             public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs)
                     throws BadLocationException {
+                if (insertingIcon) {
+                    fb.replace(offset, length, text, attrs);
+                    return;
+                }
                 if (text != null && EmojiAssets.containsEmoji(text)) {
                     fb.remove(offset, length);
                     insertWithEmojis(fb, offset, text, cleanTextAttrs(attrs));
@@ -76,8 +85,8 @@ public final class RichComposerPane extends JTextPane {
         int len = text.length();
         while (cursor < len) {
             boolean matched = false;
-            // Check for emoji match at current cursor
-            for (String emo : EmojiData.EMOTION.stream().map(EmojiData.EmojiItem::emoji).toList()) {
+            // Check for emoji match at current cursor across all emoji categories
+            for (String emo : EmojiAssets.allEmojis()) {
                 if (text.startsWith(emo, cursor)) {
                     ImageIcon icon = EmojiAssets.getIcon(emo, 20);
                     if (icon != null) {
@@ -132,11 +141,14 @@ public final class RichComposerPane extends JTextPane {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setIcon(attrs, icon);
             attrs.addAttribute("emoji", emoji);
+            insertingIcon = true;
             try {
                 int pos = getCaretPosition();
                 getStyledDocument().insertString(pos, " ", attrs);
                 setCaretPosition(pos + 1);
             } catch (BadLocationException ignored) {
+            } finally {
+                insertingIcon = false;
             }
         } else {
             replaceSelection(emoji);

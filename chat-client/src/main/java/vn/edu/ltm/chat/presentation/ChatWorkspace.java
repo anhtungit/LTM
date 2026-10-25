@@ -1054,12 +1054,7 @@ public final class ChatWorkspace extends JPanel {
                         composer.insertEmoji(selectedEmoji);
                         adjustComposerHeight();
                     },
-                    selectedSticker -> {
-                        Conversation c = currentConversation();
-                        String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-                        chatService.send(selectedConversationId, chan, user, "[Sticker: " + selectedSticker + "]");
-                        rebuildTranscript();
-                    }
+                    selectedSticker -> sendTextAsync("[Sticker: " + selectedSticker + "]")
             );
             popup.showAbove(emojiBtn);
         });
@@ -1102,8 +1097,13 @@ public final class ChatWorkspace extends JPanel {
                 File file = chooser.getSelectedFile();
                 Conversation c = currentConversation();
                 String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-                chatService.sendAttachment(selectedConversationId, chan, user, file.getAbsolutePath(), file.length(), false);
-                rebuildTranscript();
+                String convId = selectedConversationId;
+                showHint("Đang tải tệp lên máy chủ...", DiscordTheme.WARNING);
+                CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, file.getAbsolutePath(), file.length(), false))
+                        .thenRun(() -> SwingUtilities.invokeLater(() -> {
+                            showHint("Đã gửi tệp đính kèm thành công", DiscordTheme.SUCCESS);
+                            rebuildTranscript();
+                        }));
             }
         });
         menu.add(chooseFile);
@@ -1114,8 +1114,9 @@ public final class ChatWorkspace extends JPanel {
         sampleFile.addActionListener(e -> {
             Conversation c = currentConversation();
             String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-            chatService.sendAttachment(selectedConversationId, chan, user, "Tong_hop_bai_giang.pdf", 2_400_000L, false);
-            rebuildTranscript();
+            String convId = selectedConversationId;
+            CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, "Tong_hop_bai_giang.pdf", 2_400_000L, false))
+                    .thenRun(() -> SwingUtilities.invokeLater(this::rebuildTranscript));
         });
         menu.add(sampleFile);
 
@@ -1123,8 +1124,9 @@ public final class ChatWorkspace extends JPanel {
         failFile.addActionListener(e -> {
             Conversation c = currentConversation();
             String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-            chatService.sendAttachment(selectedConversationId, chan, user, "architecture-chat-flow-v2.png", 2_400_000L, true);
-            rebuildTranscript();
+            String convId = selectedConversationId;
+            CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, "architecture-chat-flow-v2.png", 2_400_000L, true))
+                    .thenRun(() -> SwingUtilities.invokeLater(this::rebuildTranscript));
         });
         menu.add(failFile);
 
@@ -1681,8 +1683,6 @@ public final class ChatWorkspace extends JPanel {
         }
 
         final String convId = selectedConversationId;
-        Conversation conv = currentConversation();
-        final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
         final String text = content.trim();
 
         // 1. Instant UI update: clear composer & reset draft immediately
@@ -1690,6 +1690,17 @@ public final class ChatWorkspace extends JPanel {
         drafts.put(convId, "");
         adjustComposerHeight();
         composer.requestFocusInWindow();
+
+        sendTextAsync(text);
+    }
+
+    private void sendTextAsync(String text) {
+        if (selectedConversationId == null || text == null || text.isBlank()) {
+            return;
+        }
+        final String convId = selectedConversationId;
+        Conversation conv = currentConversation();
+        final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
 
         // 2. Optimistic UI update: instantly show message in transcript
         String optId = "opt_" + UUID.randomUUID();
@@ -1743,7 +1754,9 @@ public final class ChatWorkspace extends JPanel {
                         if (convId.equals(selectedConversationId)) {
                             renderTranscriptRows(new ArrayList<>(currentList), chan);
                         }
-                        composer.setMessageText(text);
+                        if (!text.startsWith("[Sticker:")) {
+                            composer.setMessageText(text);
+                        }
                         showHint("Lỗi gửi tin nhắn: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()), DiscordTheme.DANGER);
                     });
                     return null;

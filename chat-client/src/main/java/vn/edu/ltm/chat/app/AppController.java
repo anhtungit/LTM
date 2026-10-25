@@ -7,11 +7,9 @@ import vn.edu.ltm.chat.infrastructure.network.TcpChatGateway;
 import vn.edu.ltm.chat.domain.UserProfile;
 import vn.edu.ltm.chat.presentation.ChatWorkspace;
 import vn.edu.ltm.chat.presentation.LoginPanel;
-import vn.edu.ltm.chat.theme.DiscordTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.JFrame;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import java.awt.CardLayout;
 import java.awt.Dimension;
