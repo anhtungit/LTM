@@ -1377,7 +1377,7 @@ public final class ChatWorkspace extends JPanel {
             if (loadingConversations) {
                 JPanel loadingPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
                 loadingPanel.setOpaque(false);
-                loadingPanel.add(new JLabel(IconFactory.phosphor("circle-notch.svg", 14, DiscordTheme.ACCENT)));
+                loadingPanel.add(new JLabel(IconFactory.phosphor("arrow-clockwise.svg", 14, DiscordTheme.ACCENT)));
                 JLabel text = new JLabel("Đang tải hội thoại...");
                 text.setFont(DiscordTheme.font(11f));
                 text.setForeground(DiscordTheme.TEXT_MUTED);
@@ -1442,6 +1442,12 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void selectConversation(Conversation conversation) {
+        if (conversation == null) return;
+        if (conversation.id().equals(selectedConversationId)
+                && (!conversation.isGroup() || conversation.channels().contains(selectedChannel))) {
+            return;
+        }
+
         if (selectedConversationId != null) {
             drafts.put(selectedConversationId, composer.getMessageText());
         }
@@ -1500,7 +1506,7 @@ public final class ChatWorkspace extends JPanel {
             transcript.removeAll();
             JPanel loadingBox = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 40));
             loadingBox.setOpaque(false);
-            loadingBox.add(new JLabel(IconFactory.phosphor("circle-notch.svg", 20, DiscordTheme.ACCENT)));
+            loadingBox.add(new JLabel(IconFactory.phosphor("arrow-clockwise.svg", 20, DiscordTheme.ACCENT)));
             JLabel lbl = new JLabel("Đang tải dữ liệu người dùng và phòng chat từ máy chủ...");
             lbl.setFont(DiscordTheme.font(13f));
             lbl.setForeground(DiscordTheme.TEXT_SECONDARY);
@@ -1571,7 +1577,7 @@ public final class ChatWorkspace extends JPanel {
         String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
         String key = transcriptCacheKey(selectedConversationId, chan);
 
-        // 1. Instant render from cache (0ms delay, no freezing)
+        // 1. Instant render from cache (0ms delay, no freezing, no flicker)
         List<ChatMessage> cached = messageCache.get(key);
         if (cached != null) {
             renderTranscriptRows(new ArrayList<>(cached), chan);
@@ -1596,6 +1602,23 @@ public final class ChatWorkspace extends JPanel {
                     List<ChatMessage> inFlight = currentList.stream()
                             .filter(m -> m.id().startsWith("opt_"))
                             .toList();
+
+                    boolean isSame = (currentList.size() == fetched.size() + inFlight.size());
+                    if (isSame) {
+                        for (int i = 0; i < fetched.size(); i++) {
+                            ChatMessage a = currentList.get(i);
+                            ChatMessage b = fetched.get(i);
+                            if (!a.id().equals(b.id()) || !a.content().equals(b.content()) || a.edited() != b.edited() || a.recalled() != b.recalled()) {
+                                isSame = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (isSame && !currentList.isEmpty()) {
+                        // Content unchanged, skip re-rendering the whole transcript to avoid UI stutter/flicker!
+                        return;
+                    }
 
                     currentList.clear();
                     currentList.addAll(fetched);
@@ -1622,7 +1645,7 @@ public final class ChatWorkspace extends JPanel {
         JPanel loadingBox = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 20));
         loadingBox.setOpaque(false);
 
-        JLabel spinnerIcon = new JLabel(IconFactory.phosphor("circle-notch.svg", 18, DiscordTheme.ACCENT));
+        JLabel spinnerIcon = new JLabel(IconFactory.phosphor("arrow-clockwise.svg", 18, DiscordTheme.ACCENT));
         JLabel loadingLabel = new JLabel("Đang tải tin nhắn từ máy chủ...");
         loadingLabel.setFont(DiscordTheme.font(13f));
         loadingLabel.setForeground(DiscordTheme.TEXT_SECONDARY);
