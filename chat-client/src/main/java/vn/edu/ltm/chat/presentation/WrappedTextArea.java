@@ -28,13 +28,14 @@ final class WrappedTextArea extends JTextArea {
             return;
         }
         this.wrapWidth = wrapWidth;
-        revalidate();
-        repaint();
+        setSize(new Dimension(wrapWidth, Short.MAX_VALUE));
     }
 
     @Override
     public Dimension getPreferredSize() {
-        setSize(new Dimension(wrapWidth, Short.MAX_VALUE));
+        if (getWidth() != wrapWidth) {
+            setSize(new Dimension(wrapWidth, Short.MAX_VALUE));
+        }
         Dimension measured = super.getPreferredSize();
         String text = getText();
         if (text != null && !text.isEmpty()) {

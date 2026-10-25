@@ -16,6 +16,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -41,11 +42,12 @@ final class MessageRow extends JPanel {
         default void onDownload(ChatMessage message) {}
     }
 
-    private final ChatMessage message;
+    private ChatMessage message;
     private final MessageActionListener listener;
     private final JPanel body = new JPanel(new BorderLayout());
     private final JPanel contentHolder = new JPanel(new BorderLayout(0, 6));
-    private final JPanel actionToolbar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+    private final RoundedPanel actionToolbar = new RoundedPanel(6);
+    private final Timer hideToolbarTimer;
     private WrappedTextArea normalText;
     private boolean isEditing = false;
     private int currentWrapWidth;
@@ -54,6 +56,13 @@ final class MessageRow extends JPanel {
         this.message = message;
         this.listener = listener;
         this.currentWrapWidth = wrapWidth;
+
+        this.hideToolbarTimer = new Timer(250, e -> {
+            if (actionToolbar.isVisible()) {
+                actionToolbar.setVisible(false);
+            }
+        });
+        this.hideToolbarTimer.setRepeats(false);
 
         setLayout(new BorderLayout(AVATAR_GAP, 0));
         setOpaque(false);
@@ -75,54 +84,39 @@ final class MessageRow extends JPanel {
         }
 
         contentHolder.setOpaque(false);
+
+        actionToolbar.setLayout(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        actionToolbar.setBackground(new Color(0x31, 0x33, 0x38));
+        actionToolbar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x3F, 0x42, 0x48), 1),
+                BorderFactory.createEmptyBorder(2, 4, 2, 4)
+        ));
+        actionToolbar.setVisible(false);
+
         buildNormalContent();
         body.add(contentHolder, BorderLayout.CENTER);
         add(body, BorderLayout.CENTER);
 
-        // Setup actionToolbar buttons
-        if (isMe && !message.recalled()) {
-            actionToolbar.setOpaque(false);
-            actionToolbar.setVisible(false);
-            actionToolbar.removeAll();
-
-            if (!message.hasAttachment()) {
-                JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
-                actionToolbar.add(editBtn);
-            }
-            JButton recallBtn = createToolbarButton("arrow-clockwise.svg", "Thu hồi tin nhắn", () -> {
-                if (listener != null) listener.onRecall(message);
-            });
-            recallBtn.setToolTipText("Thu hồi tin nhắn");
-            JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
-                if (listener != null) listener.onDelete(message);
-            });
-            actionToolbar.add(recallBtn);
-            actionToolbar.add(deleteBtn);
-        }
-
         MouseAdapter hoverAdapter = new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
-                if (!isEditing && message.fromCurrentUser() && !message.recalled()) {
-                    actionToolbar.setVisible(true);
-                    actionToolbar.revalidate();
-                    actionToolbar.repaint();
+                hideToolbarTimer.stop();
+                if (!isEditing && MessageRow.this.message.fromCurrentUser() && !MessageRow.this.message.recalled()) {
+                    if (!actionToolbar.isVisible()) {
+                        actionToolbar.setVisible(true);
+                    }
                 }
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
-                java.awt.Point p = SwingUtilities.convertPoint((Component) e.getSource(), e.getPoint(), MessageRow.this);
-                if (!contains(p)) {
-                    actionToolbar.setVisible(false);
-                    actionToolbar.revalidate();
-                    actionToolbar.repaint();
-                }
+                hideToolbarTimer.restart();
             }
         };
         addMouseListener(hoverAdapter);
         body.addMouseListener(hoverAdapter);
         contentHolder.addMouseListener(hoverAdapter);
+        actionToolbar.addMouseListener(hoverAdapter);
     }
 
     private JPanel buildAuthorRow(ChatMessage message) {
@@ -190,12 +184,32 @@ final class MessageRow extends JPanel {
         boolean isMe = message.fromCurrentUser();
         int flowAlign = isMe ? FlowLayout.RIGHT : FlowLayout.LEFT;
 
+        // Re-setup actionToolbar buttons according to current message state
+        if (isMe && !message.recalled()) {
+            actionToolbar.removeAll();
+            if (!message.hasAttachment()) {
+                JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
+                actionToolbar.add(editBtn);
+            }
+            JButton recallBtn = createToolbarButton("arrow-clockwise.svg", "Thu hồi tin nhắn", () -> {
+                if (listener != null) listener.onRecall(message);
+            });
+            recallBtn.setToolTipText("Thu hồi tin nhắn");
+            JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
+                if (listener != null) listener.onDelete(message);
+            });
+            actionToolbar.add(recallBtn);
+            actionToolbar.add(deleteBtn);
+        } else {
+            actionToolbar.setVisible(false);
+        }
+
         if (message.recalled()) {
             RoundedPanel bubble = new RoundedPanel(12);
             bubble.setBackground(new Color(0x2B, 0x2D, 0x31));
             bubble.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
             JLabel recalledLabel = new JLabel("Tin nhắn đã được thu hồi");
-            recalledLabel.setFont(DiscordTheme.font(12f));
+            recalledLabel.setFont(DiscordTheme.font(12f).deriveFont(java.awt.Font.ITALIC));
             recalledLabel.setForeground(DiscordTheme.TEXT_MUTED);
             bubble.add(recalledLabel);
 
@@ -206,7 +220,12 @@ final class MessageRow extends JPanel {
         } else {
             JComponent mainContentComp = null;
             String text = message.content();
-            if (text != null && text.startsWith("[Sticker:") && text.endsWith("]")) {
+            boolean hasAttachment = message.hasAttachment();
+            boolean isDefaultAttachmentText = hasAttachment && (text == null || text.isBlank() || text.startsWith("Đã gửi tệp:") || text.equals(message.attachmentName()));
+
+            if (hasAttachment && isDefaultAttachmentText) {
+                mainContentComp = buildAttachmentCard();
+            } else if (text != null && text.startsWith("[Sticker:") && text.endsWith("]")) {
                 String inner = text.substring(9, text.length() - 1).trim();
                 mainContentComp = buildStickerCard(inner);
             } else if (text != null && EmojiAssets.hasEmoji(text.trim())) {
@@ -220,7 +239,7 @@ final class MessageRow extends JPanel {
                     mainContentComp = createBubbleText(text, isMe);
                 }
             } else {
-                mainContentComp = createBubbleText(text, isMe);
+                mainContentComp = createBubbleText(text != null ? text : "", isMe);
             }
 
             if (isMe) {
@@ -236,7 +255,7 @@ final class MessageRow extends JPanel {
                 contentHolder.add(rowWrapper, BorderLayout.NORTH);
             }
 
-            if (message.hasAttachment()) {
+            if (hasAttachment && !isDefaultAttachmentText) {
                 JPanel attachHolder = new JPanel(new FlowLayout(flowAlign, 0, 4));
                 attachHolder.setOpaque(false);
                 attachHolder.add(buildAttachmentCard());
@@ -326,7 +345,7 @@ final class MessageRow extends JPanel {
         RoundedPanel card = new RoundedPanel(8);
         boolean failed = message.attachmentFailed();
 
-        int targetWidth = Math.min(currentWrapWidth, 480);
+        int targetWidth = Math.max(260, Math.min(380, currentWrapWidth - 60));
         card.setPreferredSize(new Dimension(targetWidth, 54));
         card.setMaximumSize(new Dimension(targetWidth, 54));
 
@@ -425,10 +444,7 @@ final class MessageRow extends JPanel {
             card.add(rightActions, BorderLayout.EAST);
         }
 
-        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        wrapper.setOpaque(false);
-        wrapper.add(card);
-        return wrapper;
+        return card;
     }
 
     private void startEdit() {
@@ -512,7 +528,31 @@ final class MessageRow extends JPanel {
         return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
+    public ChatMessage getMessage() {
+        return message;
+    }
+
+    public void markRecalled(ChatMessage updated) {
+        this.message = updated;
+        if (actionToolbar != null) {
+            actionToolbar.setVisible(false);
+        }
+        buildNormalContent();
+        revalidate();
+        repaint();
+    }
+
+    public void updateMessage(ChatMessage updated) {
+        this.message = updated;
+        buildNormalContent();
+        revalidate();
+        repaint();
+    }
+
     void updateWrapWidth(int wrapWidth) {
+        if (this.currentWrapWidth == wrapWidth) {
+            return;
+        }
         this.currentWrapWidth = wrapWidth;
         if (normalText != null) {
             normalText.setWrapWidth(Math.max(80, Math.min(520, wrapWidth - 60)));

@@ -32,6 +32,7 @@ import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -1599,7 +1600,7 @@ public final class ChatWorkspace extends JPanel {
                         }
                     }
 
-                    if (isSame && !currentList.isEmpty()) {
+                    if (isSame && cached != null) {
                         // Content unchanged, skip re-rendering the whole transcript to avoid UI stutter/flicker!
                         return;
                     }
@@ -1654,60 +1655,7 @@ public final class ChatWorkspace extends JPanel {
             transcript.add(empty);
         } else {
             String previousSenderId = null;
-            MessageRow.MessageActionListener actionListener = new MessageRow.MessageActionListener() {
-                @Override
-                public void onEdit(ChatMessage message, String newContent) {
-                    CompletableFuture.runAsync(() -> chatService.edit(selectedConversationId, message.id(), newContent))
-                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
-                }
-
-                @Override
-                public void onRecall(ChatMessage message) {
-                    // Optimistic recall: instantly reflect in cache and UI
-                    String cacheKey = transcriptCacheKey(selectedConversationId, chan);
-                    List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
-                    synchronized (currentList) {
-                        for (int i = 0; i < currentList.size(); i++) {
-                            ChatMessage m = currentList.get(i);
-                            if (m.id().equals(message.id())) {
-                                currentList.set(i, new ChatMessage(
-                                        m.id(), m.conversationId(), m.channel(), m.senderId(),
-                                        m.senderName(), m.senderInitials(), "Tin nhắn đã được thu hồi",
-                                        m.sentAt(), m.fromCurrentUser(), false, true, null, 0L, false
-                                ));
-                                break;
-                            }
-                        }
-                        renderTranscriptRows(new ArrayList<>(currentList), chan);
-                    }
-                    CompletableFuture.runAsync(() -> chatService.recall(selectedConversationId, message.id()))
-                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
-                }
-
-                @Override
-                public void onDelete(ChatMessage message) {
-                    // Optimistic delete: instantly reflect in cache and UI
-                    String cacheKey = transcriptCacheKey(selectedConversationId, chan);
-                    List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
-                    synchronized (currentList) {
-                        currentList.removeIf(m -> m.id().equals(message.id()));
-                        renderTranscriptRows(new ArrayList<>(currentList), chan);
-                    }
-                    CompletableFuture.runAsync(() -> chatService.delete(selectedConversationId, message.id()))
-                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
-                }
-
-                @Override
-                public void onResend(ChatMessage message) {
-                    CompletableFuture.runAsync(() -> chatService.sendAttachment(selectedConversationId, chan, user, message.attachmentName(), message.attachmentSize(), false))
-                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
-                }
-
-                @Override
-                public void onDownload(ChatMessage message) {
-                    downloadAttachmentToFile(message);
-                }
-            };
+            MessageRow.MessageActionListener actionListener = createActionListener(chan);
 
             for (ChatMessage message : history) {
                 boolean beginsGroup = !message.senderId().equals(previousSenderId);
@@ -1715,6 +1663,134 @@ public final class ChatWorkspace extends JPanel {
                 previousSenderId = message.senderId();
             }
         }
+        transcript.revalidate();
+        transcript.repaint();
+        scrollTranscriptToEnd();
+    }
+
+    private MessageRow.MessageActionListener createActionListener(final String chan) {
+        return new MessageRow.MessageActionListener() {
+            @Override
+            public void onEdit(ChatMessage message, String newContent) {
+                String cacheKey = transcriptCacheKey(selectedConversationId, chan);
+                List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                ChatMessage editedMsg = null;
+                synchronized (currentList) {
+                    for (int i = 0; i < currentList.size(); i++) {
+                        ChatMessage m = currentList.get(i);
+                        if (m.id().equals(message.id())) {
+                            editedMsg = m.withContent(newContent);
+                            currentList.set(i, editedMsg);
+                            break;
+                        }
+                    }
+                }
+                for (Component c : transcript.getComponents()) {
+                    if (c instanceof MessageRow row && row.getMessage().id().equals(message.id())) {
+                        if (editedMsg != null) {
+                            row.updateMessage(editedMsg);
+                        }
+                        break;
+                    }
+                }
+                CompletableFuture.runAsync(() -> chatService.edit(selectedConversationId, message.id(), newContent))
+                        .exceptionally(ex -> {
+                            SwingUtilities.invokeLater(() -> showHint("Lỗi chỉnh sửa tin nhắn", DiscordTheme.DANGER));
+                            return null;
+                        });
+            }
+
+            @Override
+            public void onRecall(ChatMessage message) {
+                String cacheKey = transcriptCacheKey(selectedConversationId, chan);
+                List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                ChatMessage recalledMsg = null;
+                synchronized (currentList) {
+                    for (int i = 0; i < currentList.size(); i++) {
+                        ChatMessage m = currentList.get(i);
+                        if (m.id().equals(message.id())) {
+                            recalledMsg = m.asRecalled();
+                            currentList.set(i, recalledMsg);
+                            break;
+                        }
+                    }
+                }
+                boolean updatedInPlace = false;
+                for (Component c : transcript.getComponents()) {
+                    if (c instanceof MessageRow row && row.getMessage().id().equals(message.id())) {
+                        if (recalledMsg != null) {
+                            row.markRecalled(recalledMsg);
+                        }
+                        updatedInPlace = true;
+                        break;
+                    }
+                }
+                if (!updatedInPlace) {
+                    renderTranscriptRows(new ArrayList<>(currentList), chan);
+                }
+                CompletableFuture.runAsync(() -> chatService.recall(selectedConversationId, message.id()))
+                        .exceptionally(ex -> {
+                            SwingUtilities.invokeLater(() -> showHint("Lỗi thu hồi tin nhắn", DiscordTheme.DANGER));
+                            return null;
+                        });
+            }
+
+            @Override
+            public void onDelete(ChatMessage message) {
+                String cacheKey = transcriptCacheKey(selectedConversationId, chan);
+                List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                synchronized (currentList) {
+                    currentList.removeIf(m -> m.id().equals(message.id()));
+                }
+                boolean removedInPlace = false;
+                for (Component c : transcript.getComponents()) {
+                    if (c instanceof MessageRow row && row.getMessage().id().equals(message.id())) {
+                        transcript.remove(c);
+                        transcript.revalidate();
+                        transcript.repaint();
+                        removedInPlace = true;
+                        break;
+                    }
+                }
+                if (!removedInPlace) {
+                    renderTranscriptRows(new ArrayList<>(currentList), chan);
+                }
+                CompletableFuture.runAsync(() -> chatService.delete(selectedConversationId, message.id()))
+                        .exceptionally(ex -> {
+                            SwingUtilities.invokeLater(() -> showHint("Lỗi xóa tin nhắn", DiscordTheme.DANGER));
+                            return null;
+                        });
+            }
+
+            @Override
+            public void onResend(ChatMessage message) {
+                CompletableFuture.runAsync(() -> chatService.sendAttachment(selectedConversationId, chan, user, message.attachmentName(), message.attachmentSize(), false))
+                        .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
+            }
+
+            @Override
+            public void onDownload(ChatMessage message) {
+                downloadAttachmentToFile(message);
+            }
+        };
+    }
+
+    private void appendMessageRow(ChatMessage msg, String chan) {
+        if (selectedConversationId == null || !selectedConversationId.equals(msg.conversationId())) {
+            return;
+        }
+        if (transcript.getComponentCount() == 2 && transcript.getComponent(1) instanceof JLabel) {
+            transcript.remove(1);
+        }
+        String previousSenderId = null;
+        for (int i = transcript.getComponentCount() - 1; i >= 0; i--) {
+            if (transcript.getComponent(i) instanceof MessageRow row) {
+                previousSenderId = row.getMessage().senderId();
+                break;
+            }
+        }
+        boolean beginsGroup = (previousSenderId == null || !previousSenderId.equals(msg.senderId()));
+        transcript.add(new MessageRow(msg, defaultWrapWidth(), beginsGroup, createActionListener(chan)));
         transcript.revalidate();
         transcript.repaint();
         scrollTranscriptToEnd();
@@ -1803,14 +1879,15 @@ public final class ChatWorkspace extends JPanel {
                 .thenAccept(confirmed -> SwingUtilities.invokeLater(() -> {
                     String cacheKey = transcriptCacheKey(convId, chan);
                     List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                    boolean alreadyThere;
                     synchronized (currentList) {
-                        boolean alreadyThere = currentList.stream().anyMatch(m -> m.id().equals(confirmed.id()));
+                        alreadyThere = currentList.stream().anyMatch(m -> m.id().equals(confirmed.id()));
                         if (!alreadyThere) {
                             currentList.add(confirmed);
                         }
                     }
-                    if (convId.equals(selectedConversationId)) {
-                        renderTranscriptRows(new ArrayList<>(currentList), chan);
+                    if (!alreadyThere && convId.equals(selectedConversationId)) {
+                        appendMessageRow(confirmed, chan);
                     }
                     showHint("Đã gửi tệp đính kèm thành công", DiscordTheme.SUCCESS);
                 }))
@@ -1853,7 +1930,7 @@ public final class ChatWorkspace extends JPanel {
         synchronized (list) {
             list.add(optimisticMsg);
         }
-        renderTranscriptRows(new ArrayList<>(list), chan);
+        appendMessageRow(optimisticMsg, chan);
         showHint("Đã gửi tin nhắn qua máy chủ TCP & CSDL Cloud", DiscordTheme.SUCCESS);
 
         // 3. Send over TCP in background thread
@@ -1862,14 +1939,20 @@ public final class ChatWorkspace extends JPanel {
                     String cacheKey = transcriptCacheKey(convId, chan);
                     List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
                     synchronized (currentList) {
-                        currentList.removeIf(m -> m.id().equals(optId));
-                        boolean alreadyThere = currentList.stream().anyMatch(m -> m.id().equals(confirmed.id()));
-                        if (!alreadyThere) {
-                            currentList.add(confirmed);
+                        for (int i = 0; i < currentList.size(); i++) {
+                            if (currentList.get(i).id().equals(optId)) {
+                                currentList.set(i, confirmed);
+                                break;
+                            }
                         }
                     }
                     if (convId.equals(selectedConversationId)) {
-                        renderTranscriptRows(new ArrayList<>(currentList), chan);
+                        for (Component c : transcript.getComponents()) {
+                            if (c instanceof MessageRow row && row.getMessage().id().equals(optId)) {
+                                row.updateMessage(confirmed);
+                                return;
+                            }
+                        }
                     }
                 }))
                 .exceptionally(ex -> {
@@ -1880,7 +1963,14 @@ public final class ChatWorkspace extends JPanel {
                             currentList.removeIf(m -> m.id().equals(optId));
                         }
                         if (convId.equals(selectedConversationId)) {
-                            renderTranscriptRows(new ArrayList<>(currentList), chan);
+                            for (Component c : transcript.getComponents()) {
+                                if (c instanceof MessageRow row && row.getMessage().id().equals(optId)) {
+                                    transcript.remove(c);
+                                    transcript.revalidate();
+                                    transcript.repaint();
+                                    break;
+                                }
+                            }
                         }
                         if (!text.startsWith("[Sticker:")) {
                             composer.setMessageText(text);
