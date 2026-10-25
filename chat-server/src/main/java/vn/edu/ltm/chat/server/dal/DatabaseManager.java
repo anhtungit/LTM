@@ -123,7 +123,16 @@ public final class DatabaseManager {
                 System.out.println("[DatabaseManager] Phát hiện cấu hình Supabase / PostgreSQL, đang kết nối Cloud DB...");
                 return new DatabaseManager(dbUrl.trim(), "server_storage", true);
             } catch (Exception e) {
-                System.err.println("[DatabaseManager] Kết nối Supabase thất bại (" + e.getMessage() + "), chuyển về fallback SQLite cục bộ.");
+                System.err.println("[DatabaseManager] Kết nối Supabase trực tiếp thất bại: " + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()));
+                if (!dbUrl.contains("pooler.supabase.com")) {
+                    try {
+                        String poolerUrl = "postgresql://postgres.tlijesqjobgwlkzsgzxy:Gawr-gura206@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres";
+                        System.out.println("[DatabaseManager] Đang chuyển sang Supabase IPv4 Pooler (Seoul)...");
+                        return new DatabaseManager(poolerUrl, "server_storage", true);
+                    } catch (Exception e2) {
+                        System.err.println("[DatabaseManager] Kết nối Pooler thất bại: " + e2.getMessage());
+                    }
+                }
             }
         }
         return new DatabaseManager("data/chat_server.db", "server_storage");
