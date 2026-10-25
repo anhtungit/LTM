@@ -6,7 +6,10 @@ import vn.edu.ltm.chat.server.protocol.ProtocolDtos.MessageDto;
 import vn.edu.ltm.chat.server.protocol.ProtocolDtos.UserDto;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -23,6 +26,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 
@@ -34,10 +38,55 @@ import java.util.UUID;
 public final class DatabaseManager {
     private static DatabaseManager instance;
 
+    static {
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException ignored) {
+        }
+        try {
+            Class.forName("org.sqlite.JDBC");
+        } catch (ClassNotFoundException ignored) {
+        }
+    }
+
     private final String jdbcUrl;
+    private final String dbUser;
+    private final String dbPassword;
+    private final boolean isPostgres;
     private final Path storageDir;
 
+    public DatabaseManager(String rawPgUrl, String storagePath, boolean isPostgres) {
+        this.isPostgres = isPostgres;
+        this.storageDir = Path.of(storagePath);
+        try {
+            Files.createDirectories(this.storageDir);
+            String clean = rawPgUrl.replaceFirst("^jdbc:", "");
+            URI uri = URI.create(clean);
+            String host = uri.getHost();
+            int port = uri.getPort() > 0 ? uri.getPort() : 5432;
+            String path = uri.getPath() != null && !uri.getPath().isEmpty() ? uri.getPath() : "/postgres";
+
+            String userInfo = uri.getUserInfo();
+            if (userInfo != null && userInfo.contains(":")) {
+                int colon = userInfo.indexOf(':');
+                this.dbUser = userInfo.substring(0, colon);
+                this.dbPassword = userInfo.substring(colon + 1);
+            } else {
+                this.dbUser = "postgres";
+                this.dbPassword = "";
+            }
+            this.jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path + "?sslmode=require";
+            initSchemaAndSeed();
+            System.out.println("[DatabaseManager] Đã kết nối Supabase PostgreSQL (" + host + ":" + port + ") thành công!");
+        } catch (Exception e) {
+            throw new RuntimeException("Không thể khởi tạo Supabase PostgreSQL DatabaseManager", e);
+        }
+    }
+
     public DatabaseManager(String dbPath, String storagePath) {
+        this.isPostgres = false;
+        this.dbUser = null;
+        this.dbPassword = null;
         try {
             Path dbFile = Path.of(dbPath);
             if (dbFile.getParent() != null) {
@@ -47,6 +96,7 @@ public final class DatabaseManager {
             Files.createDirectories(this.storageDir);
             this.jdbcUrl = "jdbc:sqlite:" + dbFile.toAbsolutePath();
             initSchemaAndSeed();
+            System.out.println("[DatabaseManager] Sử dụng SQLite local: " + dbFile.toAbsolutePath());
         } catch (IOException | SQLException e) {
             throw new RuntimeException("Không thể khởi tạo SQLite DatabaseManager", e);
         }
@@ -54,13 +104,64 @@ public final class DatabaseManager {
 
     public static synchronized DatabaseManager getInstance() {
         if (instance == null) {
-            instance = new DatabaseManager("data/chat_server.db", "server_storage");
+            instance = createDefaultInstance();
         }
         return instance;
     }
 
+    private static DatabaseManager createDefaultInstance() {
+        String dbUrl = System.getenv("DATABASE_URL");
+        if (dbUrl == null || dbUrl.isBlank()) {
+            dbUrl = System.getProperty("chat.db.url");
+        }
+        if (dbUrl == null || dbUrl.isBlank()) {
+            dbUrl = loadPropertyFromFiles("database.url");
+        }
+
+        if (dbUrl != null && !dbUrl.isBlank() && (dbUrl.startsWith("postgres://") || dbUrl.startsWith("postgresql://") || dbUrl.startsWith("jdbc:postgresql:"))) {
+            try {
+                System.out.println("[DatabaseManager] Phát hiện cấu hình Supabase / PostgreSQL, đang kết nối Cloud DB...");
+                return new DatabaseManager(dbUrl.trim(), "server_storage", true);
+            } catch (Exception e) {
+                System.err.println("[DatabaseManager] Kết nối Supabase thất bại (" + e.getMessage() + "), chuyển về fallback SQLite cục bộ.");
+            }
+        }
+        return new DatabaseManager("data/chat_server.db", "server_storage");
+    }
+
+    private static String loadPropertyFromFiles(String key) {
+        String[] paths = {"server.properties", "chat-server/server.properties", "chat-server/src/main/resources/server.properties"};
+        for (String p : paths) {
+            File f = new File(p);
+            if (f.exists() && f.isFile()) {
+                try (InputStream in = new FileInputStream(f)) {
+                    Properties props = new Properties();
+                    props.load(in);
+                    String val = props.getProperty(key);
+                    if (val != null && !val.isBlank()) return val.trim();
+                } catch (IOException ignored) {}
+            }
+        }
+        try (InputStream in = DatabaseManager.class.getResourceAsStream("/server.properties")) {
+            if (in != null) {
+                Properties props = new Properties();
+                props.load(in);
+                String val = props.getProperty(key);
+                if (val != null && !val.isBlank()) return val.trim();
+            }
+        } catch (IOException ignored) {}
+        return null;
+    }
+
     private Connection connect() throws SQLException {
+        if (dbUser != null && dbPassword != null) {
+            return DriverManager.getConnection(jdbcUrl, dbUser, dbPassword);
+        }
         return DriverManager.getConnection(jdbcUrl);
+    }
+
+    public boolean isPostgres() {
+        return isPostgres;
     }
 
     public static String dmThreadId(String userA, String userB) {
@@ -206,7 +307,7 @@ public final class DatabaseManager {
     private void linkUserDm(Connection conn, String userId, String peerId, String createdAt) throws SQLException {
         if (userId == null || peerId == null || userId.equals(peerId)) return;
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT OR IGNORE INTO user_dms(user_id, peer_id, created_at) VALUES(?,?,?)")) {
+                "INSERT INTO user_dms(user_id, peer_id, created_at) VALUES(?,?,?) ON CONFLICT (user_id, peer_id) DO NOTHING")) {
             ps.setString(1, userId);
             ps.setString(2, peerId);
             ps.setString(3, createdAt != null ? createdAt : LocalDateTime.now().toString());
@@ -315,7 +416,7 @@ public final class DatabaseManager {
 
     private void insertUserIfAbsent(String id, String email, String password, String displayName,
                                     String username, String bio, String status) throws SQLException {
-        String sql = "INSERT OR IGNORE INTO users(id, email, password, display_name, username, bio, status) VALUES(?,?,?,?,?,?,?)";
+        String sql = "INSERT INTO users(id, email, password, display_name, username, bio, status) VALUES(?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING";
         try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, email.toLowerCase(Locale.ROOT));
@@ -537,7 +638,19 @@ public final class DatabaseManager {
     }
 
     public synchronized void insertConversation(ConversationDto c) throws SQLException {
-        String sql = "INSERT OR REPLACE INTO conversations(id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json) VALUES(?,?,?,?,?,?,?,?,?)";
+        String sql = """
+            INSERT INTO conversations(id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json)
+            VALUES(?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (id) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                initials = EXCLUDED.initials,
+                about = EXCLUDED.about,
+                online = EXCLUDED.online,
+                is_group = EXCLUDED.is_group,
+                members_json = EXCLUDED.members_json,
+                channels_json = EXCLUDED.channels_json,
+                voice_channels_json = EXCLUDED.voice_channels_json
+        """;
         try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, c.id());
             ps.setString(2, c.displayName());
@@ -553,7 +666,7 @@ public final class DatabaseManager {
     }
 
     private void insertConversationIfAbsent(ConversationDto c) throws SQLException {
-        String sql = "INSERT OR IGNORE INTO conversations(id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json) VALUES(?,?,?,?,?,?,?,?,?)";
+        String sql = "INSERT INTO conversations(id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING";
         try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, c.id());
             ps.setString(2, c.displayName());
@@ -774,10 +887,17 @@ public final class DatabaseManager {
 
     private void insertRawMessage(MessageDto m) {
         String sql = """
-            INSERT OR REPLACE INTO messages(
+            INSERT INTO messages(
                 id, conversation_id, channel, sender_id, sender_name, sender_initials,
                 content, sent_at, edited, recalled, attachment_name, attachment_size, attachment_failed
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (id) DO UPDATE SET
+                content = EXCLUDED.content,
+                edited = EXCLUDED.edited,
+                recalled = EXCLUDED.recalled,
+                attachment_name = EXCLUDED.attachment_name,
+                attachment_size = EXCLUDED.attachment_size,
+                attachment_failed = EXCLUDED.attachment_failed
         """;
         try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, m.id());

@@ -64,7 +64,8 @@ public final class ChatServer {
         System.out.println(" [LTM Chat Server] Đang lắng nghe tại cổng TCP " + actualPort);
         System.out.println(" [Auto-Discovery]  UDP cổng " + getDiscoveryPort() + " (Zero-Config)");
         System.out.println(" [Địa chỉ LAN]     " + lanIp + ":" + actualPort);
-        System.out.println(" [SQLite DAL]      Sẵn sàng lưu trữ tin nhắn & tệp");
+        String dalName = db.isPostgres() ? "Supabase Cloud DB" : "SQLite Local DAL";
+        System.out.println(" [" + dalName + "] Sẵn sàng lưu trữ tin nhắn & tệp");
         System.out.println("====================================================");
 
         if (port == DEFAULT_PORT) {
