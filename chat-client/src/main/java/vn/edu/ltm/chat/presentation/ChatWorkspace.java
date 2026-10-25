@@ -123,11 +123,15 @@ public final class ChatWorkspace extends JPanel {
     private String selectedChannel = "học-tập";
     private String filter = "";
 
+    private boolean loadingConversations = false;
+
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
         this.chatService = chatService;
         this.onLogout = onLogout;
-        this.conversations = new ArrayList<>(chatService.isServerConnected()
+        boolean isConnected = chatService.isServerConnected();
+        this.loadingConversations = isConnected;
+        this.conversations = new ArrayList<>(isConnected
                 ? Collections.emptyList()
                 : chatService.conversations());
 
@@ -155,7 +159,7 @@ public final class ChatWorkspace extends JPanel {
         }
 
         this.chatService.setOnRealtimeUpdate(this::handleServerBroadcast);
-        if (chatService.isServerConnected()) {
+        if (isConnected) {
             handleServerBroadcast();
         }
     }
@@ -169,10 +173,13 @@ public final class ChatWorkspace extends JPanel {
                 return Collections.<Conversation>emptyList();
             }
         }).thenAccept(latest -> SwingUtilities.invokeLater(() -> {
+            loadingConversations = false;
             if (!latest.isEmpty()) {
                 conversations.clear();
                 conversations.addAll(latest);
                 rebuildRail();
+                rebuildConversationButtons();
+            } else {
                 rebuildConversationButtons();
             }
             if (selectedConversationId == null && !conversations.isEmpty()) {
@@ -1367,24 +1374,35 @@ public final class ChatWorkspace extends JPanel {
         }
 
         if (directMessagesList.getComponentCount() == 0 && groupMessagesList.getComponentCount() == 0) {
-            JLabel empty = new JLabel(conversations.isEmpty()
-                    ? "Chưa có cuộc trò chuyện nào."
-                    : "Không có hội thoại phù hợp.");
-            empty.setFont(DiscordTheme.font(11f));
-            empty.setForeground(DiscordTheme.TEXT_MUTED);
-            empty.setBorder(BorderFactory.createEmptyBorder(8, 6, 4, 6));
-            directMessagesList.add(empty);
+            if (loadingConversations) {
+                JPanel loadingPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
+                loadingPanel.setOpaque(false);
+                loadingPanel.add(new JLabel(IconFactory.phosphor("circle-notch.svg", 14, DiscordTheme.ACCENT)));
+                JLabel text = new JLabel("Đang tải hội thoại...");
+                text.setFont(DiscordTheme.font(11f));
+                text.setForeground(DiscordTheme.TEXT_MUTED);
+                loadingPanel.add(text);
+                directMessagesList.add(loadingPanel);
+            } else {
+                JLabel empty = new JLabel(conversations.isEmpty()
+                        ? "Chưa có cuộc trò chuyện nào."
+                        : "Không có hội thoại phù hợp.");
+                empty.setFont(DiscordTheme.font(11f));
+                empty.setForeground(DiscordTheme.TEXT_MUTED);
+                empty.setBorder(BorderFactory.createEmptyBorder(8, 6, 4, 6));
+                directMessagesList.add(empty);
 
-            if (conversations.isEmpty()) {
-                JButton startDmBtn = new JButton("+ Nhắn tin mới");
-                startDmBtn.setFont(DiscordTheme.semibold(11f));
-                startDmBtn.setForeground(DiscordTheme.ACCENT_SOFT);
-                startDmBtn.setContentAreaFilled(false);
-                startDmBtn.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
-                startDmBtn.setHorizontalAlignment(SwingConstants.LEFT);
-                startDmBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                startDmBtn.addActionListener(e -> openStartDmDialog());
-                directMessagesList.add(startDmBtn);
+                if (conversations.isEmpty()) {
+                    JButton startDmBtn = new JButton("+ Nhắn tin mới");
+                    startDmBtn.setFont(DiscordTheme.semibold(11f));
+                    startDmBtn.setForeground(DiscordTheme.ACCENT_SOFT);
+                    startDmBtn.setContentAreaFilled(false);
+                    startDmBtn.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+                    startDmBtn.setHorizontalAlignment(SwingConstants.LEFT);
+                    startDmBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                    startDmBtn.addActionListener(e -> openStartDmDialog());
+                    directMessagesList.add(startDmBtn);
+                }
             }
         }
 
@@ -1468,6 +1486,31 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void renderEmptyWorkspaceState() {
+        if (loadingConversations) {
+            conversationTitle.setText("Đang tải dữ liệu...");
+            conversationSubtitle.setText("Đang kết nối và đồng bộ dữ liệu từ máy chủ TCP.");
+            headerAvatarHolder.removeAll();
+            headerAvatarHolder.revalidate();
+            headerAvatarHolder.repaint();
+
+            infoPane.removeAll();
+            infoPane.revalidate();
+            infoPane.repaint();
+
+            transcript.removeAll();
+            JPanel loadingBox = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 40));
+            loadingBox.setOpaque(false);
+            loadingBox.add(new JLabel(IconFactory.phosphor("circle-notch.svg", 20, DiscordTheme.ACCENT)));
+            JLabel lbl = new JLabel("Đang tải dữ liệu người dùng và phòng chat từ máy chủ...");
+            lbl.setFont(DiscordTheme.font(13f));
+            lbl.setForeground(DiscordTheme.TEXT_SECONDARY);
+            loadingBox.add(lbl);
+            transcript.add(loadingBox);
+            transcript.revalidate();
+            transcript.repaint();
+            return;
+        }
+
         conversationTitle.setText("Chào mừng, " + user.displayName() + "!");
         conversationSubtitle.setText("Bấm dấu (+) ở mục Tin nhắn trực tiếp hoặc Tạo nhóm để bắt đầu trò chuyện.");
         headerAvatarHolder.removeAll();
@@ -1533,7 +1576,7 @@ public final class ChatWorkspace extends JPanel {
         if (cached != null) {
             renderTranscriptRows(new ArrayList<>(cached), chan);
         } else {
-            renderTranscriptRows(Collections.emptyList(), chan);
+            renderLoadingTranscript(chan);
         }
 
         // 2. Refresh from server asynchronously in the background
@@ -1570,6 +1613,26 @@ public final class ChatWorkspace extends JPanel {
                 }
             }
         }));
+    }
+
+    private void renderLoadingTranscript(String chan) {
+        transcript.removeAll();
+        transcript.add(buildIntroRow());
+
+        JPanel loadingBox = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 20));
+        loadingBox.setOpaque(false);
+
+        JLabel spinnerIcon = new JLabel(IconFactory.phosphor("circle-notch.svg", 18, DiscordTheme.ACCENT));
+        JLabel loadingLabel = new JLabel("Đang tải tin nhắn từ máy chủ...");
+        loadingLabel.setFont(DiscordTheme.font(13f));
+        loadingLabel.setForeground(DiscordTheme.TEXT_SECONDARY);
+
+        loadingBox.add(spinnerIcon);
+        loadingBox.add(loadingLabel);
+
+        transcript.add(loadingBox);
+        transcript.revalidate();
+        transcript.repaint();
     }
 
     private void renderTranscriptRows(List<ChatMessage> history, String chan) {
