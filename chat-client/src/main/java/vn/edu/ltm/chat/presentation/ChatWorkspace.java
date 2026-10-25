@@ -43,11 +43,17 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Discord-like desktop workspace supporting:
@@ -74,6 +80,7 @@ public final class ChatWorkspace extends JPanel {
     private final Runnable onLogout;
     private final List<Conversation> conversations;
     private final Map<String, String> drafts = new HashMap<>();
+    private final Map<String, List<ChatMessage>> messageCache = new ConcurrentHashMap<>();
 
     // Rail navigation
     private final JPanel rail = new JPanel();
@@ -150,25 +157,34 @@ public final class ChatWorkspace extends JPanel {
 
     private void handleServerBroadcast() {
         refreshConnectionBadge();
-        List<Conversation> latest = chatService.conversations();
-        conversations.clear();
-        conversations.addAll(latest);
-        rebuildRail();
-        rebuildConversationButtons();
-        if (selectedConversationId == null && !conversations.isEmpty()) {
-            selectConversation(conversations.getFirst());
-            return;
-        }
-        Conversation conv = currentConversation();
-        if (conv != null) {
-            if (conv.isGroup()) {
-                rebuildGroupChannels(conv);
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return chatService.conversations();
+            } catch (Exception e) {
+                return Collections.<Conversation>emptyList();
             }
-            rebuildInfoPane(conv);
-            rebuildTranscript();
-        } else {
-            renderEmptyWorkspaceState();
-        }
+        }).thenAccept(latest -> SwingUtilities.invokeLater(() -> {
+            if (!latest.isEmpty()) {
+                conversations.clear();
+                conversations.addAll(latest);
+                rebuildRail();
+                rebuildConversationButtons();
+            }
+            if (selectedConversationId == null && !conversations.isEmpty()) {
+                selectConversation(conversations.getFirst());
+                return;
+            }
+            Conversation conv = currentConversation();
+            if (conv != null) {
+                if (conv.isGroup()) {
+                    rebuildGroupChannels(conv);
+                }
+                rebuildInfoPane(conv);
+                rebuildTranscript();
+            } else {
+                renderEmptyWorkspaceState();
+            }
+        }));
     }
 
     private void initCenterViews() {
@@ -1490,17 +1506,48 @@ public final class ChatWorkspace extends JPanel {
         transcript.repaint();
     }
 
+    private String transcriptCacheKey(String convId, String chan) {
+        return (convId != null ? convId : "") + "::" + (chan != null ? chan : "");
+    }
+
     private void rebuildTranscript() {
         if (selectedConversationId == null || currentConversation() == null) {
             renderEmptyWorkspaceState();
             return;
         }
-        transcript.removeAll();
-        transcript.add(buildIntroRow());
 
         Conversation conv = currentConversation();
         String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
-        List<ChatMessage> history = chatService.messages(selectedConversationId, chan);
+        String key = transcriptCacheKey(selectedConversationId, chan);
+
+        // 1. Instant render from cache (0ms delay, no freezing)
+        List<ChatMessage> cached = messageCache.get(key);
+        if (cached != null) {
+            renderTranscriptRows(new ArrayList<>(cached), chan);
+        } else {
+            renderTranscriptRows(Collections.emptyList(), chan);
+        }
+
+        // 2. Refresh from server asynchronously in the background
+        final String convId = selectedConversationId;
+        final String targetChan = chan;
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return chatService.messages(convId, targetChan);
+            } catch (Exception e) {
+                return Collections.<ChatMessage>emptyList();
+            }
+        }).thenAccept(fetched -> SwingUtilities.invokeLater(() -> {
+            if (convId.equals(selectedConversationId) && targetChan.equals((currentConversation() != null && currentConversation().isGroup()) ? selectedChannel : "")) {
+                messageCache.put(transcriptCacheKey(convId, targetChan), new ArrayList<>(fetched));
+                renderTranscriptRows(fetched, targetChan);
+            }
+        }));
+    }
+
+    private void renderTranscriptRows(List<ChatMessage> history, String chan) {
+        transcript.removeAll();
+        transcript.add(buildIntroRow());
 
         if (history.isEmpty()) {
             JLabel empty = new JLabel("Chưa có tin nhắn trong " + (chan.isEmpty() ? "cuộc trò chuyện này." : "#" + chan + "."));
@@ -1513,26 +1560,26 @@ public final class ChatWorkspace extends JPanel {
             MessageRow.MessageActionListener actionListener = new MessageRow.MessageActionListener() {
                 @Override
                 public void onEdit(ChatMessage message, String newContent) {
-                    chatService.edit(selectedConversationId, message.id(), newContent);
-                    rebuildTranscript();
+                    CompletableFuture.runAsync(() -> chatService.edit(selectedConversationId, message.id(), newContent))
+                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
                 }
 
                 @Override
                 public void onRecall(ChatMessage message) {
-                    chatService.recall(selectedConversationId, message.id());
-                    rebuildTranscript();
+                    CompletableFuture.runAsync(() -> chatService.recall(selectedConversationId, message.id()))
+                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
                 }
 
                 @Override
                 public void onDelete(ChatMessage message) {
-                    chatService.delete(selectedConversationId, message.id());
-                    rebuildTranscript();
+                    CompletableFuture.runAsync(() -> chatService.delete(selectedConversationId, message.id()))
+                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
                 }
 
                 @Override
                 public void onResend(ChatMessage message) {
-                    chatService.sendAttachment(selectedConversationId, chan, user, message.attachmentName(), message.attachmentSize(), false);
-                    rebuildTranscript();
+                    CompletableFuture.runAsync(() -> chatService.sendAttachment(selectedConversationId, chan, user, message.attachmentName(), message.attachmentSize(), false))
+                            .thenRun(() -> SwingUtilities.invokeLater(ChatWorkspace.this::rebuildTranscript));
                 }
 
                 @Override
@@ -1607,21 +1654,68 @@ public final class ChatWorkspace extends JPanel {
             composer.requestFocusInWindow();
             return;
         }
-        try {
-            Conversation conv = currentConversation();
-            String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
-            chatService.send(selectedConversationId, chan, user, content);
-            drafts.put(selectedConversationId, "");
-            composer.clear();
-            showHint(chatService.isServerConnected()
-                    ? "Đã gửi qua máy chủ TCP & lưu vào SQLite"
-                    : "Đã ghi vào phiên demo cục bộ · chưa gửi qua mạng", DiscordTheme.SUCCESS);
-            adjustComposerHeight();
-            rebuildTranscript();
-            composer.requestFocusInWindow();
-        } catch (IllegalArgumentException exception) {
-            showHint(exception.getMessage(), DiscordTheme.DANGER);
+
+        final String convId = selectedConversationId;
+        Conversation conv = currentConversation();
+        final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
+        final String text = content.trim();
+
+        // 1. Instant UI update: clear composer & reset draft immediately
+        composer.clear();
+        drafts.put(convId, "");
+        adjustComposerHeight();
+        composer.requestFocusInWindow();
+
+        // 2. Optimistic UI update: instantly show message in transcript
+        String optId = "opt_" + UUID.randomUUID();
+        ChatMessage optimisticMsg = new ChatMessage(
+                optId,
+                convId,
+                chan,
+                user.id(),
+                user.displayName(),
+                user.initials(),
+                text,
+                java.time.LocalDateTime.now(),
+                true,
+                false,
+                false,
+                null,
+                0L,
+                false
+        );
+        String key = transcriptCacheKey(convId, chan);
+        List<ChatMessage> list = messageCache.computeIfAbsent(key, k -> new ArrayList<>());
+        synchronized (list) {
+            list.add(optimisticMsg);
         }
+        renderTranscriptRows(new ArrayList<>(list), chan);
+        showHint("Đã gửi tin nhắn qua máy chủ TCP & CSDL Cloud", DiscordTheme.SUCCESS);
+
+        // 3. Send over TCP in background thread
+        CompletableFuture.supplyAsync(() -> chatService.send(convId, chan, user, text))
+                .thenAccept(confirmed -> SwingUtilities.invokeLater(() -> {
+                    synchronized (list) {
+                        list.removeIf(m -> m.id().equals(optId));
+                        list.add(confirmed);
+                    }
+                    if (convId.equals(selectedConversationId)) {
+                        renderTranscriptRows(new ArrayList<>(list), chan);
+                    }
+                }))
+                .exceptionally(ex -> {
+                    SwingUtilities.invokeLater(() -> {
+                        synchronized (list) {
+                            list.removeIf(m -> m.id().equals(optId));
+                        }
+                        if (convId.equals(selectedConversationId)) {
+                            renderTranscriptRows(new ArrayList<>(list), chan);
+                        }
+                        composer.setMessageText(text);
+                        showHint("Lỗi gửi tin nhắn: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()), DiscordTheme.DANGER);
+                    });
+                    return null;
+                });
     }
 
     private void openInboxDialog() {
@@ -1648,63 +1742,72 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void openStartDmDialog() {
-        List<UserProfile> users = chatService.listUsers();
-        List<UserProfile> candidates = new ArrayList<>();
-        if (users != null) {
-            for (UserProfile u : users) {
-                if (u != null && !u.id().equals(user.id())) {
-                    candidates.add(u);
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return chatService.listUsers();
+            } catch (Exception e) {
+                return Collections.<UserProfile>emptyList();
+            }
+        }).thenAccept(users -> SwingUtilities.invokeLater(() -> {
+            List<UserProfile> candidates = new ArrayList<>();
+            if (users != null) {
+                for (UserProfile u : users) {
+                    if (u != null && !u.id().equals(user.id())) {
+                        candidates.add(u);
+                    }
                 }
             }
-        }
-        if (candidates.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "Hiện chưa có người dùng nào khác trên máy chủ.",
+            if (candidates.isEmpty()) {
+                JOptionPane.showMessageDialog(this,
+                        "Hiện chưa có người dùng nào khác trên máy chủ.",
+                        "Tin nhắn trực tiếp mới",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+
+            String[] options = new String[candidates.size()];
+            for (int i = 0; i < candidates.size(); i++) {
+                UserProfile u = candidates.get(i);
+                options[i] = u.displayName() + " (" + u.username() + ")";
+            }
+
+            String chosen = (String) JOptionPane.showInputDialog(
+                    this,
+                    "Chọn người dùng để bắt đầu trò chuyện 1-1:",
                     "Tin nhắn trực tiếp mới",
-                    JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-
-        String[] options = new String[candidates.size()];
-        for (int i = 0; i < candidates.size(); i++) {
-            UserProfile u = candidates.get(i);
-            options[i] = u.displayName() + " (" + u.username() + ")";
-        }
-
-        String chosen = (String) JOptionPane.showInputDialog(
-                this,
-                "Chọn người dùng để bắt đầu trò chuyện 1-1:",
-                "Tin nhắn trực tiếp mới",
-                JOptionPane.PLAIN_MESSAGE,
-                null,
-                options,
-                options[0]
-        );
-        if (chosen == null) {
-            return;
-        }
-        for (int i = 0; i < options.length; i++) {
-            if (options[i].equals(chosen)) {
-                UserProfile target = candidates.get(i);
-                Conversation dm = chatService.openDirectMessage(target.id());
-                if (dm != null) {
-                    boolean exists = false;
-                    for (int j = 0; j < conversations.size(); j++) {
-                        if (conversations.get(j).id().equals(dm.id())) {
-                            conversations.set(j, dm);
-                            exists = true;
-                            break;
-                        }
-                    }
-                    if (!exists) {
-                        conversations.add(dm);
-                    }
-                    selectConversation(dm);
-                    showChatView();
-                }
-                break;
+                    JOptionPane.PLAIN_MESSAGE,
+                    null,
+                    options,
+                    options[0]
+            );
+            if (chosen == null) {
+                return;
             }
-        }
+            for (int i = 0; i < options.length; i++) {
+                if (options[i].equals(chosen)) {
+                    UserProfile target = candidates.get(i);
+                    CompletableFuture.supplyAsync(() -> chatService.openDirectMessage(target.id()))
+                            .thenAccept(dm -> SwingUtilities.invokeLater(() -> {
+                                if (dm != null) {
+                                    boolean exists = false;
+                                    for (int j = 0; j < conversations.size(); j++) {
+                                        if (conversations.get(j).id().equals(dm.id())) {
+                                            conversations.set(j, dm);
+                                            exists = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!exists) {
+                                        conversations.add(dm);
+                                    }
+                                    selectConversation(dm);
+                                    showChatView();
+                                }
+                            }));
+                    break;
+                }
+            }
+        }));
     }
 
     private void openProfileDialog() {

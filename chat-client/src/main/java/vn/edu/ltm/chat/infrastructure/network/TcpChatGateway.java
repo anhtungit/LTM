@@ -88,6 +88,9 @@ public final class TcpChatGateway implements ChatGateway {
         if (connected && socket != null && !socket.isClosed()) {
             return true;
         }
+        if (SwingUtilities.isEventDispatchThread()) {
+            return false;
+        }
         try {
             Socket s = ServerEndpointResolver.connectAuto(explicitHost, explicitPort);
             this.socket = s;

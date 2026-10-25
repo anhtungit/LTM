@@ -67,14 +67,29 @@ public final class DatabaseManager {
             String path = uri.getPath() != null && !uri.getPath().isEmpty() ? uri.getPath() : "/postgres";
 
             String userInfo = uri.getUserInfo();
+            String parsedUser;
+            String parsedPassword;
             if (userInfo != null && userInfo.contains(":")) {
                 int colon = userInfo.indexOf(':');
-                this.dbUser = userInfo.substring(0, colon);
-                this.dbPassword = userInfo.substring(colon + 1);
+                parsedUser = userInfo.substring(0, colon);
+                parsedPassword = userInfo.substring(colon + 1);
             } else {
-                this.dbUser = "postgres";
-                this.dbPassword = "";
+                parsedUser = "postgres";
+                parsedPassword = "";
             }
+
+            // Supabase direct host (db.xxx.supabase.co:5432) is IPv6-only. Convert to IPv4 Pooler for cloud environments
+            if (host != null && host.startsWith("db.") && host.endsWith(".supabase.co")) {
+                String projectRef = host.substring(3, host.indexOf(".supabase.co"));
+                host = "aws-0-ap-northeast-2.pooler.supabase.com";
+                port = 6543;
+                if (!parsedUser.contains(".")) {
+                    parsedUser = parsedUser + "." + projectRef;
+                }
+            }
+            this.dbUser = parsedUser;
+            this.dbPassword = parsedPassword;
+
             this.jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path + "?sslmode=require";
             initSchemaAndSeed();
             System.out.println("[DatabaseManager] Đã kết nối Supabase PostgreSQL (" + host + ":" + port + ") thành công!");
@@ -966,7 +981,7 @@ public final class DatabaseManager {
                    content, sent_at, edited, recalled, attachment_name, attachment_size, attachment_failed
             FROM messages
             WHERE conversation_id = ? AND channel = ?
-            ORDER BY sent_at ASC, rowid ASC
+            ORDER BY sent_at ASC, id ASC
         """;
         try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, storageConversationId);
