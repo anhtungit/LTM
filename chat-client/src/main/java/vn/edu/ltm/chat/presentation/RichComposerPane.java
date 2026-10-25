@@ -42,9 +42,9 @@ public final class RichComposerPane extends JTextPane {
             public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr)
                     throws BadLocationException {
                 if (string != null && EmojiAssets.containsEmoji(string)) {
-                    insertWithEmojis(fb, offset, string, attr);
+                    insertWithEmojis(fb, offset, string, cleanTextAttrs(attr));
                 } else {
-                    super.insertString(fb, offset, string, attr);
+                    super.insertString(fb, offset, string, cleanTextAttrs(attr));
                 }
             }
 
@@ -53,15 +53,22 @@ public final class RichComposerPane extends JTextPane {
                     throws BadLocationException {
                 if (text != null && EmojiAssets.containsEmoji(text)) {
                     fb.remove(offset, length);
-                    insertWithEmojis(fb, offset, text, attrs);
+                    insertWithEmojis(fb, offset, text, cleanTextAttrs(attrs));
                 } else {
-                    super.replace(fb, offset, length, text, attrs);
+                    super.replace(fb, offset, length, text, cleanTextAttrs(attrs));
                 }
             }
         });
         setStyledDocument(doc);
 
         setupKeyBindings();
+    }
+
+    private AttributeSet cleanTextAttrs(AttributeSet attr) {
+        SimpleAttributeSet clean = attr != null ? new SimpleAttributeSet(attr) : new SimpleAttributeSet();
+        clean.removeAttribute("emoji");
+        clean.removeAttribute(StyleConstants.IconAttribute);
+        return clean;
     }
 
     private void insertWithEmojis(DocumentFilter.FilterBypass fb, int offset, String text, AttributeSet attr)
@@ -87,7 +94,7 @@ public final class RichComposerPane extends JTextPane {
                 }
             }
             if (!matched) {
-                fb.insertString(offset, text.substring(cursor, cursor + 1), attr);
+                fb.insertString(offset, text.substring(cursor, cursor + 1), cleanTextAttrs(attr));
                 offset += 1;
                 cursor += 1;
             }
@@ -135,6 +142,11 @@ public final class RichComposerPane extends JTextPane {
         } else {
             replaceSelection(emoji);
         }
+        // Critical: Reset input attributes so newly typed characters never inherit the emoji icon or attribute!
+        javax.swing.text.MutableAttributeSet inputAttrs = getInputAttributes();
+        if (inputAttrs != null) {
+            inputAttrs.removeAttributes(inputAttrs);
+        }
         requestFocusInWindow();
     }
 
@@ -144,8 +156,10 @@ public final class RichComposerPane extends JTextPane {
         try {
             for (int i = 0; i < doc.getLength(); i++) {
                 Element el = doc.getCharacterElement(i);
-                Object emo = el.getAttributes().getAttribute("emoji");
-                if (emo != null) {
+                AttributeSet as = el.getAttributes();
+                Object icon = as.getAttribute(StyleConstants.IconAttribute);
+                Object emo = as.getAttribute("emoji");
+                if (icon != null && emo != null) {
                     sb.append(emo);
                 } else {
                     sb.append(doc.getText(i, 1));
@@ -157,7 +171,7 @@ public final class RichComposerPane extends JTextPane {
     }
 
     public void setMessageText(String text) {
-        setText("");
+        clear();
         if (text != null && !text.isEmpty()) {
             try {
                 getStyledDocument().insertString(0, text, null);
@@ -168,6 +182,10 @@ public final class RichComposerPane extends JTextPane {
 
     public void clear() {
         setText("");
+        javax.swing.text.MutableAttributeSet inputAttrs = getInputAttributes();
+        if (inputAttrs != null) {
+            inputAttrs.removeAttributes(inputAttrs);
+        }
     }
 
     public boolean isMessageEmpty() {
