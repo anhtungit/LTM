@@ -1072,10 +1072,11 @@ public final class ChatWorkspace extends JPanel {
         composerHint.setFont(DiscordTheme.font(10f));
         composerHint.setForeground(DiscordTheme.TEXT_MUTED);
         padRight(composerHint);
-        footer.add(composerHint, BorderLayout.WEST);
+        footer.add(composerHint, BorderLayout.CENTER);
         JLabel keys = new JLabel("Enter để gửi · Shift + Enter xuống dòng");
         keys.setFont(DiscordTheme.font(10f));
         keys.setForeground(DiscordTheme.TEXT_MUTED);
+        keys.setHorizontalAlignment(SwingConstants.RIGHT);
         padRight(keys);
         footer.add(keys, BorderLayout.EAST);
         shell.add(footer, BorderLayout.SOUTH);
@@ -1539,8 +1540,27 @@ public final class ChatWorkspace extends JPanel {
             }
         }).thenAccept(fetched -> SwingUtilities.invokeLater(() -> {
             if (convId.equals(selectedConversationId) && targetChan.equals((currentConversation() != null && currentConversation().isGroup()) ? selectedChannel : "")) {
-                messageCache.put(transcriptCacheKey(convId, targetChan), new ArrayList<>(fetched));
-                renderTranscriptRows(fetched, targetChan);
+                String cacheKey = transcriptCacheKey(convId, targetChan);
+                List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                synchronized (currentList) {
+                    List<ChatMessage> inFlight = currentList.stream()
+                            .filter(m -> m.id().startsWith("opt_"))
+                            .toList();
+
+                    currentList.clear();
+                    currentList.addAll(fetched);
+
+                    for (ChatMessage opt : inFlight) {
+                        boolean matched = currentList.stream().anyMatch(m ->
+                                m.senderId().equals(opt.senderId()) &&
+                                m.content().equals(opt.content())
+                        );
+                        if (!matched) {
+                            currentList.add(opt);
+                        }
+                    }
+                    renderTranscriptRows(new ArrayList<>(currentList), targetChan);
+                }
             }
         }));
     }
@@ -1695,21 +1715,28 @@ public final class ChatWorkspace extends JPanel {
         // 3. Send over TCP in background thread
         CompletableFuture.supplyAsync(() -> chatService.send(convId, chan, user, text))
                 .thenAccept(confirmed -> SwingUtilities.invokeLater(() -> {
-                    synchronized (list) {
-                        list.removeIf(m -> m.id().equals(optId));
-                        list.add(confirmed);
+                    String cacheKey = transcriptCacheKey(convId, chan);
+                    List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                    synchronized (currentList) {
+                        currentList.removeIf(m -> m.id().equals(optId));
+                        boolean alreadyThere = currentList.stream().anyMatch(m -> m.id().equals(confirmed.id()));
+                        if (!alreadyThere) {
+                            currentList.add(confirmed);
+                        }
                     }
                     if (convId.equals(selectedConversationId)) {
-                        renderTranscriptRows(new ArrayList<>(list), chan);
+                        renderTranscriptRows(new ArrayList<>(currentList), chan);
                     }
                 }))
                 .exceptionally(ex -> {
                     SwingUtilities.invokeLater(() -> {
-                        synchronized (list) {
-                            list.removeIf(m -> m.id().equals(optId));
+                        String cacheKey = transcriptCacheKey(convId, chan);
+                        List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                        synchronized (currentList) {
+                            currentList.removeIf(m -> m.id().equals(optId));
                         }
                         if (convId.equals(selectedConversationId)) {
-                            renderTranscriptRows(new ArrayList<>(list), chan);
+                            renderTranscriptRows(new ArrayList<>(currentList), chan);
                         }
                         composer.setMessageText(text);
                         showHint("Lỗi gửi tin nhắn: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()), DiscordTheme.DANGER);

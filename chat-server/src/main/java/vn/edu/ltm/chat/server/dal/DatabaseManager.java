@@ -1,6 +1,6 @@
 package vn.edu.ltm.chat.server.dal;
 
-import vn.edu.ltm.chat.server.protocol.Packet;
+import com.google.gson.Gson;
 import vn.edu.ltm.chat.server.protocol.ProtocolDtos.ConversationDto;
 import vn.edu.ltm.chat.server.protocol.ProtocolDtos.MessageDto;
 import vn.edu.ltm.chat.server.protocol.ProtocolDtos.UserDto;
@@ -36,6 +36,7 @@ import java.util.UUID;
  * Isolates 1-1 Direct Messages per user pair (dm:userA::userB) and Groups per member.
  */
 public final class DatabaseManager {
+    private static final Gson GSON = new Gson();
     private static DatabaseManager instance;
 
     static {
@@ -682,9 +683,9 @@ public final class DatabaseManager {
             ps.setString(4, c.about());
             ps.setInt(5, c.online() ? 1 : 0);
             ps.setInt(6, c.isGroup() ? 1 : 0);
-            ps.setString(7, Packet.GSON.toJson(c.members()));
-            ps.setString(8, Packet.GSON.toJson(c.channels()));
-            ps.setString(9, Packet.GSON.toJson(c.voiceChannels()));
+            ps.setString(7, GSON.toJson(c.members()));
+            ps.setString(8, GSON.toJson(c.channels()));
+            ps.setString(9, GSON.toJson(c.voiceChannels()));
             ps.executeUpdate();
         }
     }
@@ -698,9 +699,9 @@ public final class DatabaseManager {
             ps.setString(4, c.about());
             ps.setInt(5, c.online() ? 1 : 0);
             ps.setInt(6, c.isGroup() ? 1 : 0);
-            ps.setString(7, Packet.GSON.toJson(c.members()));
-            ps.setString(8, Packet.GSON.toJson(c.channels()));
-            ps.setString(9, Packet.GSON.toJson(c.voiceChannels()));
+            ps.setString(7, GSON.toJson(c.members()));
+            ps.setString(8, GSON.toJson(c.channels()));
+            ps.setString(9, GSON.toJson(c.voiceChannels()));
             ps.executeUpdate();
         }
     }
@@ -712,9 +713,9 @@ public final class DatabaseManager {
              Statement st = conn.createStatement();
              ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) {
-                String[] members = Packet.GSON.fromJson(rs.getString("members_json"), String[].class);
-                String[] channels = Packet.GSON.fromJson(rs.getString("channels_json"), String[].class);
-                String[] voiceChannels = Packet.GSON.fromJson(rs.getString("voice_channels_json"), String[].class);
+                String[] members = GSON.fromJson(rs.getString("members_json"), String[].class);
+                String[] channels = GSON.fromJson(rs.getString("channels_json"), String[].class);
+                String[] voiceChannels = GSON.fromJson(rs.getString("voice_channels_json"), String[].class);
                 list.add(new ConversationDto(
                         rs.getString("id"),
                         rs.getString("display_name"),

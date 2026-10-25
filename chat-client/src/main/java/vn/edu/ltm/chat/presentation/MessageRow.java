@@ -120,7 +120,7 @@ final class MessageRow extends JPanel {
             JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
             right.setOpaque(false);
 
-            String timeStr = TIME_FORMAT.format(message.sentAt()) + " · Bạn";
+            String timeStr = TIME_FORMAT.format(message.sentAt());
             if (message.edited()) {
                 timeStr += " (đã sửa)";
             }

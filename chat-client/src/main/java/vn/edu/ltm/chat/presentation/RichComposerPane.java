@@ -33,7 +33,6 @@ public final class RichComposerPane extends JTextPane {
         setForeground(new Color(0xD3, 0xD4, 0xD8));
         setCaretColor(DiscordTheme.TEXT_PRIMARY);
         setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
-        setToolTipText("Enter để gửi · Shift + Enter để xuống dòng");
 
         // Set custom document filter to automatically convert typed/pasted emojis to inline icons
         DefaultStyledDocument doc = new DefaultStyledDocument();
