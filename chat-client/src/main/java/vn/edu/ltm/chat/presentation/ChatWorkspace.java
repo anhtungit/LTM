@@ -1102,15 +1102,7 @@ public final class ChatWorkspace extends JPanel {
             int res = chooser.showOpenDialog(this);
             if (res == JFileChooser.APPROVE_OPTION) {
                 File file = chooser.getSelectedFile();
-                Conversation c = currentConversation();
-                String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-                String convId = selectedConversationId;
-                showHint("Đang tải tệp lên máy chủ...", DiscordTheme.WARNING);
-                CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, file.getAbsolutePath(), file.length(), false))
-                        .thenRun(() -> SwingUtilities.invokeLater(() -> {
-                            showHint("Đã gửi tệp đính kèm thành công", DiscordTheme.SUCCESS);
-                            rebuildTranscript();
-                        }));
+                sendAttachmentAsync(file.getAbsolutePath(), file.getName(), file.length(), false);
             }
         });
         menu.add(chooseFile);
@@ -1119,21 +1111,13 @@ public final class ChatWorkspace extends JPanel {
 
         JMenuItem sampleFile = new JMenuItem("Gửi tệp mẫu thành công (PDF 2.4 MB)");
         sampleFile.addActionListener(e -> {
-            Conversation c = currentConversation();
-            String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-            String convId = selectedConversationId;
-            CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, "Tong_hop_bai_giang.pdf", 2_400_000L, false))
-                    .thenRun(() -> SwingUtilities.invokeLater(this::rebuildTranscript));
+            sendAttachmentAsync("Tong_hop_bai_giang.pdf", "Tong_hop_bai_giang.pdf", 2_400_000L, false);
         });
         menu.add(sampleFile);
 
         JMenuItem failFile = new JMenuItem("Gửi tệp mẫu thất bại (Màn 09 demo)");
         failFile.addActionListener(e -> {
-            Conversation c = currentConversation();
-            String chan = (c != null && c.isGroup()) ? selectedChannel : "";
-            String convId = selectedConversationId;
-            CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, "architecture-chat-flow-v2.png", 2_400_000L, true))
-                    .thenRun(() -> SwingUtilities.invokeLater(this::rebuildTranscript));
+            sendAttachmentAsync("architecture-chat-flow-v2.png", "architecture-chat-flow-v2.png", 2_400_000L, true);
         });
         menu.add(failFile);
 
@@ -1778,6 +1762,74 @@ public final class ChatWorkspace extends JPanel {
         composer.requestFocusInWindow();
 
         sendTextAsync(text);
+    }
+
+    private void sendAttachmentAsync(String filePath, String fileName, long fileSize, boolean failed) {
+        if (selectedConversationId == null) {
+            return;
+        }
+        final String convId = selectedConversationId;
+        Conversation conv = currentConversation();
+        final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
+        final String displayName = (fileName != null && !fileName.isBlank()) ? fileName : new File(filePath).getName();
+
+        // 1. Optimistic UI update: immediately append attachment to transcript
+        String optId = "opt_" + UUID.randomUUID();
+        ChatMessage optimisticMsg = new ChatMessage(
+                optId,
+                convId,
+                chan,
+                user.id(),
+                user.displayName(),
+                user.initials(),
+                "Đã gửi tệp: " + displayName,
+                java.time.LocalDateTime.now(),
+                true,
+                false,
+                false,
+                displayName,
+                fileSize,
+                failed
+        );
+        String key = transcriptCacheKey(convId, chan);
+        List<ChatMessage> list = messageCache.computeIfAbsent(key, k -> new ArrayList<>());
+        synchronized (list) {
+            list.add(optimisticMsg);
+        }
+        renderTranscriptRows(new ArrayList<>(list), chan);
+        showHint("Đang tải tệp lên máy chủ...", DiscordTheme.WARNING);
+
+        // 2. Send over TCP in background thread
+        CompletableFuture.supplyAsync(() -> chatService.sendAttachment(convId, chan, user, filePath, fileSize, failed))
+                .thenAccept(confirmed -> SwingUtilities.invokeLater(() -> {
+                    String cacheKey = transcriptCacheKey(convId, chan);
+                    List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                    synchronized (currentList) {
+                        currentList.removeIf(m -> m.id().equals(optId));
+                        boolean alreadyThere = currentList.stream().anyMatch(m -> m.id().equals(confirmed.id()));
+                        if (!alreadyThere) {
+                            currentList.add(confirmed);
+                        }
+                    }
+                    if (convId.equals(selectedConversationId)) {
+                        renderTranscriptRows(new ArrayList<>(currentList), chan);
+                    }
+                    showHint("Đã gửi tệp đính kèm thành công", DiscordTheme.SUCCESS);
+                }))
+                .exceptionally(ex -> {
+                    SwingUtilities.invokeLater(() -> {
+                        String cacheKey = transcriptCacheKey(convId, chan);
+                        List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                        synchronized (currentList) {
+                            currentList.removeIf(m -> m.id().equals(optId));
+                        }
+                        if (convId.equals(selectedConversationId)) {
+                            renderTranscriptRows(new ArrayList<>(currentList), chan);
+                        }
+                        showHint("Lỗi gửi tệp: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()), DiscordTheme.DANGER);
+                    });
+                    return null;
+                });
     }
 
     private void sendTextAsync(String text) {

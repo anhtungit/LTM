@@ -71,6 +71,11 @@ final class MessageRow extends JPanel {
         body.setOpaque(false);
         if (beginsSenderGroup) {
             body.add(buildAuthorRow(message), BorderLayout.NORTH);
+        } else if (isMe && !message.recalled()) {
+            JPanel compactToolbarHolder = new JPanel(new BorderLayout());
+            compactToolbarHolder.setOpaque(false);
+            compactToolbarHolder.add(actionToolbar, BorderLayout.WEST);
+            body.add(compactToolbarHolder, BorderLayout.NORTH);
         }
 
         contentHolder.setOpaque(false);
@@ -78,11 +83,34 @@ final class MessageRow extends JPanel {
         body.add(contentHolder, BorderLayout.CENTER);
         add(body, BorderLayout.CENTER);
 
-        addMouseListener(new MouseAdapter() {
+        // Populate actionToolbar for message from current user
+        if (isMe && !message.recalled()) {
+            actionToolbar.setOpaque(false);
+            actionToolbar.setVisible(false);
+            actionToolbar.removeAll();
+
+            if (!message.hasAttachment()) {
+                JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
+                actionToolbar.add(editBtn);
+            }
+            JButton recallBtn = createToolbarButton("arrow-clockwise.svg", "Thu hồi tin nhắn", () -> {
+                if (listener != null) listener.onRecall(message);
+            });
+            recallBtn.setToolTipText("Thu hồi tin nhắn");
+            JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
+                if (listener != null) listener.onDelete(message);
+            });
+            actionToolbar.add(recallBtn);
+            actionToolbar.add(deleteBtn);
+        }
+
+        MouseAdapter hoverAdapter = new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
                 if (!isEditing && message.fromCurrentUser() && !message.recalled()) {
                     actionToolbar.setVisible(true);
+                    actionToolbar.revalidate();
+                    actionToolbar.repaint();
                 }
             }
 
@@ -90,31 +118,20 @@ final class MessageRow extends JPanel {
             public void mouseExited(MouseEvent e) {
                 if (!contains(e.getPoint())) {
                     actionToolbar.setVisible(false);
+                    actionToolbar.revalidate();
+                    actionToolbar.repaint();
                 }
             }
-        });
+        };
+        addMouseListener(hoverAdapter);
+        body.addMouseListener(hoverAdapter);
+        contentHolder.addMouseListener(hoverAdapter);
     }
 
     private JPanel buildAuthorRow(ChatMessage message) {
         JPanel authorRow = new JPanel(new BorderLayout(8, 0));
         authorRow.setOpaque(false);
         boolean isMe = message.fromCurrentUser();
-
-        actionToolbar.setOpaque(false);
-        actionToolbar.setVisible(false);
-
-        if (isMe && !message.recalled()) {
-            JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
-            JButton recallBtn = createToolbarButton("x.svg", "Thu hồi tin nhắn", () -> {
-                if (listener != null) listener.onRecall(message);
-            });
-            JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
-                if (listener != null) listener.onDelete(message);
-            });
-            actionToolbar.add(editBtn);
-            actionToolbar.add(recallBtn);
-            actionToolbar.add(deleteBtn);
-        }
 
         if (isMe) {
             JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -155,7 +172,6 @@ final class MessageRow extends JPanel {
             left.add(time);
 
             authorRow.add(left, BorderLayout.WEST);
-            authorRow.add(actionToolbar, BorderLayout.EAST);
         }
 
         return authorRow;
