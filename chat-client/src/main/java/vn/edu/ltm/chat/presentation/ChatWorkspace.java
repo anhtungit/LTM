@@ -126,6 +126,7 @@ public final class ChatWorkspace extends JPanel {
     private String filter = "";
 
     private boolean loadingConversations = false;
+    private boolean userManuallyToggledPane = false;
 
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
@@ -151,7 +152,7 @@ public final class ChatWorkspace extends JPanel {
         add(buildRail(), BorderLayout.WEST);
         add(body, BorderLayout.CENTER);
 
-        setMinimumSize(new Dimension(960, 620));
+        setMinimumSize(new Dimension(780, 520));
         installSearchShortcut();
 
         if (!conversations.isEmpty()) {
@@ -489,7 +490,11 @@ public final class ChatWorkspace extends JPanel {
         return sidebar;
     }
 
-    private void rebuildGroupChannels(Conversation group) {
+    private void rebuildGroupChannels(Conversation initialGroup) {
+        Conversation latest = currentConversation();
+        final Conversation group = (latest != null && latest.id().equals(initialGroup.id()))
+                ? latest
+                : initialGroup;
         groupChannelsPanel.removeAll();
         groupSidebarTitle.setText(group.displayName());
 
@@ -524,18 +529,13 @@ public final class ChatWorkspace extends JPanel {
             row.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 6));
             row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-            JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-            left.setOpaque(false);
-            JLabel hashIcon = new JLabel(IconFactory.phosphor("hash.svg", 15,
-                    active ? Color.WHITE : DiscordTheme.TEXT_MUTED));
-            left.add(hashIcon);
-
-            JLabel nameLbl = new JLabel(chan);
-            nameLbl.setFont(active ? DiscordTheme.bold(13f) : DiscordTheme.semibold(13f));
-            nameLbl.setForeground(active ? Color.WHITE : new Color(0xAE, 0xB0, 0xB6));
-            left.add(nameLbl);
-            row.add(left, BorderLayout.CENTER);
-
+            JLabel chanLbl = new JLabel(chan, IconFactory.phosphor("hash.svg", 15,
+                    active ? Color.WHITE : DiscordTheme.TEXT_MUTED), SwingConstants.LEFT);
+            chanLbl.setIconTextGap(6);
+            chanLbl.setFont(active ? DiscordTheme.bold(13f) : DiscordTheme.semibold(13f));
+            chanLbl.setForeground(active ? Color.WHITE : new Color(0xAE, 0xB0, 0xB6));
+            chanLbl.setVerticalAlignment(SwingConstants.CENTER);
+            row.add(chanLbl, BorderLayout.CENTER);
             if (group.channels().size() > 1) {
                 JButton delBtn = new JButton(IconFactory.phosphor("trash.svg", 13, DiscordTheme.TEXT_MUTED));
                 delBtn.setContentAreaFilled(false);
@@ -551,15 +551,19 @@ public final class ChatWorkspace extends JPanel {
                         Conversation updated = group.withRemovedChannel(chan);
                         updateConversationInList(updated);
                         if (selectedChannel.equals(chan)) {
-                            selectedChannel = updated.channels().getFirst();
+                            selectedChannel = updated.channels().isEmpty() ? "chung" : updated.channels().getFirst();
                         }
-                        selectConversation(updated);
+                        conversationTitle.setText("#" + selectedChannel);
+                        showChatView();
+                        rebuildTranscript();
+                        rebuildInfoPane(updated);
+                        rebuildGroupChannels(updated);
                     }
                 });
                 row.add(delBtn, BorderLayout.EAST);
             }
 
-            row.addMouseListener(new MouseAdapter() {
+            MouseAdapter rowClick = new MouseAdapter() {
                 @Override
                 public void mouseEntered(MouseEvent e) {
                     if (!active) {
@@ -585,8 +589,9 @@ public final class ChatWorkspace extends JPanel {
                     rebuildInfoPane(group);
                     rebuildGroupChannels(group);
                 }
-            });
-
+            };
+            row.addMouseListener(rowClick);
+            chanLbl.addMouseListener(rowClick);
             groupChannelsPanel.add(row);
             groupChannelsPanel.add(Box.createVerticalStrut(2));
         }
@@ -623,16 +628,12 @@ public final class ChatWorkspace extends JPanel {
             vRow.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 6));
             vRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-            JPanel vLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-            vLeft.setOpaque(false);
-            JLabel vIcon = new JLabel(IconFactory.phosphor("headset.svg", 15, DiscordTheme.SUCCESS));
-            vLeft.add(vIcon);
-
-            JLabel vName = new JLabel(vChan);
-            vName.setFont(DiscordTheme.semibold(13f));
-            vName.setForeground(new Color(0xAE, 0xB0, 0xB6));
-            vLeft.add(vName);
-            vRow.add(vLeft, BorderLayout.CENTER);
+            JLabel vChanLbl = new JLabel(vChan, IconFactory.phosphor("headset.svg", 15, DiscordTheme.SUCCESS), SwingConstants.LEFT);
+            vChanLbl.setIconTextGap(6);
+            vChanLbl.setFont(DiscordTheme.semibold(13f));
+            vChanLbl.setForeground(new Color(0xAE, 0xB0, 0xB6));
+            vChanLbl.setVerticalAlignment(SwingConstants.CENTER);
+            vRow.add(vChanLbl, BorderLayout.CENTER);
 
             if (group.voiceChannels().size() > 1) {
                 JButton delVBtn = new JButton(IconFactory.phosphor("trash.svg", 13, DiscordTheme.TEXT_MUTED));
@@ -641,15 +642,21 @@ public final class ChatWorkspace extends JPanel {
                 delVBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 delVBtn.setToolTipText("Xóa kênh gặp " + vChan);
                 delVBtn.addActionListener(e -> {
-                    chatService.removeVoiceChannel(group.id(), vChan);
-                    Conversation updated = group.withRemovedVoiceChannel(vChan);
-                    updateConversationInList(updated);
-                    rebuildGroupChannels(updated);
+                    int confirm = JOptionPane.showConfirmDialog(this,
+                            "Bạn có chắc muốn xóa kênh gặp " + vChan + "?", "Xác nhận xóa kênh",
+                            JOptionPane.YES_NO_OPTION);
+                    if (confirm == JOptionPane.YES_OPTION) {
+                        chatService.removeVoiceChannel(group.id(), vChan);
+                        Conversation updated = group.withRemovedVoiceChannel(vChan);
+                        updateConversationInList(updated);
+                        rebuildInfoPane(updated);
+                        rebuildGroupChannels(updated);
+                    }
                 });
                 vRow.add(delVBtn, BorderLayout.EAST);
             }
 
-            vRow.addMouseListener(new MouseAdapter() {
+            MouseAdapter vRowClick = new MouseAdapter() {
                 @Override
                 public void mouseEntered(MouseEvent e) {
                     vRow.setBackground(DiscordTheme.HOVER);
@@ -666,7 +673,9 @@ public final class ChatWorkspace extends JPanel {
                 public void mouseClicked(MouseEvent e) {
                     showMeetLobby();
                 }
-            });
+            };
+            vRow.addMouseListener(vRowClick);
+            vChanLbl.addMouseListener(vRowClick);
 
             groupChannelsPanel.add(vRow);
             groupChannelsPanel.add(Box.createVerticalStrut(2));
@@ -701,7 +710,11 @@ public final class ChatWorkspace extends JPanel {
             Conversation updated = group.withAddedChannel(sanitized);
             updateConversationInList(updated);
             selectedChannel = sanitized;
-            selectConversation(updated);
+            conversationTitle.setText("#" + selectedChannel);
+            showChatView();
+            rebuildTranscript();
+            rebuildInfoPane(updated);
+            rebuildGroupChannels(updated);
         }
     }
 
@@ -922,7 +935,32 @@ public final class ChatWorkspace extends JPanel {
 
         chatArea.add(messageColumn, BorderLayout.CENTER);
         chatArea.add(buildInfoPane(), BorderLayout.EAST);
+
+        chatArea.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                int w = chatArea.getWidth();
+                if (!userManuallyToggledPane) {
+                    boolean shouldShow = w >= 600;
+                    if (infoPane.isVisible() != shouldShow) {
+                        infoPane.setVisible(shouldShow);
+                        chatArea.revalidate();
+                    }
+                } else if (w < 400 && infoPane.isVisible()) {
+                    infoPane.setVisible(false);
+                    chatArea.revalidate();
+                }
+            }
+        });
+
         return chatArea;
+    }
+
+    private void toggleInfoPane() {
+        userManuallyToggledPane = true;
+        infoPane.setVisible(!infoPane.isVisible());
+        revalidate();
+        repaint();
     }
 
     private JComponent buildChatHeader() {
@@ -935,6 +973,7 @@ public final class ChatWorkspace extends JPanel {
 
         JPanel identity = new JPanel(new BorderLayout(11, 0));
         identity.setOpaque(false);
+        identity.setMinimumSize(new Dimension(0, 0));
 
         headerAvatarHolder.setOpaque(false);
         identity.add(headerAvatarHolder, BorderLayout.WEST);
@@ -942,18 +981,21 @@ public final class ChatWorkspace extends JPanel {
         JPanel titleStack = new JPanel();
         titleStack.setOpaque(false);
         titleStack.setLayout(new BoxLayout(titleStack, BoxLayout.Y_AXIS));
+        titleStack.setMinimumSize(new Dimension(0, 0));
         conversationTitle.setFont(DiscordTheme.extrabold(15f));
         conversationTitle.setForeground(DiscordTheme.TEXT_PRIMARY);
         conversationTitle.setAlignmentX(LEFT_ALIGNMENT);
+        conversationTitle.setMinimumSize(new Dimension(0, 0));
         padRight(conversationTitle);
         conversationSubtitle.setFont(DiscordTheme.font(11f));
         conversationSubtitle.setForeground(DiscordTheme.TEXT_SECONDARY);
         conversationSubtitle.setAlignmentX(LEFT_ALIGNMENT);
+        conversationSubtitle.setMinimumSize(new Dimension(0, 0));
         titleStack.add(conversationTitle);
         titleStack.add(Box.createVerticalStrut(1));
         titleStack.add(conversationSubtitle);
         identity.add(titleStack, BorderLayout.CENTER);
-        header.add(identity, BorderLayout.WEST);
+        header.add(identity, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         actions.setOpaque(false);
@@ -969,6 +1011,10 @@ public final class ChatWorkspace extends JPanel {
         JButton headerInbox = iconButton("envelope-simple-open.svg", "Hộp thư thông báo (Canvas 04)", 18, DiscordTheme.TEXT_SECONDARY);
         headerInbox.addActionListener(e -> openInboxDialog());
         actions.add(headerInbox);
+
+        JButton memberToggle = iconButton("users.svg", "Ẩn/hiện danh sách thành viên", 18, DiscordTheme.TEXT_SECONDARY);
+        memberToggle.addActionListener(e -> toggleInfoPane());
+        actions.add(memberToggle);
 
         actions.add(Box.createHorizontalStrut(6));
         actions.add(connectionBadge());
@@ -1091,12 +1137,14 @@ public final class ChatWorkspace extends JPanel {
                 BorderFactory.createEmptyBorder(5, 10, 6, 10)));
         composerHint.setFont(DiscordTheme.font(10f));
         composerHint.setForeground(DiscordTheme.TEXT_MUTED);
+        composerHint.setMinimumSize(new Dimension(0, 0));
         padRight(composerHint);
         footer.add(composerHint, BorderLayout.CENTER);
         JLabel keys = new JLabel("Enter để gửi · Shift + Enter xuống dòng");
         keys.setFont(DiscordTheme.font(10f));
         keys.setForeground(DiscordTheme.TEXT_MUTED);
         keys.setHorizontalAlignment(SwingConstants.RIGHT);
+        keys.setMinimumSize(new Dimension(0, 0));
         padRight(keys);
         footer.add(keys, BorderLayout.EAST);
         shell.add(footer, BorderLayout.SOUTH);

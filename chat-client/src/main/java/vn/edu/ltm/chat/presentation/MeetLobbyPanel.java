@@ -11,6 +11,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
@@ -201,35 +202,42 @@ public final class MeetLobbyPanel extends JPanel {
     }
 
     private JPanel buildRightSidebar() {
-        JPanel pane = new JPanel();
+        JPanel pane = new JPanel(new BorderLayout());
         pane.setBackground(DiscordTheme.SIDEBAR);
         pane.setPreferredSize(new Dimension(220, 0));
         pane.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 1, 0, 0, DiscordTheme.HAIRLINE),
-                BorderFactory.createEmptyBorder(16, 16, 16, 16)
+                BorderFactory.createEmptyBorder(16, 14, 16, 14)
         ));
-        pane.setLayout(new BoxLayout(pane, BoxLayout.Y_AXIS));
+
+        JPanel content = new JPanel();
+        content.setOpaque(false);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 
         JLabel title = new JLabel("ĐANG Ở TRONG PHÒNG");
-        title.setFont(DiscordTheme.bold(11f));
+        title.setFont(DiscordTheme.extrabold(10f));
         title.setForeground(DiscordTheme.TEXT_MUTED);
-        pane.add(title);
-        pane.add(Box.createVerticalStrut(12));
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(title);
+        content.add(Box.createVerticalStrut(12));
 
-        pane.add(buildMemberTile("MA", "Minh Anh", "Mẫu · đang trực tuyến"));
-        pane.add(Box.createVerticalStrut(8));
-        pane.add(buildMemberTile("KL", "Khánh Linh", "Mẫu · đang trực tuyến"));
-        pane.add(Box.createVerticalStrut(8));
-        pane.add(buildMemberTile("HP", "Hữu Phúc", "Mẫu · đang trực tuyến"));
+        content.add(buildMemberTile("MA", "Minh Anh", "Mẫu · đang trực tuyến"));
+        content.add(Box.createVerticalStrut(8));
+        content.add(buildMemberTile("KL", "Khánh Linh", "Mẫu · đang trực tuyến"));
+        content.add(Box.createVerticalStrut(8));
+        content.add(buildMemberTile("HP", "Hữu Phúc", "Mẫu · đang trực tuyến"));
 
-        pane.add(Box.createVerticalGlue());
+        pane.add(content, BorderLayout.NORTH);
         return pane;
     }
 
     private JPanel buildMemberTile(String initials, String name, String status) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        JPanel row = new JPanel(new BorderLayout(8, 0));
         row.setOpaque(false);
-        row.add(new AvatarBadge(initials, name, 28));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+        row.setPreferredSize(new Dimension(190, 36));
+        row.add(new AvatarBadge(initials, name, 28, DiscordTheme.SUCCESS, DiscordTheme.SIDEBAR, true), BorderLayout.WEST);
 
         JPanel info = new JPanel();
         info.setOpaque(false);
@@ -238,14 +246,16 @@ public final class MeetLobbyPanel extends JPanel {
         JLabel nameLbl = new JLabel(name);
         nameLbl.setFont(DiscordTheme.semibold(12f));
         nameLbl.setForeground(Color.WHITE);
+        nameLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
         info.add(nameLbl);
 
         JLabel statLbl = new JLabel(status);
         statLbl.setFont(DiscordTheme.font(10f));
         statLbl.setForeground(DiscordTheme.TEXT_MUTED);
+        statLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
         info.add(statLbl);
 
-        row.add(info);
+        row.add(info, BorderLayout.CENTER);
         return row;
     }
 }

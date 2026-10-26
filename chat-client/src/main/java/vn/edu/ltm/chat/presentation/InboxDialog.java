@@ -12,13 +12,17 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -35,8 +39,35 @@ public final class InboxDialog extends JDialog {
             boolean unread
     ) {}
 
+    private static final class TrackingPanel extends JPanel implements Scrollable {
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 64;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
+    }
+
     private final List<NotificationItem> items = new ArrayList<>();
-    private final JPanel listPanel = new JPanel();
+    private final JPanel listPanel = new TrackingPanel();
     private final Consumer<NotificationItem> onSelectNotification;
     private boolean filterUnreadOnly = false;
     private final JLabel unreadCountLabel = new JLabel("3 mới");
@@ -63,7 +94,7 @@ public final class InboxDialog extends JDialog {
         container.add(buildFooter(), BorderLayout.SOUTH);
 
         setContentPane(container);
-        setSize(440, 560);
+        setSize(480, 560);
         setLocationRelativeTo(parent);
     }
 
@@ -167,6 +198,7 @@ public final class InboxDialog extends JDialog {
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         scroll.setBorder(null);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
         content.add(scroll, BorderLayout.CENTER);
 
@@ -203,6 +235,7 @@ public final class InboxDialog extends JDialog {
                 BorderFactory.createEmptyBorder(10, 10, 10, 10)
         ));
         row.setLayout(new BorderLayout(10, 4));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         AvatarBadge avatar = new AvatarBadge(item.senderInitials(), item.senderName(), 32);
         row.add(avatar, BorderLayout.WEST);
@@ -232,7 +265,7 @@ public final class InboxDialog extends JDialog {
         type.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
         center.add(type);
 
-        WrappedTextArea snippet = new WrappedTextArea(item.snippet(), 310);
+        WrappedTextArea snippet = new WrappedTextArea(item.snippet(), 280);
         snippet.setFont(DiscordTheme.font(11f));
         snippet.setForeground(DiscordTheme.TEXT_SECONDARY);
         center.add(snippet);
@@ -243,6 +276,7 @@ public final class InboxDialog extends JDialog {
         openBtn.setFont(DiscordTheme.bold(11f));
         openBtn.setForeground(Color.WHITE);
         openBtn.setBackground(DiscordTheme.ACCENT);
+        openBtn.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
         openBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         openBtn.addActionListener(e -> {
             if (onSelectNotification != null) {

@@ -34,7 +34,7 @@ public final class AppController {
     public void start() {
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         Rectangle usableBounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
-        frame.setMinimumSize(new Dimension(Math.min(980, usableBounds.width), Math.min(620, usableBounds.height)));
+        frame.setMinimumSize(new Dimension(Math.min(780, usableBounds.width), Math.min(520, usableBounds.height)));
         frame.setSize(Math.min(1360, usableBounds.width), Math.min(900, usableBounds.height));
         frame.setLocationRelativeTo(null);
         viewHost.setBorder(BorderFactory.createEmptyBorder());
