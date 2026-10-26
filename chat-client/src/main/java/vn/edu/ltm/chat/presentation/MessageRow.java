@@ -24,6 +24,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.Insets;
 import java.awt.MouseInfo;
 import java.awt.Point;
@@ -70,6 +71,7 @@ final class MessageRow extends JPanel {
     private final Timer hideToolbarTimer;
     private final JLabel compactTimeLabel;
     private final MouseAdapter hoverAdapter;
+    private boolean isHovered = false;
     private WrappedTextArea normalText;
     private boolean isEditing = false;
     private int currentWrapWidth;
@@ -119,9 +121,13 @@ final class MessageRow extends JPanel {
             compactTimeLabel = new JLabel(COMPACT_TIME_FORMAT.format(message.sentAt()), SwingConstants.RIGHT);
             compactTimeLabel.setFont(DiscordTheme.font(10f));
             compactTimeLabel.setForeground(DiscordTheme.TEXT_MUTED);
-            compactTimeLabel.setPreferredSize(new Dimension(AVATAR_SIZE, 18));
             compactTimeLabel.setVisible(false);
-            add(compactTimeLabel, BorderLayout.WEST);
+
+            JPanel westHolder = new JPanel(new BorderLayout());
+            westHolder.setOpaque(false);
+            westHolder.setPreferredSize(new Dimension(AVATAR_SIZE, 18));
+            westHolder.add(compactTimeLabel, BorderLayout.CENTER);
+            add(westHolder, BorderLayout.WEST);
         }
 
         body.setOpaque(false);
@@ -147,11 +153,7 @@ final class MessageRow extends JPanel {
             @Override
             public void mouseEntered(MouseEvent e) {
                 hideToolbarTimer.stop();
-                if (!isEditing && !MessageRow.this.message.recalled()) {
-                    if (!actionToolbar.isVisible()) {
-                        actionToolbar.setVisible(true);
-                    }
-                }
+                showToolbar();
             }
 
             @Override
@@ -166,8 +168,25 @@ final class MessageRow extends JPanel {
         attachHoverRecursively(this);
     }
 
+    public void showToolbar() {
+        if (isEditing || message.recalled()) return;
+        if (activeHoveredRow != null && activeHoveredRow != this) {
+            activeHoveredRow.hideToolbar();
+        }
+        activeHoveredRow = this;
+        isHovered = true;
+        if (!actionToolbar.isVisible()) {
+            actionToolbar.setVisible(true);
+        }
+        if (compactTimeLabel != null) {
+            compactTimeLabel.setVisible(true);
+        }
+        repaint();
+    }
+
     public void hideToolbar() {
         hideToolbarTimer.stop();
+        isHovered = false;
         if (actionToolbar.isVisible()) {
             actionToolbar.setVisible(false);
         }
@@ -175,6 +194,15 @@ final class MessageRow extends JPanel {
             compactTimeLabel.setVisible(false);
         }
         repaint();
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        if (isHovered && !isEditing && !message.recalled()) {
+            g.setColor(new Color(0x2E, 0x30, 0x35, 120));
+            g.fillRect(0, 0, getWidth(), getHeight());
+        }
+        super.paintComponent(g);
     }
 
     private JPanel buildAuthorRow(ChatMessage message) {
@@ -242,9 +270,19 @@ final class MessageRow extends JPanel {
         // Re-setup actionToolbar buttons according to current message state
         actionToolbar.removeAll();
         if (!message.recalled()) {
-            JButton reactBtn = createToolbarButton("smiley.svg", "Thả biểu cảm", null);
+            actionToolbar.add(createEmojiButton("1f44d", "👍", "Thích (Like)"));
+            actionToolbar.add(createEmojiButton("2764", "❤️", "Yêu thích (Heart)"));
+            actionToolbar.add(createEmojiButton("1f602", "😂", "Haha"));
+
+            JButton reactBtn = createToolbarButton("smiley.svg", "Thêm biểu cảm", null);
             reactBtn.addActionListener(e -> showQuickReactionPopup(reactBtn));
             actionToolbar.add(reactBtn);
+
+            JButton replyBtn = createToolbarButton("arrow-u-up-left.svg", "Trả lời", () -> {
+                if (listener != null) listener.onReply(message);
+            });
+            actionToolbar.add(replyBtn);
+
             if (isMe) {
                 if (!message.hasAttachment()) {
                     JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
@@ -303,29 +341,30 @@ final class MessageRow extends JPanel {
             stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
             stack.setOpaque(false);
 
-            JPanel rowWrapper = new JPanel(new FlowLayout(isMe ? FlowLayout.RIGHT : FlowLayout.LEFT, 6, 0));
+            JPanel rowWrapper = new JPanel(new BorderLayout(8, 0));
             rowWrapper.setOpaque(false);
-            if (isMe) {
-                rowWrapper.add(actionToolbar);
-                rowWrapper.add(mainContentComp);
-            } else {
-                rowWrapper.add(mainContentComp);
-                rowWrapper.add(actionToolbar);
+            rowWrapper.add(mainContentComp, BorderLayout.WEST);
+
+            if (!body.isAncestorOf(actionToolbar)) {
+                JPanel tbWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+                tbWrapper.setOpaque(false);
+                tbWrapper.add(actionToolbar);
+                rowWrapper.add(tbWrapper, BorderLayout.EAST);
             }
-            rowWrapper.setAlignmentX(isMe ? 1.0f : 0.0f);
+            rowWrapper.setAlignmentX(0.0f);
             stack.add(rowWrapper);
 
             if (hasAttachment && !isDefaultAttachmentText) {
                 JPanel attachHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
                 attachHolder.setOpaque(false);
                 attachHolder.add(buildAttachmentCard());
-                attachHolder.setAlignmentX(isMe ? 1.0f : 0.0f);
+                attachHolder.setAlignmentX(0.0f);
                 stack.add(attachHolder);
             }
 
-            JComponent reactionsRow = buildReactionsRow(isMe);
+            JComponent reactionsRow = buildReactionsRow();
             if (reactionsRow != null) {
-                reactionsRow.setAlignmentX(isMe ? 1.0f : 0.0f);
+                reactionsRow.setAlignmentX(0.0f);
                 stack.add(reactionsRow);
             }
 
@@ -421,13 +460,13 @@ final class MessageRow extends JPanel {
         });
     }
 
-    private JComponent buildReactionsRow(boolean isMe) {
+    private JComponent buildReactionsRow() {
         Map<String, java.util.List<String>> reactions = message.reactions();
         if (reactions == null || reactions.isEmpty()) {
             return null;
         }
 
-        JPanel row = new JPanel(new FlowLayout(isMe ? FlowLayout.RIGHT : FlowLayout.LEFT, 4, 2));
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
         row.setOpaque(false);
 
         for (Map.Entry<String, java.util.List<String>> entry : reactions.entrySet()) {
