@@ -366,6 +366,56 @@ class ChatServerTest {
         }
     }
 
+    @Test
+    void supportsReactMessageAndPersistsAcrossRequests() throws Exception {
+        try (Socket s1 = new Socket("127.0.0.1", port);
+             BufferedReader in1 = new BufferedReader(new InputStreamReader(s1.getInputStream(), StandardCharsets.UTF_8));
+             PrintWriter out1 = new PrintWriter(new OutputStreamWriter(s1.getOutputStream(), StandardCharsets.UTF_8), true)) {
+
+            out1.println(new Packet("REGISTER_REQ", "r-1")
+                    .put("email", "react_user@example.com")
+                    .put("password", "secret")
+                    .put("displayName", "React User").toJsonLine());
+            Packet regRes = readNextNonStatus(in1);
+            assertTrue(regRes.isOk());
+            UserDto u = regRes.getObj("user", UserDto.class);
+
+            // Send a DM to an-nguyen
+            out1.println(new Packet("SEND_MSG_REQ", "s-1")
+                    .put("conversationId", "an-nguyen")
+                    .put("channel", "")
+                    .put("senderId", u.id())
+                    .put("senderName", u.displayName())
+                    .put("senderInitials", "RU")
+                    .put("content", "Test react emoji").toJsonLine());
+            Packet sendRes = readNextNonStatus(in1);
+            assertTrue(sendRes.isOk());
+            MessageDto msg = sendRes.getObj("message", MessageDto.class);
+
+            // React with emoji
+            out1.println(new Packet("REACT_MSG_REQ", "react-1")
+                    .put("conversationId", "an-nguyen")
+                    .put("userId", u.id())
+                    .put("messageId", msg.id())
+                    .put("emoji", "\uD83D\uDC4D").toJsonLine());
+            Packet reactRes = readNextNonStatus(in1);
+            assertTrue(reactRes.isOk());
+
+            // Fetch chat history
+            out1.println(new Packet("GET_CHAT_HISTORY_REQ", "hist-1")
+                    .put("userId", u.id())
+                    .put("conversationId", "an-nguyen")
+                    .put("channel", "").toJsonLine());
+            Packet histRes = readNextNonStatus(in1);
+            assertTrue(histRes.isOk());
+            MessageDto[] history = histRes.getObj("messages", MessageDto[].class);
+            assertEquals(1, history.length);
+            assertNotNull(history[0].reactions());
+            assertTrue(history[0].reactions().containsKey("\uD83D\uDC4D"), "Reactions should contain emoji but was: " + history[0].reactions());
+            assertTrue(history[0].reactions().get("\uD83D\uDC4D").contains(u.id()));
+        }
+    }
+
     private Packet readNextNonStatus(BufferedReader in) throws Exception {
         while (true) {
             String line = in.readLine();

@@ -43,12 +43,20 @@ public final class DatabaseManager implements AutoCloseable {
 
     static {
         try {
-            Class.forName("org.postgresql.Driver");
-        } catch (ClassNotFoundException ignored) {
+            DriverManager.registerDriver(new org.postgresql.Driver());
+        } catch (Throwable ignored) {
+            try {
+                Class.forName("org.postgresql.Driver");
+            } catch (ClassNotFoundException ignored2) {
+            }
         }
         try {
-            Class.forName("org.sqlite.JDBC");
-        } catch (ClassNotFoundException ignored) {
+            DriverManager.registerDriver(new org.sqlite.JDBC());
+        } catch (Throwable ignored) {
+            try {
+                Class.forName("org.sqlite.JDBC");
+            } catch (ClassNotFoundException ignored2) {
+            }
         }
     }
 

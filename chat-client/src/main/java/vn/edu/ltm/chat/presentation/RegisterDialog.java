@@ -6,6 +6,7 @@ import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
 import javax.swing.BorderFactory;
+import javax.swing.border.Border;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -125,6 +126,7 @@ public final class RegisterDialog extends JDialog {
         label.setForeground(DiscordTheme.TEXT_PRIMARY);
 
         field.setPreferredSize(new Dimension(360, 38));
+        field.setMinimumSize(new Dimension(120, 38));
         field.putClientProperty("JTextField.placeholderText", placeholder);
         DiscordTheme.styleField(field);
 
@@ -153,11 +155,17 @@ public final class RegisterDialog extends JDialog {
 
         RoundedPanel box = new RoundedPanel(8);
         box.setBackground(DiscordTheme.COMPOSER);
-        box.setBorder(BorderFactory.createCompoundBorder(
+        Border defaultBorder = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(DiscordTheme.SEPARATOR, 1),
                 BorderFactory.createEmptyBorder(0, 12, 0, 8)
-        ));
+        );
+        Border focusedBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x5E, 0x68, 0xF7), 1),
+                BorderFactory.createEmptyBorder(0, 12, 0, 8)
+        );
+        box.setBorder(defaultBorder);
         box.setPreferredSize(new Dimension(360, 38));
+        box.setMinimumSize(new Dimension(120, 38));
         box.setLayout(new BorderLayout());
 
         passwordField.putClientProperty("JPasswordField.placeholderText", "Nhập mật khẩu");
@@ -167,6 +175,17 @@ public final class RegisterDialog extends JDialog {
         passwordField.setForeground(DiscordTheme.TEXT_PRIMARY);
         passwordField.setCaretColor(DiscordTheme.TEXT_PRIMARY);
         passwordField.addActionListener(e -> submitRegister());
+        passwordField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusGained(java.awt.event.FocusEvent e) {
+                box.setBorder(focusedBorder);
+            }
+
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) {
+                box.setBorder(defaultBorder);
+            }
+        });
         box.add(passwordField, BorderLayout.CENTER);
 
         passwordVisibilityButton.setIcon(IconFactory.phosphor("eye.svg", 18, DiscordTheme.TEXT_SECONDARY));
