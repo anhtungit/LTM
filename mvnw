@@ -43,6 +43,15 @@ esac
 
 # set JAVACMD and JAVACCMD
 set_java_home() {
+  if [ -z "${JAVA_HOME-}" ]; then
+    if [ -d "/c/Program Files/Apache NetBeans/jdk" ]; then
+      JAVA_HOME="/c/Program Files/Apache NetBeans/jdk"
+    elif [ -d "C:/Program Files/Apache NetBeans/jdk" ]; then
+      JAVA_HOME="C:/Program Files/Apache NetBeans/jdk"
+    elif [ -d "$HOME/.vscode/extensions/redhat.java-1.58.0-win32-x64/jre/25.0.4.1-win32-x86_64" ]; then
+      JAVA_HOME="$HOME/.vscode/extensions/redhat.java-1.58.0-win32-x64/jre/25.0.4.1-win32-x86_64"
+    fi
+  fi
   # For Cygwin and MinGW, ensure paths are in Unix format before anything is touched
   if [ -n "${JAVA_HOME-}" ]; then
     if [ -x "$JAVA_HOME/jre/sh/java" ]; then

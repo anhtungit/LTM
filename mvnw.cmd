@@ -40,6 +40,13 @@
 @SET __MVNW_ARG0_NAME__=
 @SET MVNW_USERNAME=
 @SET MVNW_PASSWORD=
+@IF "%JAVA_HOME%"=="" (
+  @IF EXIST "C:\Program Files\Apache NetBeans\jdk\bin\java.exe" (
+    @SET "JAVA_HOME=C:\Program Files\Apache NetBeans\jdk"
+  ) ELSE IF EXIST "%USERPROFILE%\.vscode\extensions\redhat.java-1.58.0-win32-x64\jre\25.0.4.1-win32-x86_64\bin\java.exe" (
+    @SET "JAVA_HOME=%USERPROFILE%\.vscode\extensions\redhat.java-1.58.0-win32-x64\jre\25.0.4.1-win32-x86_64"
+  )
+)
 @IF NOT "%__MVNW_CMD__%"=="" ("%__MVNW_CMD__%" %*)
 @echo Cannot start maven from wrapper >&2 && exit /b 1
 @GOTO :EOF

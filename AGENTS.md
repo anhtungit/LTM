@@ -47,13 +47,21 @@
 ## 4. Build, Kiểm thử & Quản lý Mã nguồn (Git)
 
 - **Lệnh kiểm thử bắt buộc trước khi hoàn tất công việc**:
-  ```bash
-  JAVA_HOME=/home/dunggawr/.vscode/extensions/redhat.java-1.58.0-linux-x64/jre/25.0.4.1-linux-x86_64 \
-  /home/dunggawr/.m2/wrapper/dists/apache-maven-3.9.16/56ba1f9f/bin/mvn -f chat-server/pom.xml clean test
+  - **Trên Windows (PowerShell / CMD)**:
+    ```powershell
+    .\mvnw.cmd -f chat-server/pom.xml clean test
+    .\mvnw.cmd -f chat-client/pom.xml clean test
+    # Hoặc chạy toàn bộ dự án từ thư mục gốc:
+    .\mvnw.cmd clean test
+    ```
+  - **Trên Linux / WSL**:
+    ```bash
+    JAVA_HOME=/home/dunggawr/.vscode/extensions/redhat.java-1.58.0-linux-x64/jre/25.0.4.1-linux-x86_64 \
+    /home/dunggawr/.m2/wrapper/dists/apache-maven-3.9.16/56ba1f9f/bin/mvn -f chat-server/pom.xml clean test
 
-  JAVA_HOME=/home/dunggawr/.vscode/extensions/redhat.java-1.58.0-linux-x64/jre/25.0.4.1-linux-x86_64 \
-  /home/dunggawr/.m2/wrapper/dists/apache-maven-3.9.16/56ba1f9f/bin/mvn -f chat-client/pom.xml clean test
-  ```
+    JAVA_HOME=/home/dunggawr/.vscode/extensions/redhat.java-1.58.0-linux-x64/jre/25.0.4.1-linux-x86_64 \
+    /home/dunggawr/.m2/wrapper/dists/apache-maven-3.9.16/56ba1f9f/bin/mvn -f chat-client/pom.xml clean test
+    ```
 - **Quy tắc Git**:
   - Viết commit message ngắn gọn theo chuẩn Conventional Commits (`feat(...)`, `fix(...)`, `refactor(...)`).
   - Luôn `git pull --rebase origin main` trước khi push và đồng bộ lên cả hai remote: `origin` (`anhtungit/LTM`) và `dunggawr` (`dunggawr/LTM`).
