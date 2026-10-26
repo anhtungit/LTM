@@ -15,17 +15,19 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FlowLayout;
 import java.awt.Container;
 import java.awt.Insets;
+import java.awt.MouseInfo;
+import java.awt.Point;
+import java.awt.PointerInfo;
+import java.awt.Rectangle;
 import java.awt.Point;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -34,7 +36,17 @@ import java.util.Map;
 
 /** One message row: avatar, author, text, inline editor, file attachment card, and action buttons. */
 final class MessageRow extends JPanel {
-    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static MessageRow activeHoveredRow = null;
+
+    public static void clearActiveHover() {
+        if (activeHoveredRow != null) {
+            activeHoveredRow.hideToolbar();
+            activeHoveredRow = null;
+        }
+    }
+
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("M/d/yy, h:mm a", Locale.ENGLISH);
+    private static final DateTimeFormatter COMPACT_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH);
     private static final int AVATAR_SIZE = 34;
     private static final int AVATAR_GAP = 12;
 
@@ -82,15 +94,21 @@ final class MessageRow extends JPanel {
         setLayout(new BorderLayout(AVATAR_GAP, 0));
         setOpaque(false);
         setAlignmentX(CENTER_ALIGNMENT);
-        setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 7 : 2, 0, 4, 0));
+        setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 7 : 2, 4, 4, 4));
 
         boolean isMe = message.fromCurrentUser();
         if (beginsSenderGroup) {
             AvatarBadge avatar = new AvatarBadge(message.senderInitials(), message.senderId(), AVATAR_SIZE);
             avatar.setToolTipText(isMe ? "Tin nhắn của bạn" : "Tin nhắn từ " + message.senderName());
-            add(avatar, isMe ? BorderLayout.EAST : BorderLayout.WEST);
+            add(avatar, BorderLayout.WEST);
+            compactTimeLabel = null;
         } else {
-            add(Box.createRigidArea(new Dimension(AVATAR_SIZE, 1)), isMe ? BorderLayout.EAST : BorderLayout.WEST);
+            compactTimeLabel = new JLabel(COMPACT_TIME_FORMAT.format(message.sentAt()), SwingConstants.RIGHT);
+            compactTimeLabel.setFont(DiscordTheme.font(10f));
+            compactTimeLabel.setForeground(DiscordTheme.TEXT_MUTED);
+            compactTimeLabel.setPreferredSize(new Dimension(AVATAR_SIZE, 18));
+            compactTimeLabel.setVisible(false);
+            add(compactTimeLabel, BorderLayout.WEST);
         }
 
         body.setOpaque(false);
@@ -140,47 +158,45 @@ final class MessageRow extends JPanel {
         authorRow.setOpaque(false);
         boolean isMe = message.fromCurrentUser();
 
-        if (isMe) {
-            JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            right.setOpaque(false);
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        left.setOpaque(false);
 
-            String timeStr = TIME_FORMAT.format(message.sentAt());
-            if (message.edited()) {
-                timeStr += " (đã sửa)";
-            }
-            JLabel time = new JLabel(timeStr);
-            time.setFont(DiscordTheme.font(10f));
-            time.setForeground(DiscordTheme.TEXT_MUTED);
-            right.add(time);
+        JLabel author = new JLabel(message.senderName() != null ? message.senderName() : (isMe ? "Bạn" : "Người dùng"));
+        author.setFont(DiscordTheme.bold(13.5f));
+        author.setForeground(isMe ? new Color(0x58, 0x65, 0xF2) : Color.WHITE);
+        left.add(author);
 
-            JLabel author = new JLabel("Bạn");
-            author.setFont(DiscordTheme.bold(13f));
-            author.setForeground(new Color(0x58, 0x65, 0xF2));
-            right.add(author);
-
-            authorRow.add(right, BorderLayout.EAST);
-        } else {
-            JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            left.setOpaque(false);
-
-            JLabel author = new JLabel(message.senderName());
-            author.setFont(DiscordTheme.bold(13f));
-            author.setForeground(Color.WHITE);
-            left.add(author);
-
-            String timeStr = TIME_FORMAT.format(message.sentAt());
-            if (message.edited()) {
-                timeStr += " (đã sửa)";
-            }
-            JLabel time = new JLabel(timeStr);
-            time.setFont(DiscordTheme.font(10f));
-            time.setForeground(DiscordTheme.TEXT_MUTED);
-            left.add(time);
-
-            authorRow.add(left, BorderLayout.WEST);
+        String timeStr = TIME_FORMAT.format(message.sentAt());
+        if (message.edited()) {
+            timeStr += " (đã sửa)";
         }
+        JLabel time = new JLabel(timeStr);
+        time.setFont(DiscordTheme.font(10.5f));
+        time.setForeground(DiscordTheme.TEXT_MUTED);
+        left.add(time);
 
+        authorRow.add(left, BorderLayout.WEST);
+
+        JPanel tbWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        tbWrapper.setOpaque(false);
+        tbWrapper.add(actionToolbar);
+        authorRow.add(tbWrapper, BorderLayout.EAST);
         return authorRow;
+    }
+
+    private JButton createEmojiButton(String hex, String emojiChar, String tooltip) {
+        ImageIcon icon = EmojiAssets.getIconByHex(hex, 16);
+        JButton btn = icon != null ? new JButton(icon) : new JButton(IconFactory.phosphor("smiley.svg", 14, DiscordTheme.TEXT_SECONDARY));
+        btn.setToolTipText(tooltip);
+        btn.setContentAreaFilled(false);
+        btn.setBorderPainted(false);
+        btn.setFocusable(false);
+        btn.setMargin(new Insets(1, 3, 1, 3));
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        btn.addActionListener(e -> {
+            if (listener != null) listener.onReaction(message, emojiChar);
+        });
+        return btn;
     }
 
     private JButton createToolbarButton(String iconName, String tooltip, Runnable action) {
@@ -198,7 +214,6 @@ final class MessageRow extends JPanel {
     private void buildNormalContent() {
         contentHolder.removeAll();
         boolean isMe = message.fromCurrentUser();
-        int flowAlign = isMe ? FlowLayout.RIGHT : FlowLayout.LEFT;
 
         // Re-setup actionToolbar buttons according to current message state
         actionToolbar.removeAll();
@@ -226,17 +241,14 @@ final class MessageRow extends JPanel {
         }
 
         if (message.recalled()) {
-            RoundedPanel bubble = new RoundedPanel(12);
-            bubble.setBackground(new Color(0x2B, 0x2D, 0x31));
-            bubble.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
             JLabel recalledLabel = new JLabel("Tin nhắn đã được thu hồi");
             recalledLabel.setFont(DiscordTheme.font(12f).deriveFont(java.awt.Font.ITALIC));
             recalledLabel.setForeground(DiscordTheme.TEXT_MUTED);
-            bubble.add(recalledLabel);
+            recalledLabel.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
 
-            JPanel holder = new JPanel(new FlowLayout(flowAlign, 0, 0));
+            JPanel holder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             holder.setOpaque(false);
-            holder.add(bubble);
+            holder.add(recalledLabel);
             contentHolder.add(holder, BorderLayout.NORTH);
         } else {
             JComponent mainContentComp = null;
@@ -280,7 +292,7 @@ final class MessageRow extends JPanel {
             stack.add(rowWrapper);
 
             if (hasAttachment && !isDefaultAttachmentText) {
-                JPanel attachHolder = new JPanel(new FlowLayout(flowAlign, 0, 4));
+                JPanel attachHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
                 attachHolder.setOpaque(false);
                 attachHolder.add(buildAttachmentCard());
                 attachHolder.setAlignmentX(isMe ? 1.0f : 0.0f);
@@ -448,174 +460,96 @@ final class MessageRow extends JPanel {
     }
 
     private JComponent createBubbleText(String text, boolean isMe) {
-        RoundedPanel bubble = new RoundedPanel(14);
-        bubble.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
-        if (isMe) {
-            bubble.setBackground(DiscordTheme.BLURPLE);
-        } else {
-            bubble.setBackground(new Color(0x2B, 0x2D, 0x31));
-        }
-
-        int maxBubbleWidth = Math.max(80, Math.min(520, currentWrapWidth - 60));
-
-        if (EmojiAssets.containsEmoji(text)) {
-            String html = EmojiAssets.toHtml(text, maxBubbleWidth);
-            if (isMe) {
-                html = html.replace("color:#D9DADE", "color:#FFFFFF");
-            }
-            JLabel emoLabel = new JLabel(html);
-            emoLabel.setBorder(null);
-            bubble.add(emoLabel);
-        } else {
-            normalText = new WrappedTextArea(text, maxBubbleWidth);
-            normalText.setFont(DiscordTheme.font(13.5f));
-            normalText.setForeground(isMe ? Color.WHITE : new Color(0xDB, 0xDE, 0xE1));
-            normalText.setBorder(null);
-            bubble.add(normalText);
-        }
-        return bubble;
+        normalText = new WrappedTextArea(text, Math.max(80, Math.min(520, currentWrapWidth - 60)));
+        normalText.setFont(DiscordTheme.font(13.5f));
+        normalText.setForeground(DiscordTheme.TEXT_PRIMARY);
+        normalText.setOpaque(false);
+        normalText.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        return normalText;
     }
 
-    private JComponent buildStickerCard(String query) {
-        EmojiAssets.StickerItem s = EmojiAssets.findSticker(query);
-        RoundedPanel card = new RoundedPanel(10);
-        card.setLayout(new BorderLayout(10, 0));
-        card.setBackground(new Color(0x23, 0x24, 0x28));
+    private JComponent buildStickerCard(String stickerId) {
+        EmojiAssets.StickerItem item = null;
+        for (EmojiAssets.StickerItem s : EmojiAssets.STICKERS) {
+            if (s.id().equals(stickerId)) {
+                item = s;
+                break;
+            }
+        }
+        if (item == null) {
+            return new JLabel("[Sticker: " + stickerId + "]");
+        }
+
+        RoundedPanel card = new RoundedPanel(8);
+        card.setBackground(new Color(0x2B, 0x2D, 0x31));
         card.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(0x35, 0x37, 0x3C), 1),
+                BorderFactory.createLineBorder(new Color(0x20, 0x22, 0x25), 1),
                 BorderFactory.createEmptyBorder(8, 12, 8, 12)
         ));
-        card.setPreferredSize(new Dimension(200, 72));
-        card.setMaximumSize(new Dimension(200, 72));
+        card.setLayout(new BorderLayout(10, 0));
 
-        String hex = (s != null) ? s.hex() : "1f389";
-        String name = (s != null) ? s.name() : query;
-        String tag = (s != null) ? s.tag() : "Nhãn dán";
-        Color accent = (s != null) ? s.accent() : DiscordTheme.BLURPLE;
+        ImageIcon stickerIcon = EmojiAssets.getIconByHex(item.hex(), 40);
+        JLabel iconLabel = new JLabel(stickerIcon != null ? stickerIcon : IconFactory.phosphor("sticker.svg", 32, item.accent()));
+        card.add(iconLabel, BorderLayout.WEST);
 
-        ImageIcon icon = EmojiAssets.getIconByHex(hex, 48);
-        JLabel iconLbl = new JLabel(icon, SwingConstants.CENTER);
-        card.add(iconLbl, BorderLayout.WEST);
+        JPanel meta = new JPanel();
+        meta.setLayout(new BoxLayout(meta, BoxLayout.Y_AXIS));
+        meta.setOpaque(false);
 
-        JPanel info = new JPanel();
-        info.setOpaque(false);
-        info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+        JLabel nameLbl = new JLabel(item.name());
+        nameLbl.setFont(DiscordTheme.bold(12.5f));
+        nameLbl.setForeground(DiscordTheme.TEXT_PRIMARY);
+        meta.add(nameLbl);
 
-        JLabel title = new JLabel(name);
-        title.setFont(DiscordTheme.bold(12f));
-        title.setForeground(DiscordTheme.TEXT_PRIMARY);
-        info.add(title);
-        info.add(Box.createVerticalStrut(4));
+        JLabel tagLbl = new JLabel(item.tag() + " · Sticker");
+        tagLbl.setFont(DiscordTheme.font(10.5f));
+        tagLbl.setForeground(item.accent());
+        meta.add(tagLbl);
 
-        JLabel tagLbl = new JLabel(" " + tag + " · Sticker ");
-        tagLbl.setFont(DiscordTheme.bold(9f));
-        tagLbl.setForeground(accent);
-        tagLbl.setOpaque(true);
-        tagLbl.setBackground(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 35));
-        info.add(tagLbl);
-
-        card.add(info, BorderLayout.CENTER);
-
-        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        wrapper.setOpaque(false);
-        wrapper.add(card);
-        return wrapper;
+        card.add(meta, BorderLayout.CENTER);
+        return card;
     }
 
     private JComponent buildAttachmentCard() {
         RoundedPanel card = new RoundedPanel(8);
-        boolean failed = message.attachmentFailed();
+        card.setLayout(new BorderLayout(10, 0));
+        card.setBackground(new Color(0x2B, 0x2D, 0x31));
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x20, 0x22, 0x25), 1),
+                BorderFactory.createEmptyBorder(8, 12, 8, 12)
+        ));
 
-        int targetWidth = Math.max(260, Math.min(380, currentWrapWidth - 60));
-        card.setPreferredSize(new Dimension(targetWidth, 54));
-        card.setMaximumSize(new Dimension(targetWidth, 54));
-
-        if (failed) {
-            card.setBackground(new Color(0x2F, 0x22, 0x24));
-            card.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(new Color(0x52, 0x29, 0x2C), 1),
-                    BorderFactory.createEmptyBorder(8, 12, 8, 12)
-            ));
-        } else {
-            card.setBackground(new Color(0x2B, 0x2D, 0x31));
-            card.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1),
-                    BorderFactory.createEmptyBorder(8, 12, 8, 12)
-            ));
-        }
-        card.setLayout(new BorderLayout(12, 0));
-
-        // Icon left
-        JLabel fileIcon = new JLabel(IconFactory.phosphor(failed ? "file-text.svg" : "file-text.svg",
-                24, failed ? DiscordTheme.DANGER : DiscordTheme.ACCENT_SOFT));
+        JLabel fileIcon = new JLabel(IconFactory.phosphor("file-text.svg", 24, DiscordTheme.ACCENT));
         card.add(fileIcon, BorderLayout.WEST);
 
-        // Center info
-        JPanel center = new JPanel();
-        center.setOpaque(false);
-        center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+        JPanel details = new JPanel();
+        details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
+        details.setOpaque(false);
 
-        JPanel nameRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        nameRow.setOpaque(false);
-        JLabel nameLabel = new JLabel(message.attachmentName());
-        nameLabel.setFont(DiscordTheme.bold(12f));
-        nameLabel.setForeground(failed ? new Color(0xFF, 0x96, 0x98) : DiscordTheme.TEXT_PRIMARY);
-        nameRow.add(nameLabel);
+        String fileName = message.attachmentName() != null ? message.attachmentName() : "tệp_đính_kèm";
+        JLabel nameLabel = new JLabel(fileName);
+        nameLabel.setFont(DiscordTheme.semibold(12.5f));
+        nameLabel.setForeground(new Color(0x00, 0xA8, 0xFC));
+        nameLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        details.add(nameLabel);
 
-        if (failed) {
-            JLabel badge = new JLabel(" MẪU ");
-            badge.setOpaque(true);
-            badge.setBackground(new Color(0x3C, 0x3E, 0x44));
-            badge.setForeground(DiscordTheme.TEXT_SECONDARY);
-            badge.setFont(DiscordTheme.bold(9f));
-            nameRow.add(badge);
-        }
-        center.add(nameRow);
+        String sizeStr = formatFileSize(message.attachmentSize());
+        JLabel sizeLabel = new JLabel(sizeStr);
+        sizeLabel.setFont(DiscordTheme.font(10.5f));
+        sizeLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        details.add(sizeLabel);
 
-        String sizeText = formatFileSize(message.attachmentSize());
-        String metaText = failed ? (sizeText + " · Tệp minh họa · Gửi thất bại") : sizeText;
-        JLabel metaLabel = new JLabel(metaText);
-        metaLabel.setFont(DiscordTheme.font(10f));
-        metaLabel.setForeground(failed ? new Color(0xF5, 0x65, 0x65) : DiscordTheme.TEXT_MUTED);
-        metaLabel.setBorder(BorderFactory.createEmptyBorder(2, 4, 0, 0));
-        center.add(metaLabel);
+        card.add(details, BorderLayout.CENTER);
 
-        card.add(center, BorderLayout.CENTER);
-
-        // Right actions
-        if (failed) {
-            JPanel rightActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-            rightActions.setOpaque(false);
-
-            JButton resendBtn = new JButton("Gửi lại", IconFactory.phosphor("arrow-clockwise.svg", 14, new Color(0xFF, 0x96, 0x98)));
-            resendBtn.setFont(DiscordTheme.bold(11f));
-            resendBtn.setForeground(new Color(0xFF, 0x96, 0x98));
-            resendBtn.setContentAreaFilled(false);
-            resendBtn.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
-            resendBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            resendBtn.addActionListener(e -> {
-                if (listener != null) listener.onResend(message);
-            });
-            rightActions.add(resendBtn);
-
-            JButton delBtn = new JButton(IconFactory.phosphor("trash.svg", 14, DiscordTheme.TEXT_MUTED));
-            delBtn.setContentAreaFilled(false);
-            delBtn.setBorderPainted(false);
-            delBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            delBtn.addActionListener(e -> {
-                if (listener != null) listener.onDelete(message);
-            });
-            rightActions.add(delBtn);
-
-            card.add(rightActions, BorderLayout.EAST);
-        } else {
-            JPanel rightActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        if (message.hasAttachment()) {
+            JPanel rightActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
             rightActions.setOpaque(false);
 
             JButton dlBtn = new JButton(IconFactory.phosphor("download-simple.svg", 16, DiscordTheme.TEXT_SECONDARY));
-            dlBtn.setToolTipText("Tải tệp xuống");
+            dlBtn.setToolTipText("Tải tệp về máy");
             dlBtn.setContentAreaFilled(false);
             dlBtn.setBorderPainted(false);
+            dlBtn.setFocusable(false);
             dlBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             dlBtn.addActionListener(e -> {
                 if (listener != null) listener.onDownload(message);

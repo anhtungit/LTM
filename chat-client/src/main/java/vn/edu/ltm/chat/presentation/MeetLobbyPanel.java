@@ -16,9 +16,7 @@ import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
-import java.awt.Insets;
 
 /** Meet channel waiting lobby (Canvas 05). */
 public final class MeetLobbyPanel extends JPanel {

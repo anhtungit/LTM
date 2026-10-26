@@ -21,15 +21,13 @@ import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
-import java.util.HashSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
@@ -58,14 +56,13 @@ public final class DatabaseManager implements AutoCloseable {
     private final String dbUser;
     private final String dbPassword;
     private final boolean isPostgres;
-    private final Path storageDir;
+    private final FileStorageRepository fileStorage;
     private Connection sharedPostgresConn;
 
     public DatabaseManager(String rawPgUrl, String storagePath, boolean isPostgres) {
         this.isPostgres = isPostgres;
-        this.storageDir = Path.of(storagePath);
+        this.fileStorage = new FileStorageRepository(Path.of(storagePath));
         try {
-            Files.createDirectories(this.storageDir);
             String clean = rawPgUrl.replaceFirst("^jdbc:", "");
             URI uri = URI.create(clean);
             String host = uri.getHost();
@@ -113,8 +110,7 @@ public final class DatabaseManager implements AutoCloseable {
             if (dbFile.getParent() != null) {
                 Files.createDirectories(dbFile.getParent());
             }
-            this.storageDir = Path.of(storagePath);
-            Files.createDirectories(this.storageDir);
+            this.fileStorage = new FileStorageRepository(Path.of(storagePath));
             this.jdbcUrl = "jdbc:sqlite:" + dbFile.toAbsolutePath();
             initSchemaAndSeed();
             System.out.println("[DatabaseManager] Sử dụng SQLite local: " + dbFile.toAbsolutePath());
@@ -250,343 +246,18 @@ public final class DatabaseManager implements AutoCloseable {
     }
 
     private void initSchemaAndSeed() throws SQLException {
-        try (Connection conn = connect(); Statement st = conn.createStatement()) {
-            st.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    email TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    display_name TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    bio TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    avatar_path TEXT
-                )
-            """);
-
-            st.execute("""
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id TEXT PRIMARY KEY,
-                    display_name TEXT NOT NULL,
-                    initials TEXT NOT NULL,
-                    about TEXT NOT NULL,
-                    online INTEGER NOT NULL DEFAULT 1,
-                    is_group INTEGER NOT NULL DEFAULT 0,
-                    members_json TEXT NOT NULL,
-                    channels_json TEXT NOT NULL,
-                    voice_channels_json TEXT NOT NULL
-                )
-            """);
-
-            st.execute("""
-                CREATE TABLE IF NOT EXISTS user_dms (
-                    user_id TEXT NOT NULL,
-                    peer_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (user_id, peer_id)
-                )
-            """);
-
-            st.execute("""
-                CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    conversation_id TEXT NOT NULL,
-                    channel TEXT NOT NULL DEFAULT '',
-                    sender_id TEXT NOT NULL,
-                    sender_name TEXT NOT NULL,
-                    sender_initials TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    sent_at TEXT NOT NULL,
-                    edited INTEGER NOT NULL DEFAULT 0,
-                    recalled INTEGER NOT NULL DEFAULT 0,
-                    attachment_name TEXT,
-                    attachment_size INTEGER NOT NULL DEFAULT 0,
-                    attachment_failed INTEGER NOT NULL DEFAULT 0
-                )
-            """);
-
-            st.execute("""
-                CREATE TABLE IF NOT EXISTS message_reactions (
-                    message_id TEXT NOT NULL,
-                    user_id TEXT NOT NULL,
-                    emoji TEXT NOT NULL,
-                    PRIMARY KEY (message_id, user_id, emoji)
-                )
-            """);
-        }
-
-        if (countConversations() == 0) {
-            seedDefaultData();
-        } else {
-            migrateLegacyDmMessages();
-        }
-        migrateGroupMembersToUserIds();
-    }
-
-    private void migrateGroupMembersToUserIds() {
         try (Connection conn = connect()) {
-            Map<String, String> displayNameToId = new HashMap<>();
-            try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT id, display_name FROM users ")) {
-                while (rs.next()) {
-                    String uid = rs.getString("id");
-                    String dname = rs.getString("display_name");
-                    if (dname != null && !dname.isBlank()) {
-                        displayNameToId.putIfAbsent(dname.trim().toLowerCase(Locale.ROOT), uid);
-                    }
-                    if (uid != null && !uid.isBlank()) {
-                        displayNameToId.putIfAbsent(uid.trim().toLowerCase(Locale.ROOT), uid);
-                    }
-                }
-            }
-
-            List<String[]> groupsToUpdate = new ArrayList<>();
-            try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT id, members_json FROM conversations WHERE is_group = 1")) {
-                while (rs.next()) {
-                    String gid = rs.getString("id");
-                    String mJson = rs.getString("members_json");
-                    if ("nhom-ban-than".equals(gid) || "ltm-studio".equals(gid) || "phong-chill".equals(gid)) {
-                        continue;
-                    }
-                    if (mJson != null && !mJson.isBlank()) {
-                        String[] members = GSON.fromJson(mJson, String[].class);
-                        if (members != null) {
-                            List<String> updated = new ArrayList<>();
-                            boolean changed = false;
-                            for (String m : members) {
-                                if (m == null) continue;
-                                String trimmed = m.trim();
-                                String resolvedId = displayNameToId.get(trimmed.toLowerCase(Locale.ROOT));
-                                if (resolvedId != null) {
-                                    if (!resolvedId.equals(trimmed)) {
-                                        changed = true;
-                                    }
-                                    if (!updated.contains(resolvedId)) {
-                                        updated.add(resolvedId);
-                                    }
-                                } else {
-                                    if (!updated.contains(trimmed)) {
-                                        updated.add(trimmed);
-                                    }
-                                }
-                            }
-                            if (changed) {
-                                groupsToUpdate.add(new String[]{gid, GSON.toJson(updated)});
-                            }
-                        }
-                    }
-                }
-            }
-
-            for (String[] g : groupsToUpdate) {
-                try (PreparedStatement ps = conn.prepareStatement("UPDATE conversations SET members_json = ? WHERE id = ?")) {
-                    ps.setString(1, g[1]);
-                    ps.setString(2, g[0]);
-                    ps.executeUpdate();
-                }
-            }
-
-            try (Statement stClean = conn.createStatement()) {
-                stClean.executeUpdate("UPDATE conversations SET online = 0 WHERE is_group = 1");
-                stClean.executeUpdate("UPDATE conversations SET online = 0");
-                stClean.executeUpdate("UPDATE users SET status = 'offline'");
-            }
-        } catch (SQLException ignored) {
+            DatabaseSchemaMigrator.initialize(this, conn);
         }
     }
 
-    private int countConversations() throws SQLException {
-        try (Connection conn = connect();
-             Statement st = conn.createStatement();
-             ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM conversations")) {
-            return rs.next() ? rs.getInt(1) : 0;
-        }
-    }
-
-    private void migrateLegacyDmMessages() throws SQLException {
-        insertUserIfAbsent("mai-phuong", "mai.phuong@example.com", "123456", "Mai Phương",
-                "@maiphuong", "Thiết kế sản phẩm · thích vẽ và chơi game cùng bạn bè.", "online");
-        insertUserIfAbsent("an-nguyen", "an.nguyen@example.com", "123456", "An Nguyễn",
-                "@annguyen", "Lập trình backend · đang thử luồng chat cục bộ.", "offline");
-        insertUserIfAbsent("duc-khanh", "duc.khanh@example.com", "123456", "Đức Khánh",
-                "@duckhanh", "Bạn học chung · kiểm tra phần giao diện.", "online");
-        insertUserIfAbsent("ha-linh", "ha.linh@example.com", "123456", "Hà Linh",
-                "@halinh", "Bạn học chung · trò chuyện demo.", "offline");
-
-        Set<String> groupIds = new HashSet<>();
-        for (ConversationDto c : listConversations()) {
-            if (c.isGroup()) {
-                groupIds.add(c.id());
-            }
-        }
-
-        try (Connection conn = connect()) {
-            List<String[]> toMigrate = new ArrayList<>();
-            try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT id, conversation_id, sender_id, sent_at FROM messages")) {
-                while (rs.next()) {
-                    String msgId = rs.getString("id");
-                    String convId = rs.getString("conversation_id");
-                    String senderId = rs.getString("sender_id");
-                    String sentAt = rs.getString("sent_at");
-                    if (convId != null && !convId.startsWith("dm:") && !groupIds.contains(convId)) {
-                        toMigrate.add(new String[]{msgId, convId, senderId, sentAt});
-                    }
-                }
-            }
-
-            for (String[] row : toMigrate) {
-                String msgId = row[0];
-                String targetPeer = row[1];
-                String senderId = row[2];
-                String sentAt = row[3];
-                if (senderId.equals(targetPeer)) {
-                    // Legacy seed message where senderId == targetPeer -> belongs to demo account mai-phuong
-                    String peer = "mai-phuong".equals(targetPeer) ? "an-nguyen" : targetPeer;
-                    String threadId = dmThreadId("mai-phuong", peer);
-                    try (PreparedStatement upd = conn.prepareStatement("UPDATE messages SET conversation_id = ? WHERE id = ?")) {
-                        upd.setString(1, threadId);
-                        upd.setString(2, msgId);
-                        upd.executeUpdate();
-                    }
-                    linkUserDm(conn, "mai-phuong", peer, sentAt);
-                    linkUserDm(conn, peer, "mai-phuong", sentAt);
-                } else {
-                    String threadId = dmThreadId(senderId, targetPeer);
-                    try (PreparedStatement upd = conn.prepareStatement("UPDATE messages SET conversation_id = ? WHERE id = ?")) {
-                        upd.setString(1, threadId);
-                        upd.setString(2, msgId);
-                        upd.executeUpdate();
-                    }
-                    linkUserDm(conn, senderId, targetPeer, sentAt);
-                    linkUserDm(conn, targetPeer, senderId, sentAt);
-                }
-            }
-        }
-    }
-
-    private void linkUserDm(Connection conn, String userId, String peerId, String createdAt) throws SQLException {
+    void linkUserDm(Connection conn, String userId, String peerId, String createdAt) throws SQLException {
         if (userId == null || peerId == null || userId.equals(peerId)) return;
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO user_dms(user_id, peer_id, created_at) VALUES(?,?,?) ON CONFLICT (user_id, peer_id) DO NOTHING")) {
             ps.setString(1, userId);
             ps.setString(2, peerId);
             ps.setString(3, createdAt != null ? createdAt : LocalDateTime.now().toString());
-            ps.executeUpdate();
-        }
-    }
-
-    private void seedDefaultData() throws SQLException {
-        // Seed default users
-        insertUserIfAbsent("mai-phuong", "mai.phuong@example.com", "123456", "Mai Phương",
-                "@maiphuong", "Thiết kế sản phẩm · thích vẽ và chơi game cùng bạn bè.", "online");
-        insertUserIfAbsent("an-nguyen", "an.nguyen@example.com", "123456", "An Nguyễn",
-                "@annguyen", "Lập trình backend · đang thử luồng chat cục bộ.", "offline");
-        insertUserIfAbsent("duc-khanh", "duc.khanh@example.com", "123456", "Đức Khánh",
-                "@duckhanh", "Bạn học chung · kiểm tra phần giao diện.", "online");
-        insertUserIfAbsent("ha-linh", "ha.linh@example.com", "123456", "Hà Linh",
-                "@halinh", "Bạn học chung · trò chuyện demo.", "offline");
-
-        // Seed Direct Messages (User directory entries)
-        insertConversation(new ConversationDto("mai-phuong", "Mai Phương", "MP",
-                "Thiết kế sản phẩm · thích vẽ và chơi game cùng bạn bè.", true, false,
-                List.of(), List.of(), List.of()));
-        insertConversation(new ConversationDto("an-nguyen", "An Nguyễn", "AN",
-                "Lập trình backend · đang thử luồng chat cục bộ.", false, false,
-                List.of(), List.of(), List.of()));
-        insertConversation(new ConversationDto("duc-khanh", "Đức Khánh", "ĐK",
-                "Bạn học chung · kiểm tra phần giao diện.", true, false,
-                List.of(), List.of(), List.of()));
-        insertConversation(new ConversationDto("ha-linh", "Hà Linh", "HL",
-                "Bạn học chung · trò chuyện demo.", false, false,
-                List.of(), List.of(), List.of()));
-
-        // Seed Groups (scoped to demo members)
-        insertConversation(new ConversationDto("nhom-ban-than", "Nhóm bạn thân", "HB",
-                "Cùng nhau học, cùng nhau tiến bộ.", false, true,
-                List.of("Mai Phương", "An Nguyễn", "Thảo Nguyễn", "Mai Linh", "Bảo Long", "Đức Minh"),
-                List.of("tổng-quan", "học-tập", "ảnh-chia-sẻ"),
-                List.of("Phòng chill", "Góc học chung")));
-
-        insertConversation(new ConversationDto("ltm-studio", "LTM Studio", "LT",
-                "Nhóm phát triển hệ thống mạng máy tính.", false, true,
-                List.of("Mai Phương", "An Nguyễn", "Minh Anh", "Khánh Linh", "Hữu Phúc", "Thành Đạt"),
-                List.of("chung", "chia-sẻ-tài-liệu"),
-                List.of("phòng-họp", "Thảo luận nhanh")));
-
-        insertConversation(new ConversationDto("phong-chill", "Hội Bạn Chill", "CL",
-                "Góc giải trí và trò chuyện cuối tuần.", false, true,
-                List.of("Mai Phương", "Hà My", "Quốc Thái", "Thanh Duy"),
-                List.of("trò-chuyện", "âm-nhạc"),
-                List.of("Phòng nghe nhạc")));
-
-        LocalDateTime now = LocalDateTime.now();
-
-        // Seed DM links & messages only between demo accounts (mai-phuong <-> an-nguyen, duc-khanh, ha-linh)
-        try (Connection conn = connect()) {
-            linkUserDm(conn, "mai-phuong", "an-nguyen", now.minusHours(2).toString());
-            linkUserDm(conn, "an-nguyen", "mai-phuong", now.minusHours(2).toString());
-            linkUserDm(conn, "mai-phuong", "duc-khanh", now.minusHours(5).toString());
-            linkUserDm(conn, "duc-khanh", "mai-phuong", now.minusHours(5).toString());
-            linkUserDm(conn, "mai-phuong", "ha-linh", now.minusDays(1).toString());
-            linkUserDm(conn, "ha-linh", "mai-phuong", now.minusDays(1).toString());
-        }
-
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), dmThreadId("mai-phuong", "an-nguyen"), "",
-                "an-nguyen", "An Nguyễn", "AN",
-                "Mình có thể chọn cuộc trò chuyện ở danh sách bên trái.", now.minusHours(2).toString(), false, false, null, 0, false));
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), dmThreadId("mai-phuong", "duc-khanh"), "",
-                "duc-khanh", "Đức Khánh", "ĐK",
-                "Hệ thống hiện đã kết nối trực tiếp với SQLite database trên Server.", now.minusHours(5).toString(), false, false, null, 0, false));
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), dmThreadId("mai-phuong", "ha-linh"), "",
-                "ha-linh", "Hà Linh", "HL",
-                "Chào bạn! Đây là hội thoại được đồng bộ từ máy chủ.", now.minusDays(1).toString(), false, false, null, 0, false));
-
-        // Seed Group 1: #học-tập
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "học-tập", "mai-linh", "Mai Linh", "ML",
-                "Mình gom tài liệu ôn tập vào đây nhé. Mọi người xem thử kế hoạch tuần này có cần thêm gì không?",
-                now.minusMinutes(25).toString(), false, false, null, 0, false));
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "học-tập", "mai-linh", "Mai Linh", "ML",
-                "Đây là góc học tập mình vừa sắp xếp lại, gửi mọi người xem bố cục nha.",
-                now.minusMinutes(23).toString(), false, false, "setup-moi.jpg", 1_800_000L, false));
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "học-tập", "bao-long", "Bảo Long", "BL",
-                "Mình gửi bản tổng hợp buổi học hôm qua ở đây. Mọi người tải về xem nhé.",
-                now.minusMinutes(15).toString(), false, false, "Tổng_hợp_bài_giảng_tuần_04.pdf", 2_400_000L, false));
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "học-tập", "duc-minh", "Đức Minh", "ĐM",
-                "Đẹp đó Linh, mình sẽ thêm lịch ôn vào tối thứ năm.",
-                now.minusMinutes(10).toString(), false, false, null, 0, false));
-
-        // Seed Group 1: #tổng-quan
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "tổng-quan", "thao-nguyen", "Thảo Nguyễn", "TN",
-                "Chào mừng mọi người đến với kênh tổng quan của nhóm bạn thân!",
-                now.minusHours(3).toString(), false, false, null, 0, false));
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "tổng-quan", "duc-minh", "Đức Minh", "ĐM",
-                "Tuần này chúng ta sẽ tập trung hoàn thiện bài tập lớn LTM nhé.",
-                now.minusHours(2).toString(), false, false, null, 0, false));
-
-        // Seed Group 1: #ảnh-chia-sẻ
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "nhom-ban-than", "ảnh-chia-sẻ", "bao-long", "Bảo Long", "BL",
-                "Kênh lưu trữ hình ảnh kỷ niệm của nhóm.",
-                now.minusDays(2).toString(), false, false, null, 0, false));
-
-        // Seed Group 2: #chung
-        insertRawMessage(new MessageDto(UUID.randomUUID().toString(), "ltm-studio", "chung", "minh-anh", "Minh Anh", "MA",
-                "Chào mừng team LTM Studio! Báo cáo tiến độ các module tại đây.",
-                now.minusHours(4).toString(), false, false, null, 0, false));
-    }
-
-    private void insertUserIfAbsent(String id, String email, String password, String displayName,
-                                    String username, String bio, String status) throws SQLException {
-        String sql = "INSERT INTO users(id, email, password, display_name, username, bio, status) VALUES(?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING";
-        try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, id);
-            ps.setString(2, email.toLowerCase(Locale.ROOT));
-            ps.setString(3, password);
-            ps.setString(4, displayName);
-            ps.setString(5, username);
-            ps.setString(6, bio);
-            ps.setString(7, status);
             ps.executeUpdate();
         }
     }
@@ -1074,7 +745,7 @@ public final class DatabaseManager implements AutoCloseable {
         insertRawMessage(toStore);
     }
 
-    private void insertRawMessage(MessageDto m) {
+    void insertRawMessage(MessageDto m) {
         String sql = """
             INSERT INTO messages(
                 id, conversation_id, channel, sender_id, sender_name, sender_initials,
@@ -1149,7 +820,7 @@ public final class DatabaseManager implements AutoCloseable {
         String chan = channel == null ? "" : channel;
         String sql = """
             SELECT id, conversation_id, channel, sender_id, sender_name, sender_initials,
-                   content, sent_at, edited, recalled, attachment_name, attachment_size, attachment_failed
+                    content, sent_at, edited, recalled, attachment_name, attachment_size, attachment_failed
             FROM messages
             WHERE conversation_id = ? AND channel = ?
             ORDER BY sent_at ASC, id ASC
@@ -1312,26 +983,11 @@ public final class DatabaseManager implements AutoCloseable {
     }
 
     public synchronized void storePhysicalFile(String messageId, String fileName, String base64Data) {
-        if (base64Data == null || base64Data.isBlank()) return;
-        try {
-            String safeName = new File(fileName).getName();
-            Path filePath = storageDir.resolve(messageId + "_" + safeName);
-            byte[] bytes = Base64.getDecoder().decode(base64Data);
-            Files.write(filePath, bytes);
-        } catch (Exception ignored) {
-        }
+        fileStorage.storeFile(messageId, fileName, base64Data);
     }
 
     public synchronized String readPhysicalFileBase64(String messageId, String fileName) {
-        try {
-            String safeName = new File(fileName).getName();
-            Path filePath = storageDir.resolve(messageId + "_" + safeName);
-            if (Files.exists(filePath)) {
-                return Base64.getEncoder().encodeToString(Files.readAllBytes(filePath));
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
+        return fileStorage.readFileBase64(messageId, fileName);
     }
 
     public static String computeInitials(String displayName) {
