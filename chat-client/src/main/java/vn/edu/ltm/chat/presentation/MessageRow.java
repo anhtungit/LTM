@@ -236,21 +236,6 @@ final class MessageRow extends JPanel {
         return authorRow;
     }
 
-    private JButton createEmojiButton(String hex, String emojiChar, String tooltip) {
-        ImageIcon icon = EmojiAssets.getIconByHex(hex, 16);
-        JButton btn = icon != null ? new JButton(icon) : new JButton(IconFactory.phosphor("smiley.svg", 14, DiscordTheme.TEXT_SECONDARY));
-        btn.setToolTipText(tooltip);
-        btn.setContentAreaFilled(false);
-        btn.setBorderPainted(false);
-        btn.setFocusable(false);
-        btn.setMargin(new Insets(1, 3, 1, 3));
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.addActionListener(e -> {
-            if (listener != null) listener.onReaction(message, emojiChar);
-        });
-        return btn;
-    }
-
     private JButton createToolbarButton(String iconName, String tooltip, Runnable action) {
         JButton btn = new JButton(IconFactory.phosphor(iconName, 14, DiscordTheme.TEXT_SECONDARY));
         btn.setToolTipText(tooltip);
@@ -270,18 +255,9 @@ final class MessageRow extends JPanel {
         // Re-setup actionToolbar buttons according to current message state
         actionToolbar.removeAll();
         if (!message.recalled()) {
-            actionToolbar.add(createEmojiButton("1f44d", "👍", "Thích (Like)"));
-            actionToolbar.add(createEmojiButton("2764", "❤️", "Yêu thích (Heart)"));
-            actionToolbar.add(createEmojiButton("1f602", "😂", "Haha"));
-
             JButton reactBtn = createToolbarButton("smiley.svg", "Thêm biểu cảm", null);
             reactBtn.addActionListener(e -> showQuickReactionPopup(reactBtn));
             actionToolbar.add(reactBtn);
-
-            JButton replyBtn = createToolbarButton("arrow-u-up-left.svg", "Trả lời", () -> {
-                if (listener != null) listener.onReply(message);
-            });
-            actionToolbar.add(replyBtn);
 
             if (isMe) {
                 if (!message.hasAttachment()) {
@@ -434,12 +410,25 @@ final class MessageRow extends JPanel {
 
         popup.add(panel);
         int popY = -42;
+        int popX = 0;
         try {
-            if (invoker.isShowing() && invoker.getLocationOnScreen().y < 130) {
-                popY = invoker.getHeight() + 4;
+            int popW = panel.getPreferredSize().width;
+            popX = -popW / 2 + invoker.getWidth() / 2;
+            if (invoker.isShowing()) {
+                Point loc = invoker.getLocationOnScreen();
+                if (loc.y < 130) {
+                    popY = invoker.getHeight() + 4;
+                }
+                int screenW = invoker.getGraphicsConfiguration().getBounds().width;
+                if (loc.x + popX + popW > screenW - 20) {
+                    popX = screenW - 20 - loc.x - popW;
+                }
+                if (loc.x + popX < 10) {
+                    popX = 10 - loc.x;
+                }
             }
         } catch (Exception ignored) {}
-        popup.show(invoker, 0, popY);
+        popup.show(invoker, popX, popY);
     }
 
     private static void setupHoverButton(JButton btn) {
