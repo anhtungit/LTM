@@ -271,8 +271,7 @@ public final class LoginPanel extends JPanel {
         infoIcon.setVerticalAlignment(SwingConstants.TOP);
         notice.add(infoIcon, BorderLayout.WEST);
 
-        WrappedTextArea text = new WrappedTextArea(
-                "Đăng nhập bằng tài khoản máy chủ. Nếu chưa có, bấm 'Tạo tài khoản'.", CONTENT_WIDTH - 52);
+        JLabel text = new JLabel("<html>Đăng nhập bằng tài khoản máy chủ. Nếu chưa có, bấm 'Tạo tài khoản'.</html>");
         text.setFont(DiscordTheme.font(12f));
         text.setForeground(DiscordTheme.TEXT_SECONDARY);
         notice.add(text, BorderLayout.CENTER);
