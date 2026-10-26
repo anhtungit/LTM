@@ -1667,29 +1667,7 @@ public final class ChatWorkspace extends JPanel {
                 }
                 CompletableFuture.runAsync(() -> chatService.react(selectedConversationId, message.id(), emoji))
                         .exceptionally(ex -> {
-                            SwingUtilities.invokeLater(() -> {
-                                ChatMessage revertedMsg = null;
-                                synchronized (currentList) {
-                                    for (int i = 0; i < currentList.size(); i++) {
-                                        ChatMessage m = currentList.get(i);
-                                        if (m.id().equals(message.id())) {
-                                            revertedMsg = m.toggleReaction(emoji, myId);
-                                            currentList.set(i, revertedMsg);
-                                            break;
-                                        }
-                                    }
-                                }
-                                if (revertedMsg != null) {
-                                    for (Component comp : transcript.getComponents()) {
-                                        if (comp instanceof MessageRow row && row.getMessage().id().equals(message.id())) {
-                                            row.updateMessage(revertedMsg);
-                                            break;
-                                        }
-                                    }
-                                }
-                                String err = ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage();
-                                showHint("Lỗi thả biểu cảm: " + (err != null ? err : "Máy chủ chưa hỗ trợ"), DiscordTheme.DANGER);
-                            });
+                            SwingUtilities.invokeLater(() -> showHint("Lỗi thả biểu cảm", DiscordTheme.DANGER));
                             return null;
                         });
             }
