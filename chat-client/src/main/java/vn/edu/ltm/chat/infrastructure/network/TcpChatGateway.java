@@ -588,8 +588,28 @@ public final class TcpChatGateway implements ChatGateway {
                 m.recalled(),
                 m.attachmentName(),
                 m.attachmentSize(),
-                m.attachmentFailed()
+                m.attachmentFailed(),
+                m.reactions() != null ? m.reactions() : java.util.Collections.emptyMap()
         );
+    }
+
+    @Override
+    public void reactMessage(String conversationId, String messageId, String emoji) {
+        if (!tryConnect()) {
+            fallback.reactMessage(conversationId, messageId, emoji);
+            return;
+        }
+        if (messageId == null || emoji == null || emoji.isBlank()) return;
+        TcpPacket p = new TcpPacket("REACT_MSG_REQ", java.util.UUID.randomUUID().toString())
+                .put("conversationId", conversationId != null ? conversationId : "")
+                .put("userId", currentUserId != null ? currentUserId : "")
+                .put("messageId", messageId)
+                .put("emoji", emoji);
+        try {
+            request(p);
+        } catch (Exception e) {
+            System.err.println("[TcpChatGateway] Error sending reaction: " + e.getMessage());
+        }
     }
 }
 

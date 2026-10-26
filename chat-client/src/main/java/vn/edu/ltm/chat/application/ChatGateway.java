@@ -66,6 +66,8 @@ public interface ChatGateway {
 
     ChatMessage recallMessage(String conversationId, String messageId);
 
+    default void reactMessage(String conversationId, String messageId, String emoji) {}
+
     default ChatMessage sendAttachment(String conversationId, UserProfile sender, String fileName, long fileSize, boolean failed) {
         return sendAttachment(conversationId, "", sender, fileName, fileSize, failed);
     }

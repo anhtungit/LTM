@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Packet and DTO structures matching the TCP Server JSON newline protocol.
@@ -130,7 +131,17 @@ public final class TcpPacket {
             boolean recalled,
             String attachmentName,
             long attachmentSize,
-            boolean attachmentFailed
-    ) {}
+            boolean attachmentFailed,
+            Map<String, List<String>> reactions
+    ) {
+        public MessageDto(
+                String id, String conversationId, String channel, String senderId, String senderName,
+                String senderInitials, String content, String sentAt, boolean edited, boolean recalled,
+                String attachmentName, long attachmentSize, boolean attachmentFailed
+        ) {
+            this(id, conversationId, channel, senderId, senderName, senderInitials, content, sentAt,
+                 edited, recalled, attachmentName, attachmentSize, attachmentFailed, Map.of());
+        }
+    }
 }
 

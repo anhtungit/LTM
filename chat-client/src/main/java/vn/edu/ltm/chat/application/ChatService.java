@@ -93,6 +93,12 @@ public final class ChatService {
         return gateway.recallMessage(conversationId, messageId);
     }
 
+    public void react(String conversationId, String messageId, String emoji) {
+        if (conversationId != null && messageId != null && emoji != null && !emoji.isBlank()) {
+            gateway.reactMessage(conversationId, messageId, emoji);
+        }
+    }
+
     public ChatMessage sendAttachment(String conversationId, UserProfile sender, String fileName, long fileSize, boolean failed) {
         return sendAttachment(conversationId, "", sender, fileName, fileSize, failed);
     }

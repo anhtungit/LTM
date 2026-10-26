@@ -70,6 +70,7 @@ public final class ClientHandler implements Runnable {
                     handleRequest(req);
                 } catch (Exception e) {
                     System.err.println("[ClientHandler] Error processing packet: " + e.getMessage());
+                    e.printStackTrace();
                 }
             }
         } catch (IOException ignored) {
@@ -104,6 +105,7 @@ public final class ClientHandler implements Runnable {
                 case "EDIT_MSG_REQ" -> handleEditMessage(req, reqId);
                 case "RECALL_MSG_REQ" -> handleRecallMessage(req, reqId);
                 case "DELETE_MSG_REQ" -> handleDeleteMessage(req, reqId);
+                case "REACT_MSG_REQ" -> handleReactMessage(req, reqId);
                 case "FILE_UPLOAD_REQ" -> handleFileUpload(req, reqId);
                 case "FILE_DOWNLOAD_REQ" -> handleFileDownload(req, reqId);
                 case "CREATE_GROUP_REQ" -> handleCreateGroup(req, reqId);
@@ -368,8 +370,51 @@ public final class ClientHandler implements Runnable {
         return new MessageDto(
                 m.id(), newConvId, m.channel(), m.senderId(), m.senderName(),
                 m.senderInitials(), m.content(), m.sentAt(), m.edited(), m.recalled(),
-                m.attachmentName(), m.attachmentSize(), m.attachmentFailed()
+                m.attachmentName(), m.attachmentSize(), m.attachmentFailed(), m.reactions()
         );
+    }
+
+    private void handleReactMessage(Packet req, String reqId) {
+        String convId = req.getString("conversationId", "");
+        String msgId = req.getString("messageId", "");
+        String emoji = req.getString("emoji", "");
+        if (msgId.isBlank() || emoji.isBlank()) {
+            sendPacket(Packet.error("REACT_MSG_RES", reqId, "messageId and emoji are required"));
+            return;
+        }
+        String uid = req.getString("userId", currentUser != null ? currentUser.id() : "");
+        if (uid.isBlank() && currentUser != null) {
+            uid = currentUser.id();
+        }
+        db.toggleMessageReaction(msgId, uid, emoji);
+        sendPacket(Packet.response("REACT_MSG_RES", reqId)
+                .put("conversationId", convId)
+                .put("messageId", msgId)
+                .put("emoji", emoji));
+
+        if (db.isGroupConversation(convId)) {
+            broadcastToGroupMembers(convId, Packet.broadcast("MSG_UPDATED_BROADCAST")
+                    .put("action", "REACT")
+                    .put("conversationId", convId)
+                    .put("messageId", msgId)
+                    .put("emoji", emoji)
+                    .put("userId", uid));
+        } else {
+            for (ClientHandler h : server.getActiveHandlers()) {
+                if (h == this) continue;
+                UserDto u = h.getCurrentUser();
+                if (u == null) continue;
+                if (u.id().equals(convId) || u.id().equals(uid)) {
+                    String viewConvId = u.id().equals(convId) ? uid : convId;
+                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
+                            .put("action", "REACT")
+                            .put("conversationId", viewConvId)
+                            .put("messageId", msgId)
+                            .put("emoji", emoji)
+                            .put("userId", uid));
+                }
+            }
+        }
     }
 
     private void handleDeleteMessage(Packet req, String reqId) {

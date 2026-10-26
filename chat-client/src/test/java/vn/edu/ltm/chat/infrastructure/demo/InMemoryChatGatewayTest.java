@@ -93,4 +93,32 @@ class InMemoryChatGatewayTest {
                 .filter(c -> c.id().equals(group.id())).findFirst().orElseThrow();
         assertFalse(afterRemoval.channels().contains("tai-lieu"));
     }
+
+    @Test
+    void togglesReactionsOnMessage() {
+        InMemoryChatGateway gateway = new InMemoryChatGateway();
+        UserProfile user = new UserProfile("demo", "Demo User", "demo@example.com");
+        ChatMessage sent = gateway.sendMessage("mai-phuong", "", user, "Tin nhắn thử biểu cảm");
+
+        // React with thumbs up
+        gateway.reactMessage("mai-phuong", sent.id(), "👍");
+        ChatMessage afterReact = gateway.loadMessages("mai-phuong", "").stream()
+                .filter(m -> m.id().equals(sent.id())).findFirst().orElseThrow();
+        assertTrue(afterReact.reactions().containsKey("👍"));
+        assertEquals(List.of("me"), afterReact.reactions().get("👍"));
+
+        // React with heart
+        gateway.reactMessage("mai-phuong", sent.id(), "❤️");
+        ChatMessage afterHeart = gateway.loadMessages("mai-phuong", "").stream()
+                .filter(m -> m.id().equals(sent.id())).findFirst().orElseThrow();
+        assertTrue(afterHeart.reactions().containsKey("👍"));
+        assertTrue(afterHeart.reactions().containsKey("❤️"));
+
+        // Toggle thumbs up off
+        gateway.reactMessage("mai-phuong", sent.id(), "👍");
+        ChatMessage afterToggleOff = gateway.loadMessages("mai-phuong", "").stream()
+                .filter(m -> m.id().equals(sent.id())).findFirst().orElseThrow();
+        assertFalse(afterToggleOff.reactions().containsKey("👍"));
+        assertTrue(afterToggleOff.reactions().containsKey("❤️"));
+    }
 }

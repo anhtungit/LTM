@@ -132,7 +132,6 @@ public final class LoginPanel extends JPanel {
         row = addRow(content, statusRow(), row, 6);
         row = addRow(content, loginButton(), row, 8);
         row = addRow(content, createAccountButton(), row, 16);
-        row = addRow(content, separator(), row, 12);
         addRow(content, centeredLabel("Kết nối tự động · đồng bộ thời gian thực qua TCP/SQLite", 12,
                 DiscordTheme.TEXT_MUTED), row, 0);
         return content;

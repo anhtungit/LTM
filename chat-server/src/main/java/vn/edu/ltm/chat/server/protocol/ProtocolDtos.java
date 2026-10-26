@@ -44,7 +44,17 @@ public final class ProtocolDtos {
             boolean recalled,
             String attachmentName,
             long attachmentSize,
-            boolean attachmentFailed
-    ) {}
+            boolean attachmentFailed,
+            java.util.Map<String, java.util.List<String>> reactions
+    ) {
+        public MessageDto(
+                String id, String conversationId, String channel, String senderId, String senderName,
+                String senderInitials, String content, String sentAt, boolean edited, boolean recalled,
+                String attachmentName, long attachmentSize, boolean attachmentFailed
+        ) {
+            this(id, conversationId, channel, senderId, senderName, senderInitials, content, sentAt,
+                 edited, recalled, attachmentName, attachmentSize, attachmentFailed, java.util.Map.of());
+        }
+    }
 }
 

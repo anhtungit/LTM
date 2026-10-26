@@ -233,5 +233,8 @@ public final class ChatServer {
         }
         activeHandlers.clear();
         onlineRegistry.clear();
+        if (db != null) {
+            db.close();
+        }
     }
 }

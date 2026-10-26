@@ -48,10 +48,12 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -1717,7 +1719,9 @@ public final class ChatWorkspace extends JPanel {
                         for (int i = 0; i < fetched.size(); i++) {
                             ChatMessage a = currentList.get(i);
                             ChatMessage b = fetched.get(i);
-                            if (!a.id().equals(b.id()) || !a.content().equals(b.content()) || a.edited() != b.edited() || a.recalled() != b.recalled()) {
+                            if (!a.id().equals(b.id()) || !a.content().equals(b.content())
+                                    || a.edited() != b.edited() || a.recalled() != b.recalled()
+                                    || !Objects.equals(a.reactions(), b.reactions())) {
                                 isSame = false;
                                 break;
                             }
@@ -1783,7 +1787,7 @@ public final class ChatWorkspace extends JPanel {
 
             for (ChatMessage message : history) {
                 boolean beginsGroup = !message.senderId().equals(previousSenderId);
-                transcript.add(new MessageRow(message, defaultWrapWidth(), beginsGroup, actionListener));
+                transcript.add(new MessageRow(message, defaultWrapWidth(), beginsGroup, user != null ? user.id() : null, actionListener));
                 previousSenderId = message.senderId();
             }
         }
@@ -1896,6 +1900,38 @@ public final class ChatWorkspace extends JPanel {
             public void onDownload(ChatMessage message) {
                 downloadAttachmentToFile(message);
             }
+
+            @Override
+            public void onReact(ChatMessage message, String emoji) {
+                if (message == null || emoji == null || emoji.isBlank()) return;
+                String cacheKey = transcriptCacheKey(selectedConversationId, chan);
+                List<ChatMessage> currentList = messageCache.computeIfAbsent(cacheKey, k -> new ArrayList<>());
+                ChatMessage updatedMsg = null;
+                String myId = user != null ? user.id() : "me";
+                synchronized (currentList) {
+                    for (int i = 0; i < currentList.size(); i++) {
+                        ChatMessage m = currentList.get(i);
+                        if (m.id().equals(message.id())) {
+                            updatedMsg = m.toggleReaction(emoji, myId);
+                            currentList.set(i, updatedMsg);
+                            break;
+                        }
+                    }
+                }
+                if (updatedMsg != null) {
+                    for (Component comp : transcript.getComponents()) {
+                        if (comp instanceof MessageRow row && row.getMessage().id().equals(message.id())) {
+                            row.updateMessage(updatedMsg);
+                            break;
+                        }
+                    }
+                }
+                CompletableFuture.runAsync(() -> chatService.react(selectedConversationId, message.id(), emoji))
+                        .exceptionally(ex -> {
+                            SwingUtilities.invokeLater(() -> showHint("Lỗi thả biểu cảm", DiscordTheme.DANGER));
+                            return null;
+                        });
+            }
         };
     }
 
@@ -1914,7 +1950,7 @@ public final class ChatWorkspace extends JPanel {
             }
         }
         boolean beginsGroup = (previousSenderId == null || !previousSenderId.equals(msg.senderId()));
-        transcript.add(new MessageRow(msg, defaultWrapWidth(), beginsGroup, createActionListener(chan)));
+        transcript.add(new MessageRow(msg, defaultWrapWidth(), beginsGroup, user != null ? user.id() : null, createActionListener(chan)));
         transcript.revalidate();
         transcript.repaint();
         scrollTranscriptToEnd();

@@ -16,6 +16,7 @@ import java.util.UUID;
 public final class InMemoryChatGateway implements ChatGateway {
     private final Map<String, Conversation> conversations = new LinkedHashMap<>();
     private final Map<String, List<ChatMessage>> messages = new LinkedHashMap<>();
+    private Runnable onRealtimeUpdate;
 
     public InMemoryChatGateway() {
         // Direct messages
@@ -217,6 +218,28 @@ public final class InMemoryChatGateway implements ChatGateway {
             }
         }
         throw new IllegalArgumentException("Không tìm thấy tin nhắn cần thu hồi.");
+    }
+
+    @Override
+    public void setOnRealtimeUpdate(Runnable callback) {
+        this.onRealtimeUpdate = callback;
+    }
+
+    @Override
+    public synchronized void reactMessage(String conversationId, String messageId, String emoji) {
+        if (messageId == null || emoji == null || emoji.isBlank()) return;
+        for (List<ChatMessage> history : messages.values()) {
+            for (int i = 0; i < history.size(); i++) {
+                ChatMessage msg = history.get(i);
+                if (msg.id().equals(messageId)) {
+                    history.set(i, msg.toggleReaction(emoji, "me"));
+                    if (onRealtimeUpdate != null) {
+                        onRealtimeUpdate.run();
+                    }
+                    return;
+                }
+            }
+        }
     }
 
     @Override

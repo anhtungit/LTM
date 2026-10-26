@@ -25,3 +25,5 @@ server_storage/
 !data/.gitkeep
 !server_storage/.gitkeep
 *.png
+
+.agents/

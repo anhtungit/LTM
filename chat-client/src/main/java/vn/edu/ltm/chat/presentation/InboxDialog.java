@@ -94,7 +94,8 @@ public final class InboxDialog extends JDialog {
         container.add(buildFooter(), BorderLayout.SOUTH);
 
         setContentPane(container);
-        setSize(480, 560);
+        pack();
+        setSize(Math.max(getWidth(), 520), 580);
         setLocationRelativeTo(parent);
     }
 
@@ -284,9 +285,10 @@ public final class InboxDialog extends JDialog {
             }
             dispose();
         });
-        JPanel rightHolder = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JPanel rightHolder = new JPanel(new BorderLayout());
         rightHolder.setOpaque(false);
-        rightHolder.add(openBtn);
+        rightHolder.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
+        rightHolder.add(openBtn, BorderLayout.NORTH);
         row.add(rightHolder, BorderLayout.EAST);
 
         return row;

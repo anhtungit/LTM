@@ -23,7 +23,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -37,7 +39,7 @@ import java.util.UUID;
  * and physical file storage (server_storage/).
  * Isolates 1-1 Direct Messages per user pair (dm:userA::userB) and Groups per member.
  */
-public final class DatabaseManager {
+public final class DatabaseManager implements AutoCloseable {
     private static final Gson GSON = new Gson();
     private static DatabaseManager instance;
 
@@ -230,6 +232,17 @@ public final class DatabaseManager {
         return isPostgres;
     }
 
+    @Override
+    public synchronized void close() {
+        if (sharedPostgresConn != null) {
+            try {
+                sharedPostgresConn.close();
+            } catch (SQLException ignored) {
+            }
+            sharedPostgresConn = null;
+        }
+    }
+
     public static String dmThreadId(String userA, String userB) {
         String a = userA == null ? "" : userA.trim().toLowerCase(Locale.ROOT);
         String b = userB == null ? "" : userB.trim().toLowerCase(Locale.ROOT);
@@ -291,6 +304,15 @@ public final class DatabaseManager {
                     attachment_failed INTEGER NOT NULL DEFAULT 0
                 )
             """);
+
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS message_reactions (
+                    message_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    PRIMARY KEY (message_id, user_id, emoji)
+                )
+            """);
         }
 
         if (countConversations() == 0) {
@@ -305,7 +327,7 @@ public final class DatabaseManager {
         try (Connection conn = connect()) {
             Map<String, String> displayNameToId = new HashMap<>();
             try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT id, display_name FROM users ORDER BY rowid ASC")) {
+                 ResultSet rs = st.executeQuery("SELECT id, display_name FROM users ")) {
                 while (rs.next()) {
                     String uid = rs.getString("id");
                     String dname = rs.getString("display_name");
@@ -1111,7 +1133,7 @@ public final class DatabaseManager {
             mapped.add(new MessageDto(
                     m.id(), conversationId, m.channel(), m.senderId(), m.senderName(),
                     m.senderInitials(), m.content(), m.sentAt(), m.edited(), m.recalled(),
-                    m.attachmentName(), m.attachmentSize(), m.attachmentFailed()
+                    m.attachmentName(), m.attachmentSize(), m.attachmentFailed(), m.reactions()
             ));
         }
         return mapped;
@@ -1123,6 +1145,7 @@ public final class DatabaseManager {
 
     private List<MessageDto> loadRawMessages(String storageConversationId, String channel) {
         List<MessageDto> list = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
         String chan = channel == null ? "" : channel;
         String sql = """
             SELECT id, conversation_id, channel, sender_id, sender_name, sender_initials,
@@ -1137,12 +1160,81 @@ public final class DatabaseManager {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     list.add(mapMessage(rs));
+                    ids.add(rs.getString("id"));
+                }
+            }
+            if (!ids.isEmpty()) {
+                Map<String, Map<String, List<String>>> reactionsMap = loadReactionsForMessages(conn, ids);
+                for (int i = 0; i < list.size(); i++) {
+                    MessageDto m = list.get(i);
+                    Map<String, List<String>> r = reactionsMap.get(m.id());
+                    if (r != null && !r.isEmpty()) {
+                        list.set(i, new MessageDto(
+                                m.id(), m.conversationId(), m.channel(), m.senderId(), m.senderName(),
+                                m.senderInitials(), m.content(), m.sentAt(), m.edited(), m.recalled(),
+                                m.attachmentName(), m.attachmentSize(), m.attachmentFailed(), r
+                        ));
+                    }
                 }
             }
         } catch (SQLException e) {
             throw new RuntimeException("Lỗi tải lịch sử tin nhắn: " + e.getMessage(), e);
         }
         return list;
+    }
+
+    private Map<String, Map<String, List<String>>> loadReactionsForMessages(Connection conn, List<String> messageIds) {
+        Map<String, Map<String, List<String>>> result = new HashMap<>();
+        if (messageIds == null || messageIds.isEmpty()) return result;
+        for (int i = 0; i < messageIds.size(); i += 50) {
+            List<String> chunk = messageIds.subList(i, Math.min(i + 50, messageIds.size()));
+            String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+            String sql = "SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id IN (" + placeholders + ") ";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (int j = 0; j < chunk.size(); j++) {
+                    ps.setString(j + 1, chunk.get(j));
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String mid = rs.getString("message_id");
+                        String emoji = rs.getString("emoji");
+                        String uid = rs.getString("user_id");
+                        result.computeIfAbsent(mid, k -> new LinkedHashMap<>())
+                                .computeIfAbsent(emoji, k -> new ArrayList<>())
+                                .add(uid);
+                    }
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+        return result;
+    }
+
+    public synchronized boolean toggleMessageReaction(String messageId, String userId, String emoji) {
+        if (messageId == null || userId == null || emoji == null) return false;
+        try (Connection conn = connect()) {
+            try (PreparedStatement del = conn.prepareStatement(
+                    "DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?")) {
+                del.setString(1, messageId);
+                del.setString(2, userId);
+                del.setString(3, emoji);
+                if (del.executeUpdate() > 0) {
+                    return false;
+                }
+            }
+            try (PreparedStatement ins = conn.prepareStatement(
+                    "INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)")) {
+                ins.setString(1, messageId);
+                ins.setString(2, userId);
+                ins.setString(3, emoji);
+                ins.executeUpdate();
+                return true;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public synchronized MessageDto editMessage(String messageId, String newContent) {
