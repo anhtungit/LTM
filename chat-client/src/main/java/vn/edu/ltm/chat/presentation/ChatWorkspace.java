@@ -910,6 +910,7 @@ public final class ChatWorkspace extends JPanel {
         transcriptScroll.getViewport().setOpaque(false);
         transcriptScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         transcriptScroll.getVerticalScrollBar().setUnitIncrement(18);
+        transcriptScroll.getVerticalScrollBar().addAdjustmentListener(e -> MessageRow.clearActiveHover());
         area.add(transcriptScroll, BorderLayout.CENTER);
         return area;
     }
@@ -1678,11 +1679,6 @@ public final class ChatWorkspace extends JPanel {
         text.setFont(DiscordTheme.font(11f));
         text.setForeground(DiscordTheme.TEXT_SECONDARY);
         intro.add(text, BorderLayout.CENTER);
-
-        JLabel day = new JLabel("Hôm nay");
-        day.setFont(DiscordTheme.font(10f));
-        day.setForeground(DiscordTheme.TEXT_MUTED);
-        intro.add(day, BorderLayout.EAST);
         return intro;
     }
 

@@ -22,6 +22,8 @@ final class DateDividerRow extends JPanel {
     DateDividerRow(LocalDate date) {
         setOpaque(false);
         setLayout(new GridBagLayout());
+        setAlignmentX(CENTER_ALIGNMENT);
+        setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
         setBorder(BorderFactory.createEmptyBorder(14, 0, 10, 0));
 
         String labelText;
@@ -38,7 +40,7 @@ final class DateDividerRow extends JPanel {
         JPanel rightLine = createLine();
 
         JLabel badge = new JLabel(labelText);
-        badge.setFont(DiscordTheme.bold(11f));
+        badge.setFont(DiscordTheme.bold(11.5f));
         badge.setForeground(DiscordTheme.TEXT_MUTED);
         badge.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 12));
 
@@ -63,9 +65,9 @@ final class DateDividerRow extends JPanel {
 
     private static JPanel createLine() {
         JPanel line = new JPanel();
-        line.setBackground(new Color(0x3F, 0x41, 0x47));
-        line.setPreferredSize(new Dimension(1, 1));
-        line.setMinimumSize(new Dimension(1, 1));
+        line.setBackground(new Color(0x4E, 0x50, 0x58));
+        line.setPreferredSize(new Dimension(10, 1));
+        line.setMinimumSize(new Dimension(10, 1));
         return line;
     }
 }
