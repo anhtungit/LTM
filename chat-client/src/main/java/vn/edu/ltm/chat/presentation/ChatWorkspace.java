@@ -162,22 +162,35 @@ public final class ChatWorkspace extends JPanel {
         }
 
         this.chatService.setOnRealtimeUpdate(this::handleServerBroadcast);
+        this.chatService.setOnPresenceUpdate(this::handlePresenceUpdate);
         if (isConnected) {
             handleServerBroadcast();
+        }
+    }
+
+    private void handlePresenceUpdate() {
+        refreshConnectionBadge();
+        rebuildConversationButtons();
+        Conversation conv = currentConversation();
+        if (conv != null) {
+            updateHeaderAvatar(conv);
+            rebuildInfoPane(conv);
         }
     }
 
     private void handleServerBroadcast() {
         refreshConnectionBadge();
         CompletableFuture.supplyAsync(() -> {
-            try {
-                List<UserProfile> users = chatService.listUsers();
-                if (users != null) {
-                    for (UserProfile u : users) {
-                        userProfileCache.put(u.id(), u);
+            if (userProfileCache.isEmpty()) {
+                try {
+                    List<UserProfile> users = chatService.listUsers();
+                    if (users != null) {
+                        for (UserProfile u : users) {
+                            userProfileCache.put(u.id(), u);
+                        }
                     }
+                } catch (Exception ignored) {
                 }
-            } catch (Exception ignored) {
             }
             try {
                 return chatService.conversations();
@@ -1189,8 +1202,8 @@ public final class ChatWorkspace extends JPanel {
         if (user != null && memberId.equalsIgnoreCase(user.id())) {
             return true;
         }
-        if (chatService.isUserOnline(memberId)) {
-            return true;
+        if (chatService.isServerConnected()) {
+            return chatService.isUserOnline(memberId);
         }
         UserProfile p = userProfileCache.get(memberId);
         if (p != null) {
@@ -1517,7 +1530,16 @@ public final class ChatWorkspace extends JPanel {
         rebuildRail();
 
         conversationSubtitle.setText(conversation.about());
+        updateHeaderAvatar(conversation);
 
+        composer.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
+        showHint("Bản nháp riêng cho cuộc trò chuyện này", DiscordTheme.TEXT_MUTED);
+        rebuildConversationButtons();
+        rebuildInfoPane(conversation);
+        rebuildTranscript();
+    }
+
+    private void updateHeaderAvatar(Conversation conversation) {
         headerAvatarHolder.removeAll();
         boolean isPeerOnline = !conversation.isGroup() && resolveMemberOnline(conversation.id());
         AvatarBadge headerAvatar = new AvatarBadge(conversation.initials(), conversation.id(), AVATAR_SIZE,
@@ -1525,12 +1547,12 @@ public final class ChatWorkspace extends JPanel {
         headerAvatarHolder.add(headerAvatar, BorderLayout.CENTER);
         headerAvatarHolder.revalidate();
         headerAvatarHolder.repaint();
+    }
 
-        composer.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
-        showHint("Bản nháp riêng cho cuộc trò chuyện này", DiscordTheme.TEXT_MUTED);
-        rebuildConversationButtons();
-        rebuildInfoPane(conversation);
-        rebuildTranscript();
+    private static void clearPanel(JComponent panel) {
+        panel.removeAll();
+        panel.revalidate();
+        panel.repaint();
     }
 
     private Conversation currentConversation() {
@@ -1544,13 +1566,8 @@ public final class ChatWorkspace extends JPanel {
         if (loadingConversations) {
             conversationTitle.setText("Đang tải dữ liệu...");
             conversationSubtitle.setText("Đang kết nối và đồng bộ dữ liệu từ máy chủ TCP.");
-            headerAvatarHolder.removeAll();
-            headerAvatarHolder.revalidate();
-            headerAvatarHolder.repaint();
-
-            infoPane.removeAll();
-            infoPane.revalidate();
-            infoPane.repaint();
+            clearPanel(headerAvatarHolder);
+            clearPanel(infoPane);
 
             transcript.removeAll();
             JPanel loadingBox = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 40));
@@ -1568,13 +1585,8 @@ public final class ChatWorkspace extends JPanel {
 
         conversationTitle.setText("Chào mừng, " + user.displayName() + "!");
         conversationSubtitle.setText("Bấm dấu (+) ở mục Tin nhắn trực tiếp hoặc Tạo nhóm để bắt đầu trò chuyện.");
-        headerAvatarHolder.removeAll();
-        headerAvatarHolder.revalidate();
-        headerAvatarHolder.repaint();
-
-        infoPane.removeAll();
-        infoPane.revalidate();
-        infoPane.repaint();
+        clearPanel(headerAvatarHolder);
+        clearPanel(infoPane);
 
         transcript.removeAll();
         JLabel welcome = new JLabel("Tài khoản của bạn hiện chưa có cuộc trò chuyện nào.");

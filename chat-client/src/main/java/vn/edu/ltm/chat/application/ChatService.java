@@ -29,6 +29,10 @@ public final class ChatService {
         gateway.setOnRealtimeUpdate(callback);
     }
 
+    public void setOnPresenceUpdate(Runnable callback) {
+        gateway.setOnPresenceUpdate(callback);
+    }
+
     public UserProfile updateProfile(UserProfile user) {
         return gateway.updateProfile(user);
     }

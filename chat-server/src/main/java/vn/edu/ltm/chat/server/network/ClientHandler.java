@@ -162,23 +162,38 @@ public final class ClientHandler implements Runnable {
                 .put("status", updated.status()));
     }
 
+    private ConversationDto withLivePresence(ConversationDto c) {
+        if (c == null) return null;
+        boolean liveOnline = !c.isGroup() && server.isUserOnline(c.id());
+        if (c.online() == liveOnline) return c;
+        return new ConversationDto(c.id(), c.displayName(), c.initials(), c.about(),
+                liveOnline, c.isGroup(), c.members(), c.channels(), c.voiceChannels());
+    }
+
+    private boolean denyGroupAccess(String userId, String convId, String resType, String reqId, String errorMsg) {
+        if (db.isGroupConversation(convId) && (userId == null || !db.isUserMemberOfGroup(userId, convId))) {
+            sendPacket(Packet.error(resType, reqId, errorMsg));
+            return true;
+        }
+        return false;
+    }
+
+    private void broadcastToGroupMembers(String groupConvId, Packet packet) {
+        for (ClientHandler h : server.getActiveHandlers()) {
+            if (h == this) continue;
+            UserDto u = h.getCurrentUser();
+            if (u != null && db.isUserMemberOfGroup(u.id(), groupConvId)) {
+                h.sendPacket(packet);
+            }
+        }
+    }
+
     private void handleListConversations(Packet req, String reqId) {
         String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
         List<ConversationDto> raw = db.listConversationsForUser(userId);
-        List<ConversationDto> conversations = new ArrayList<>();
+        List<ConversationDto> conversations = new ArrayList<>(raw.size());
         for (ConversationDto c : raw) {
-            boolean isLiveOnline = !c.isGroup() && server.isUserOnline(c.id());
-            conversations.add(new ConversationDto(
-                    c.id(),
-                    c.displayName(),
-                    c.initials(),
-                    c.about(),
-                    isLiveOnline,
-                    c.isGroup(),
-                    c.members(),
-                    c.channels(),
-                    c.voiceChannels()
-            ));
+            conversations.add(withLivePresence(c));
         }
         sendPacket(Packet.response("LIST_CONVERSATIONS_RES", reqId)
                 .putObj("conversations", conversations));
@@ -187,7 +202,7 @@ public final class ClientHandler implements Runnable {
     private void handleListUsers(Packet req, String reqId) {
         String excludeUserId = req.getString("excludeUserId", currentUser != null ? currentUser.id() : null);
         List<UserDto> raw = db.listUsers(excludeUserId);
-        List<UserDto> users = new ArrayList<>();
+        List<UserDto> users = new ArrayList<>(raw.size());
         for (UserDto u : raw) {
             boolean liveOnline = server.isUserOnline(u.id());
             users.add(new UserDto(
@@ -208,27 +223,14 @@ public final class ClientHandler implements Runnable {
         String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
         String peerId = req.getString("peerId", "");
         ConversationDto conv = db.openDirectMessage(userId, peerId);
-        boolean liveOnline = !conv.isGroup() && server.isUserOnline(conv.id());
-        ConversationDto liveConv = new ConversationDto(
-                conv.id(), conv.displayName(), conv.initials(), conv.about(),
-                liveOnline, conv.isGroup(), conv.members(), conv.channels(), conv.voiceChannels());
         sendPacket(Packet.response("OPEN_DM_RES", reqId)
-                .putObj("conversation", liveConv));
+                .putObj("conversation", withLivePresence(conv)));
     }
 
     private void handleGetHistory(Packet req, String reqId) {
         String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
         String convId = req.getString("conversationId", "");
         String channel = req.getString("channel", "");
-        if (db.isGroupConversation(convId)) {
-            if (userId == null || !db.isUserMemberOfGroup(userId, convId)) {
-                sendPacket(Packet.response("CHAT_HISTORY_RES", reqId)
-                        .put("conversationId", convId)
-                        .put("channel", channel)
-                        .putObj("messages", List.of()));
-                return;
-            }
-        }
         List<MessageDto> messages = db.loadMessagesForUser(userId, convId, channel);
         sendPacket(Packet.response("CHAT_HISTORY_RES", reqId)
                 .put("conversationId", convId)
@@ -244,11 +246,8 @@ public final class ClientHandler implements Runnable {
         String senderInitials = req.getString("senderInitials", DatabaseManager.computeInitials(senderName));
         String content = req.getString("content", "");
 
-        if (db.isGroupConversation(convId)) {
-            if (senderId == null || !db.isUserMemberOfGroup(senderId, convId)) {
-                sendPacket(Packet.error("SEND_MSG_RES", reqId, "Bạn không phải thành viên của nhóm này."));
-                return;
-            }
+        if (denyGroupAccess(senderId, convId, "SEND_MSG_RES", reqId, "Bạn không phải thành viên của nhóm này.")) {
+            return;
         }
 
         MessageDto msg = new MessageDto(
@@ -274,18 +273,12 @@ public final class ClientHandler implements Runnable {
 
     private void broadcastNewMessage(String convId, String senderId, MessageDto msg) {
         if (db.isGroupConversation(convId)) {
-            for (ClientHandler h : server.getActiveHandlers()) {
-                if (h == this) continue;
-                UserDto targetUser = h.getCurrentUser();
-                if (targetUser != null && db.isUserMemberOfGroup(targetUser.id(), convId)) {
-                    h.sendPacket(Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", msg));
-                }
-            }
+            broadcastToGroupMembers(convId, Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", msg));
             return;
         }
         // 1-1 Direct Message between senderId and peerId (convId)
         String peerId = convId;
-        ConversationDto senderConv = db.getConversation(senderId);
+        ConversationDto senderConv = withLivePresence(db.getConversation(senderId));
         for (ClientHandler h : server.getActiveHandlers()) {
             if (h == this) continue;
             UserDto targetUser = h.getCurrentUser();
@@ -345,15 +338,9 @@ public final class ClientHandler implements Runnable {
             }
         }
         if (db.isGroupConversation(rawConvId)) {
-            for (ClientHandler h : server.getActiveHandlers()) {
-                if (h == this) continue;
-                UserDto u = h.getCurrentUser();
-                if (u != null && db.isUserMemberOfGroup(u.id(), rawConvId)) {
-                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
-                            .put("action", action)
-                            .putObj("message", rawUpdated));
-                }
-            }
+            broadcastToGroupMembers(rawConvId, Packet.broadcast("MSG_UPDATED_BROADCAST")
+                    .put("action", action)
+                    .putObj("message", rawUpdated));
             return;
         }
         server.broadcastExcept(this, Packet.broadcast("MSG_UPDATED_BROADCAST")
@@ -394,31 +381,21 @@ public final class ClientHandler implements Runnable {
                 .put("conversationId", convId)
                 .put("messageId", msgId));
         if (db.isGroupConversation(convId)) {
-            for (ClientHandler h : server.getActiveHandlers()) {
-                if (h == this) continue;
-                UserDto u = h.getCurrentUser();
-                if (u != null && db.isUserMemberOfGroup(u.id(), convId)) {
-                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
-                            .put("action", "DELETE")
-                            .put("conversationId", convId)
-                            .put("messageId", msgId));
-                }
-            }
+            broadcastToGroupMembers(convId, Packet.broadcast("MSG_UPDATED_BROADCAST")
+                    .put("action", "DELETE")
+                    .put("conversationId", convId)
+                    .put("messageId", msgId));
         } else {
             String senderId = currentUser != null ? currentUser.id() : "";
             for (ClientHandler h : server.getActiveHandlers()) {
                 if (h == this) continue;
                 UserDto u = h.getCurrentUser();
                 if (u == null) continue;
-                if (u.id().equals(convId)) {
+                if (u.id().equals(convId) || u.id().equals(senderId)) {
+                    String viewConvId = u.id().equals(convId) ? senderId : convId;
                     h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
                             .put("action", "DELETE")
-                            .put("conversationId", senderId)
-                            .put("messageId", msgId));
-                } else if (u.id().equals(senderId)) {
-                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
-                            .put("action", "DELETE")
-                            .put("conversationId", convId)
+                            .put("conversationId", viewConvId)
                             .put("messageId", msgId));
                 }
             }
@@ -436,11 +413,8 @@ public final class ClientHandler implements Runnable {
         boolean failed = req.getBoolean("failed", false);
         String base64Data = req.getString("base64Data", null);
 
-        if (db.isGroupConversation(convId)) {
-            if (senderId == null || !db.isUserMemberOfGroup(senderId, convId)) {
-                sendPacket(Packet.error("FILE_UPLOAD_RES", reqId, "Bạn không phải thành viên của nhóm này."));
-                return;
-            }
+        if (denyGroupAccess(senderId, convId, "FILE_UPLOAD_RES", reqId, "Bạn không phải thành viên của nhóm này.")) {
+            return;
         }
 
         String msgId = UUID.randomUUID().toString();
@@ -489,43 +463,26 @@ public final class ClientHandler implements Runnable {
 
         ConversationDto created = db.createGroup(creatorId, creatorName, groupName, members);
         sendPacket(Packet.response("CREATE_GROUP_RES", reqId).putObj("conversation", created));
-        for (ClientHandler h : server.getActiveHandlers()) {
-            if (h == this) continue;
-            UserDto u = h.getCurrentUser();
-            if (u != null && created.members() != null && created.members().stream()
-                    .anyMatch(m -> m.equalsIgnoreCase(u.id()))) {
-                h.sendPacket(Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
-                        .putObj("conversation", created));
-            }
-        }
+        broadcastToGroupMembers(created.id(), Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
+                .putObj("conversation", created));
     }
 
     private void handleModifyChannel(Packet req, String reqId, boolean isAdd, boolean isVoice) {
         String convId = req.getString("conversationId", "");
         String chanName = req.getString("channelName", "");
         String userId = currentUser != null ? currentUser.id() : null;
-        if (db.isGroupConversation(convId)) {
-            if (userId == null || !db.isUserMemberOfGroup(userId, convId)) {
-                String resType = req.getType().replace("_REQ", "_RES");
-                sendPacket(Packet.error(resType, reqId, "Bạn không có quyền quản lý kênh trong nhóm này."));
-                return;
-            }
+        String resType = req.getType().replace("_REQ", "_RES");
+        if (denyGroupAccess(userId, convId, resType, reqId, "Bạn không có quyền quản lý kênh trong nhóm này.")) {
+            return;
         }
         ConversationDto updated = isAdd
                 ? db.addChannel(convId, chanName, isVoice)
                 : db.removeChannel(convId, chanName, isVoice);
 
-        String resType = req.getType().replace("_REQ", "_RES");
         sendPacket(Packet.response(resType, reqId).putObj("conversation", updated));
         if (updated != null) {
-            for (ClientHandler h : server.getActiveHandlers()) {
-                if (h == this) continue;
-                UserDto u = h.getCurrentUser();
-                if (u != null && db.isUserMemberOfGroup(u.id(), convId)) {
-                    h.sendPacket(Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
-                            .putObj("conversation", updated));
-                }
-            }
+            broadcastToGroupMembers(convId, Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
+                    .putObj("conversation", updated));
         }
     }
 
