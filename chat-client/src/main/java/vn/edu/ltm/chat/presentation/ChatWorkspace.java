@@ -14,14 +14,13 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
-import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
@@ -36,16 +35,11 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -74,7 +68,6 @@ public final class ChatWorkspace extends JPanel {
     private static final int AVATAR_SIZE = 34;
     private static final int AVATAR_GAP = 12;
     private static final int SIDEBAR_WIDTH = 240;
-    private static final int INFO_WIDTH = 220;
 
     private UserProfile user;
     private final ChatService chatService;
@@ -82,6 +75,8 @@ public final class ChatWorkspace extends JPanel {
     private final List<Conversation> conversations;
     private final Map<String, String> drafts = new HashMap<>();
     private final Map<String, List<ChatMessage>> messageCache = new ConcurrentHashMap<>();
+    private static final int DEFAULT_PAGE_SIZE = 40;
+    private final Map<String, Integer> visibleLimits = new ConcurrentHashMap<>();
 
     // Rail navigation
     private final JPanel rail = new JPanel();
@@ -1410,6 +1405,7 @@ public final class ChatWorkspace extends JPanel {
 
         composer.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
         showHint("Bản nháp riêng cho cuộc trò chuyện này", DiscordTheme.TEXT_MUTED);
+        visibleLimits.remove(transcriptCacheKey(conversation.id(), conversation.isGroup() ? selectedChannel : ""));
         rebuildConversationButtons();
         rebuildInfoPane(conversation);
         rebuildTranscript();
@@ -1517,7 +1513,7 @@ public final class ChatWorkspace extends JPanel {
         // 1. Instant render from cache (0ms delay, no freezing, no flicker)
         List<ChatMessage> cached = messageCache.get(key);
         if (cached != null) {
-            renderTranscriptRows(new ArrayList<>(cached), chan);
+            renderTranscriptRows(new ArrayList<>(cached), chan, true);
         } else {
             renderLoadingTranscript(chan);
         }
@@ -1569,7 +1565,8 @@ public final class ChatWorkspace extends JPanel {
                             currentList.add(opt);
                         }
                     }
-                    renderTranscriptRows(new ArrayList<>(currentList), targetChan);
+                    boolean wasAtBottom = (cached == null) || isScrollAtBottom();
+                    renderTranscriptRows(new ArrayList<>(currentList), targetChan, wasAtBottom);
                 }
             }
         }));
@@ -1596,28 +1593,86 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void renderTranscriptRows(List<ChatMessage> history, String chan) {
+        renderTranscriptRows(history, chan, true);
+    }
+
+    private void renderTranscriptRows(List<ChatMessage> history, String chan, boolean scrollToBottom) {
         transcript.removeAll();
-        transcript.add(buildIntroRow());
 
         if (history.isEmpty()) {
+            transcript.add(buildIntroRow());
             JLabel empty = new JLabel("Chưa có tin nhắn trong " + (chan.isEmpty() ? "cuộc trò chuyện này." : "#" + chan + "."));
             empty.setFont(DiscordTheme.font(13f));
             empty.setForeground(DiscordTheme.TEXT_MUTED);
             empty.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
             transcript.add(empty);
         } else {
+            String key = transcriptCacheKey(selectedConversationId, chan);
+            int limit = visibleLimits.getOrDefault(key, DEFAULT_PAGE_SIZE);
+            int total = history.size();
+            int startIndex = Math.max(0, total - limit);
+            List<ChatMessage> visible = history.subList(startIndex, total);
+
+            if (startIndex > 0) {
+                JPanel loadOlderBar = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 6));
+                loadOlderBar.setOpaque(false);
+                JButton loadOlderBtn = new JButton("↑ Tải thêm tin nhắn cũ hơn (" + startIndex + " tin)");
+                loadOlderBtn.setFont(DiscordTheme.semibold(12f));
+                loadOlderBtn.setForeground(DiscordTheme.TEXT_SECONDARY);
+                loadOlderBtn.setBackground(DiscordTheme.SUNKEN);
+                loadOlderBtn.setFocusPainted(false);
+                loadOlderBtn.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(DiscordTheme.HAIRLINE, 1),
+                        BorderFactory.createEmptyBorder(6, 16, 6, 16)));
+                loadOlderBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                loadOlderBtn.addMouseListener(new MouseAdapter() {
+                    @Override
+                    public void mouseEntered(MouseEvent e) {
+                        loadOlderBtn.setForeground(DiscordTheme.TEXT_PRIMARY);
+                        loadOlderBtn.setBackground(DiscordTheme.SELECTED);
+                    }
+
+                    @Override
+                    public void mouseExited(MouseEvent e) {
+                        loadOlderBtn.setForeground(DiscordTheme.TEXT_SECONDARY);
+                        loadOlderBtn.setBackground(DiscordTheme.SUNKEN);
+                    }
+                });
+                loadOlderBtn.addActionListener(e -> {
+                    visibleLimits.put(key, limit + DEFAULT_PAGE_SIZE);
+                    int oldMax = transcriptScroll.getVerticalScrollBar().getMaximum();
+                    int oldVal = transcriptScroll.getVerticalScrollBar().getValue();
+                    renderTranscriptRows(history, chan, false);
+                    transcript.revalidate();
+                    transcriptScroll.validate();
+                    int newMax = transcriptScroll.getVerticalScrollBar().getMaximum();
+                    int targetVal = oldVal + (newMax - oldMax);
+                    transcriptScroll.getVerticalScrollBar().setValue(targetVal);
+                    transcript.repaint();
+                    SwingUtilities.invokeLater(() -> transcriptScroll.getVerticalScrollBar().setValue(targetVal));
+                });
+                loadOlderBar.add(loadOlderBtn);
+                transcript.add(loadOlderBar);
+            } else {
+                transcript.add(buildIntroRow());
+            }
+
             String previousSenderId = null;
             MessageRow.MessageActionListener actionListener = createActionListener(chan);
 
-            for (ChatMessage message : history) {
+            for (ChatMessage message : visible) {
                 boolean beginsGroup = !message.senderId().equals(previousSenderId);
                 transcript.add(new MessageRow(message, defaultWrapWidth(), beginsGroup, actionListener));
                 previousSenderId = message.senderId();
             }
         }
-        transcript.revalidate();
-        transcript.repaint();
-        scrollTranscriptToEnd();
+
+        if (scrollToBottom) {
+            scrollTranscriptToEnd();
+        } else {
+            transcript.revalidate();
+            transcript.repaint();
+        }
     }
 
     private MessageRow.MessageActionListener createActionListener(final String chan) {
@@ -1678,7 +1733,7 @@ public final class ChatWorkspace extends JPanel {
                     }
                 }
                 if (!updatedInPlace) {
-                    renderTranscriptRows(new ArrayList<>(currentList), chan);
+                    renderTranscriptRows(new ArrayList<>(currentList), chan, isScrollAtBottom());
                 }
                 CompletableFuture.runAsync(() -> chatService.recall(selectedConversationId, message.id()))
                         .exceptionally(ex -> {
@@ -1705,7 +1760,7 @@ public final class ChatWorkspace extends JPanel {
                     }
                 }
                 if (!removedInPlace) {
-                    renderTranscriptRows(new ArrayList<>(currentList), chan);
+                    renderTranscriptRows(new ArrayList<>(currentList), chan, isScrollAtBottom());
                 }
                 CompletableFuture.runAsync(() -> chatService.delete(selectedConversationId, message.id()))
                         .exceptionally(ex -> {
@@ -1743,8 +1798,8 @@ public final class ChatWorkspace extends JPanel {
         }
         boolean beginsGroup = (previousSenderId == null || !previousSenderId.equals(msg.senderId()));
         transcript.add(new MessageRow(msg, defaultWrapWidth(), beginsGroup, createActionListener(chan)));
-        transcript.revalidate();
-        transcript.repaint();
+        String key = transcriptCacheKey(selectedConversationId, chan);
+        visibleLimits.compute(key, (k, v) -> (v == null ? DEFAULT_PAGE_SIZE : v) + 1);
         scrollTranscriptToEnd();
     }
 
@@ -1777,10 +1832,20 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void scrollTranscriptToEnd() {
-        SwingUtilities.invokeLater(() -> {
-            JScrollPane scroll = transcriptScroll;
-            scroll.getVerticalScrollBar().setValue(scroll.getVerticalScrollBar().getMaximum());
-        });
+        transcript.revalidate();
+        transcriptScroll.validate();
+        JScrollBar bar = transcriptScroll.getVerticalScrollBar();
+        bar.setValue(bar.getMaximum());
+        transcript.repaint();
+        SwingUtilities.invokeLater(() -> bar.setValue(bar.getMaximum()));
+    }
+
+    private boolean isScrollAtBottom() {
+        JScrollBar bar = transcriptScroll.getVerticalScrollBar();
+        int extent = bar.getModel().getExtent();
+        int max = bar.getMaximum();
+        int val = bar.getValue();
+        return (max - extent - val) <= 50;
     }
 
     private void adjustComposerHeight() {
