@@ -132,7 +132,8 @@ public final class ChatWorkspace extends JPanel {
         this.onLogout = onLogout;
         boolean isConnected = chatService.isServerConnected();
         this.loadingConversations = isConnected;
-        this.conversations = new ArrayList<>(isConnected
+        boolean isLocalNewUser = user != null && user.id().startsWith("local-");
+        this.conversations = new ArrayList<>(isConnected || isLocalNewUser
                 ? Collections.emptyList()
                 : chatService.conversations());
 
@@ -175,28 +176,29 @@ public final class ChatWorkspace extends JPanel {
             }
         }).thenAccept(latest -> SwingUtilities.invokeLater(() -> {
             loadingConversations = false;
-            if (!latest.isEmpty()) {
-                conversations.clear();
+            conversations.clear();
+            if (latest != null && !latest.isEmpty()) {
                 conversations.addAll(latest);
-                rebuildRail();
-                rebuildConversationButtons();
-            } else {
-                rebuildConversationButtons();
             }
-            if (selectedConversationId == null && !conversations.isEmpty()) {
+            rebuildRail();
+            rebuildConversationButtons();
+
+            if (conversations.isEmpty()) {
+                selectedConversationId = null;
+                renderEmptyWorkspaceState();
+                return;
+            }
+
+            if (selectedConversationId == null || currentConversation() == null) {
                 selectConversation(conversations.getFirst());
                 return;
             }
             Conversation conv = currentConversation();
-            if (conv != null) {
-                if (conv.isGroup()) {
-                    rebuildGroupChannels(conv);
-                }
-                rebuildInfoPane(conv);
-                rebuildTranscript();
-            } else {
-                renderEmptyWorkspaceState();
+            if (conv.isGroup()) {
+                rebuildGroupChannels(conv);
             }
+            rebuildInfoPane(conv);
+            rebuildTranscript();
         }));
     }
 

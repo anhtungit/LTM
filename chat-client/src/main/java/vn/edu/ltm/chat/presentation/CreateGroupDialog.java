@@ -80,9 +80,6 @@ public final class CreateGroupDialog extends JDialog {
                 String role = (u.bio() != null && !u.bio().isBlank()) ? u.bio() : u.statusLabel();
                 candidates.add(new FriendCandidate(u.id(), u.displayName(), u.initials(), role));
             }
-            for (int i = 0; i < Math.min(2, candidates.size()); i++) {
-                selectedIds.add(candidates.get(i).id());
-            }
             updateSummary();
             return;
         }
@@ -93,10 +90,6 @@ public final class CreateGroupDialog extends JDialog {
         candidates.add(new FriendCandidate("4", "Phạm Quang Huy", "QH", "Lập trình viên"));
         candidates.add(new FriendCandidate("5", "Đỗ Hoàng Nam", "HN", "Đang hoạt động"));
 
-        // Default 3 selected as in Canvas 03
-        selectedIds.add("1");
-        selectedIds.add("2");
-        selectedIds.add("3");
         updateSummary();
     }
 

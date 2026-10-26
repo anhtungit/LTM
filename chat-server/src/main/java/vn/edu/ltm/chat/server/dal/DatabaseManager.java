@@ -784,7 +784,7 @@ public final class DatabaseManager {
      */
     public synchronized List<ConversationDto> listConversationsForUser(String userId) {
         if (userId == null || userId.isBlank()) {
-            return listConversations();
+            return List.of();
         }
         UserDto user = findUser(userId);
         String userDisplayName = user != null ? user.displayName() : "";
@@ -820,18 +820,25 @@ public final class DatabaseManager {
 
         // 2. Add groups where user is a member
         for (ConversationDto c : all) {
-            if (c.isGroup() && isMemberOfGroup(userId, userDisplayName, c.members())) {
+            if (c.isGroup() && isMemberOfGroup(c.id(), userId, userDisplayName, c.members())) {
                 result.add(c);
             }
         }
         return result;
     }
 
-    private boolean isMemberOfGroup(String userId, String displayName, List<String> members) {
+    private boolean isMemberOfGroup(String groupConvId, String userId, String displayName, List<String> members) {
         if (members == null || members.isEmpty()) return false;
+        // Demo seed groups only belong to demo accounts (mai-phuong, an-nguyen)
+        if ("nhom-ban-than".equals(groupConvId) || "ltm-studio".equals(groupConvId) || "phong-chill".equals(groupConvId)) {
+            return "mai-phuong".equalsIgnoreCase(userId) || "an-nguyen".equalsIgnoreCase(userId);
+        }
         for (String m : members) {
             if (m == null) continue;
-            if (m.equalsIgnoreCase(userId) || (!displayName.isBlank() && m.equalsIgnoreCase(displayName))) {
+            if (userId != null && !userId.isBlank() && m.equalsIgnoreCase(userId)) {
+                return true;
+            }
+            if (displayName != null && !displayName.isBlank() && m.equalsIgnoreCase(displayName)) {
                 return true;
             }
         }

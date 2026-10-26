@@ -293,6 +293,9 @@ public final class TcpChatGateway implements ChatGateway {
             }
             return result;
         } catch (Exception e) {
+            if (currentUserId != null && !currentUserId.isBlank()) {
+                return Collections.emptyList();
+            }
             return fallback.listConversations();
         }
     }

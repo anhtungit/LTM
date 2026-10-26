@@ -310,6 +310,12 @@ class ChatServerTest {
             MessageDto[] u2HistoryWithAn = readNextNonStatus(in2).getObj("messages", MessageDto[].class);
             assertEquals(0, u2HistoryWithAn.length);
 
+            // LIST_CONVERSATIONS_REQ with blank userId returns 0 conversations (never dumps db)
+            out2.println(new Packet("LIST_CONVERSATIONS_REQ", "u2-blank")
+                    .put("userId", "").toJsonLine());
+            ConversationDto[] blankConvs = readNextNonStatus(in2).getObj("conversations", ConversationDto[].class);
+            assertEquals(0, blankConvs.length);
+
             // While User 1 sees their 1 message with An Nguyễn
             out1.println(new Packet("GET_CHAT_HISTORY_REQ", "u1-hist")
                     .put("userId", user1.id())
