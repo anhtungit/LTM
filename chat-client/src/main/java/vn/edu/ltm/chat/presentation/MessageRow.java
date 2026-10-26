@@ -18,20 +18,21 @@ import javax.swing.SwingConstants;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.FlowLayout;
-import java.awt.Container;
+import java.awt.Font;
 import java.awt.Insets;
 import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.PointerInfo;
 import java.awt.Rectangle;
-import java.awt.Point;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.Map;
 
 /** One message row: avatar, author, text, inline editor, file attachment card, and action buttons. */
@@ -57,6 +58,8 @@ final class MessageRow extends JPanel {
         void onResend(ChatMessage message);
         default void onDownload(ChatMessage message) {}
         default void onReact(ChatMessage message, String emoji) {}
+        default void onReaction(ChatMessage message, String emoji) { onReact(message, emoji); }
+        default void onReply(ChatMessage message) {}
     }
 
     private ChatMessage message;
@@ -65,6 +68,7 @@ final class MessageRow extends JPanel {
     private final JPanel contentHolder = new JPanel(new BorderLayout(0, 6));
     private final RoundedPanel actionToolbar = new RoundedPanel(6);
     private final Timer hideToolbarTimer;
+    private final JLabel compactTimeLabel;
     private final MouseAdapter hoverAdapter;
     private WrappedTextArea normalText;
     private boolean isEditing = false;
@@ -81,12 +85,21 @@ final class MessageRow extends JPanel {
         this.listener = listener;
         this.currentWrapWidth = wrapWidth;
 
-        this.hideToolbarTimer = new Timer(350, e -> {
-            Point p = getMousePosition();
-            if (p == null) {
-                if (actionToolbar.isVisible()) {
-                    actionToolbar.setVisible(false);
+        this.hideToolbarTimer = new Timer(200, e -> {
+            try {
+                PointerInfo pi = MouseInfo.getPointerInfo();
+                if (pi != null && isShowing()) {
+                    Point pt = pi.getLocation();
+                    Point loc = getLocationOnScreen();
+                    Rectangle bounds = new Rectangle(loc.x, loc.y, getWidth(), getHeight());
+                    if (bounds.contains(pt)) {
+                        return;
+                    }
                 }
+            } catch (Exception ignored) {}
+            hideToolbar();
+            if (activeHoveredRow == this) {
+                activeHoveredRow = null;
             }
         });
         this.hideToolbarTimer.setRepeats(false);
@@ -151,6 +164,17 @@ final class MessageRow extends JPanel {
             }
         };
         attachHoverRecursively(this);
+    }
+
+    public void hideToolbar() {
+        hideToolbarTimer.stop();
+        if (actionToolbar.isVisible()) {
+            actionToolbar.setVisible(false);
+        }
+        if (compactTimeLabel != null) {
+            compactTimeLabel.setVisible(false);
+        }
+        repaint();
     }
 
     private JPanel buildAuthorRow(ChatMessage message) {
