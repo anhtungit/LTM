@@ -608,6 +608,7 @@ public final class TcpChatGateway implements ChatGateway {
             request(p);
         } catch (Exception e) {
             System.err.println("[TcpChatGateway] Error sending reaction: " + e.getMessage());
+            throw new RuntimeException(e.getMessage(), e);
         }
     }
 }
