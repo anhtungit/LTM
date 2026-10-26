@@ -21,7 +21,6 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;

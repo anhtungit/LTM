@@ -18,6 +18,11 @@ import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 
@@ -201,6 +206,28 @@ public final class RichComposerPane extends JTextPane {
 
     public boolean isMessageEmpty() {
         return getMessageText().trim().isEmpty();
+    }
+
+    private String placeholder = "Nhập tin nhắn...";
+
+    public void setPlaceholder(String placeholder) {
+        this.placeholder = placeholder;
+        repaint();
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        if (getText().isEmpty() && placeholder != null && !placeholder.isEmpty()) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g2.setColor(DiscordTheme.TEXT_MUTED);
+            g2.setFont(getFont());
+            Insets insets = getInsets();
+            FontMetrics fm = g2.getFontMetrics();
+            g2.drawString(placeholder, insets.left + 2, insets.top + fm.getAscent());
+            g2.dispose();
+        }
     }
 }
 

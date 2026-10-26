@@ -57,3 +57,4 @@
 - **Quy tắc Git**:
   - Viết commit message ngắn gọn theo chuẩn Conventional Commits (`feat(...)`, `fix(...)`, `refactor(...)`).
   - Luôn `git pull --rebase origin main` trước khi push và đồng bộ lên cả hai remote: `origin` (`anhtungit/LTM`) và `dunggawr` (`dunggawr/LTM`).
+

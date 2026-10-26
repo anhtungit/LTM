@@ -15,22 +15,22 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 /** One message row: avatar, author, text, inline editor, file attachment card, and action buttons. */
 final class MessageRow extends JPanel {
-    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("M/d/yy, h:mm a", Locale.ENGLISH);
     private static final int AVATAR_SIZE = 34;
     private static final int AVATAR_GAP = 12;
 
@@ -40,6 +40,8 @@ final class MessageRow extends JPanel {
         void onDelete(ChatMessage message);
         void onResend(ChatMessage message);
         default void onDownload(ChatMessage message) {}
+        default void onReaction(ChatMessage message, String emoji) {}
+        default void onReply(ChatMessage message) {}
     }
 
     private ChatMessage message;
@@ -67,15 +69,15 @@ final class MessageRow extends JPanel {
         setLayout(new BorderLayout(AVATAR_GAP, 0));
         setOpaque(false);
         setAlignmentX(CENTER_ALIGNMENT);
-        setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 7 : 2, 0, 4, 0));
+        setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 7 : 2, 4, 4, 4));
 
         boolean isMe = message.fromCurrentUser();
         if (beginsSenderGroup) {
             AvatarBadge avatar = new AvatarBadge(message.senderInitials(), message.senderId(), AVATAR_SIZE);
             avatar.setToolTipText(isMe ? "Tin nhắn của bạn" : "Tin nhắn từ " + message.senderName());
-            add(avatar, isMe ? BorderLayout.EAST : BorderLayout.WEST);
+            add(avatar, BorderLayout.WEST);
         } else {
-            add(Box.createRigidArea(new Dimension(AVATAR_SIZE, 1)), isMe ? BorderLayout.EAST : BorderLayout.WEST);
+            add(Box.createRigidArea(new Dimension(AVATAR_SIZE, 1)), BorderLayout.WEST);
         }
 
         body.setOpaque(false);
@@ -101,7 +103,7 @@ final class MessageRow extends JPanel {
             @Override
             public void mouseEntered(MouseEvent e) {
                 hideToolbarTimer.stop();
-                if (!isEditing && MessageRow.this.message.fromCurrentUser() && !MessageRow.this.message.recalled()) {
+                if (!isEditing && !MessageRow.this.message.recalled()) {
                     if (!actionToolbar.isVisible()) {
                         actionToolbar.setVisible(true);
                     }
@@ -124,46 +126,25 @@ final class MessageRow extends JPanel {
         authorRow.setOpaque(false);
         boolean isMe = message.fromCurrentUser();
 
-        if (isMe) {
-            JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            right.setOpaque(false);
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        left.setOpaque(false);
 
-            String timeStr = TIME_FORMAT.format(message.sentAt());
-            if (message.edited()) {
-                timeStr += " (đã sửa)";
-            }
-            JLabel time = new JLabel(timeStr);
-            time.setFont(DiscordTheme.font(10f));
-            time.setForeground(DiscordTheme.TEXT_MUTED);
-            right.add(time);
+        JLabel author = new JLabel(message.senderName() != null ? message.senderName() : (isMe ? "Bạn" : "Người dùng"));
+        author.setFont(DiscordTheme.bold(13.5f));
+        author.setForeground(isMe ? new Color(0x58, 0x65, 0xF2) : Color.WHITE);
+        left.add(author);
 
-            JLabel author = new JLabel("Bạn");
-            author.setFont(DiscordTheme.bold(13f));
-            author.setForeground(new Color(0x58, 0x65, 0xF2));
-            right.add(author);
-
-            authorRow.add(right, BorderLayout.EAST);
-        } else {
-            JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            left.setOpaque(false);
-
-            JLabel author = new JLabel(message.senderName());
-            author.setFont(DiscordTheme.bold(13f));
-            author.setForeground(Color.WHITE);
-            left.add(author);
-
-            String timeStr = TIME_FORMAT.format(message.sentAt());
-            if (message.edited()) {
-                timeStr += " (đã sửa)";
-            }
-            JLabel time = new JLabel(timeStr);
-            time.setFont(DiscordTheme.font(10f));
-            time.setForeground(DiscordTheme.TEXT_MUTED);
-            left.add(time);
-
-            authorRow.add(left, BorderLayout.WEST);
+        String timeStr = TIME_FORMAT.format(message.sentAt());
+        if (message.edited()) {
+            timeStr += " (đã sửa)";
         }
+        JLabel time = new JLabel(timeStr);
+        time.setFont(DiscordTheme.font(10.5f));
+        time.setForeground(DiscordTheme.TEXT_MUTED);
+        left.add(time);
 
+        authorRow.add(left, BorderLayout.WEST);
+        authorRow.add(actionToolbar, BorderLayout.EAST);
         return authorRow;
     }
 
@@ -182,26 +163,44 @@ final class MessageRow extends JPanel {
     private void buildNormalContent() {
         contentHolder.removeAll();
         boolean isMe = message.fromCurrentUser();
-        int flowAlign = isMe ? FlowLayout.RIGHT : FlowLayout.LEFT;
 
-        // Re-setup actionToolbar buttons according to current message state
-        if (isMe && !message.recalled()) {
-            actionToolbar.removeAll();
-            if (!message.hasAttachment()) {
-                JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
-                actionToolbar.add(editBtn);
+        // Re-setup actionToolbar buttons
+        actionToolbar.removeAll();
+        if (!message.recalled()) {
+            String[] quickEmojis = {"🐧", "💩", "❤️"};
+            for (String emo : quickEmojis) {
+                JButton emoBtn = new JButton(emo);
+                emoBtn.setFont(DiscordTheme.font(12f));
+                emoBtn.setContentAreaFilled(false);
+                emoBtn.setBorderPainted(false);
+                emoBtn.setFocusable(false);
+                emoBtn.setMargin(new Insets(0, 3, 0, 3));
+                emoBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                emoBtn.addActionListener(e -> {
+                    if (listener != null) listener.onReaction(message, emo);
+                });
+                actionToolbar.add(emoBtn);
             }
-            JButton recallBtn = createToolbarButton("arrow-clockwise.svg", "Thu hồi tin nhắn", () -> {
-                if (listener != null) listener.onRecall(message);
+
+            JButton replyBtn = createToolbarButton("arrow-u-up-left.svg", "Trả lời", () -> {
+                if (listener != null) listener.onReply(message);
             });
-            recallBtn.setToolTipText("Thu hồi tin nhắn");
-            JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
-                if (listener != null) listener.onDelete(message);
-            });
-            actionToolbar.add(recallBtn);
-            actionToolbar.add(deleteBtn);
-        } else {
-            actionToolbar.setVisible(false);
+            actionToolbar.add(replyBtn);
+
+            if (isMe) {
+                if (!message.hasAttachment()) {
+                    JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
+                    actionToolbar.add(editBtn);
+                }
+                JButton recallBtn = createToolbarButton("arrow-clockwise.svg", "Thu hồi tin nhắn", () -> {
+                    if (listener != null) listener.onRecall(message);
+                });
+                JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
+                    if (listener != null) listener.onDelete(message);
+                });
+                actionToolbar.add(recallBtn);
+                actionToolbar.add(deleteBtn);
+            }
         }
 
         if (message.recalled()) {
@@ -213,7 +212,7 @@ final class MessageRow extends JPanel {
             recalledLabel.setForeground(DiscordTheme.TEXT_MUTED);
             bubble.add(recalledLabel);
 
-            JPanel holder = new JPanel(new FlowLayout(flowAlign, 0, 0));
+            JPanel holder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             holder.setOpaque(false);
             holder.add(bubble);
             contentHolder.add(holder, BorderLayout.NORTH);
@@ -242,53 +241,115 @@ final class MessageRow extends JPanel {
                 mainContentComp = createBubbleText(text != null ? text : "", isMe);
             }
 
-            if (isMe) {
-                JPanel rowWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-                rowWrapper.setOpaque(false);
-                rowWrapper.add(actionToolbar);
-                rowWrapper.add(mainContentComp);
-                contentHolder.add(rowWrapper, BorderLayout.NORTH);
-            } else {
-                JPanel rowWrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-                rowWrapper.setOpaque(false);
-                rowWrapper.add(mainContentComp);
-                contentHolder.add(rowWrapper, BorderLayout.NORTH);
+            JPanel rowWrapper = new JPanel(new BorderLayout(8, 0));
+            rowWrapper.setOpaque(false);
+            rowWrapper.add(mainContentComp, BorderLayout.WEST);
+            if (!body.isAncestorOf(actionToolbar)) {
+                rowWrapper.add(actionToolbar, BorderLayout.EAST);
+            }
+            contentHolder.add(rowWrapper, BorderLayout.NORTH);
+
+            // Link embed card preview
+            String firstUrl = extractFirstUrl(text);
+            if (firstUrl != null) {
+                JPanel linkHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
+                linkHolder.setOpaque(false);
+                linkHolder.add(buildLinkPreviewCard(firstUrl));
+                contentHolder.add(linkHolder, BorderLayout.CENTER);
             }
 
             if (hasAttachment && !isDefaultAttachmentText) {
-                JPanel attachHolder = new JPanel(new FlowLayout(flowAlign, 0, 4));
+                JPanel attachHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
                 attachHolder.setOpaque(false);
                 attachHolder.add(buildAttachmentCard());
-                contentHolder.add(attachHolder, BorderLayout.CENTER);
+                contentHolder.add(attachHolder, BorderLayout.SOUTH);
             }
         }
         contentHolder.revalidate();
         contentHolder.repaint();
     }
 
+    private static String extractFirstUrl(String text) {
+        if (text == null) return null;
+        int idx = text.indexOf("http://");
+        if (idx == -1) idx = text.indexOf("https://");
+        if (idx == -1) return null;
+        int end = text.indexOf(' ', idx);
+        if (end == -1) end = text.indexOf('\n', idx);
+        if (end == -1) end = text.length();
+        return text.substring(idx, end).trim();
+    }
+
+    private JComponent buildLinkPreviewCard(String url) {
+        RoundedPanel card = new RoundedPanel(8);
+        card.setLayout(new BorderLayout(8, 6));
+        card.setBackground(new Color(0x2B, 0x2D, 0x31));
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x1E, 0x1F, 0x22), 1),
+                BorderFactory.createEmptyBorder(10, 14, 10, 14)
+        ));
+        card.setMaximumSize(new Dimension(Math.min(460, currentWrapWidth - 60), 80));
+
+        JLabel subtitle = new JLabel(url.contains("discord.gg") ? "You've been invited, but" : "Xem trước liên kết");
+        subtitle.setFont(DiscordTheme.font(11f));
+        subtitle.setForeground(DiscordTheme.TEXT_MUTED);
+        card.add(subtitle, BorderLayout.NORTH);
+
+        JPanel centerRow = new JPanel(new BorderLayout(10, 0));
+        centerRow.setOpaque(false);
+
+        RoundedPanel iconBox = new RoundedPanel(6);
+        iconBox.setPreferredSize(new Dimension(38, 38));
+        iconBox.setBackground(new Color(0xDA, 0x37, 0x3C, 45));
+        iconBox.setLayout(new GridBagLayout());
+        JLabel mailIcon = new JLabel(IconFactory.phosphor("envelope.svg", 18, new Color(0xF2, 0x3F, 0x43)));
+        iconBox.add(mailIcon);
+        centerRow.add(iconBox, BorderLayout.WEST);
+
+        JPanel textBlock = new JPanel();
+        textBlock.setOpaque(false);
+        textBlock.setLayout(new BoxLayout(textBlock, BoxLayout.Y_AXIS));
+
+        JLabel title = new JLabel(url.contains("discord.gg") ? "Invalid Invite" : "Liên kết");
+        title.setFont(DiscordTheme.bold(13f));
+        title.setForeground(new Color(0xF2, 0x3F, 0x43));
+        textBlock.add(title);
+        textBlock.add(Box.createVerticalStrut(2));
+
+        JLabel desc = new JLabel(url.contains("discord.gg") ? "Ask for a new invite" : url);
+        desc.setFont(DiscordTheme.font(11f));
+        desc.setForeground(DiscordTheme.TEXT_MUTED);
+        textBlock.add(desc);
+
+        centerRow.add(textBlock, BorderLayout.CENTER);
+        card.add(centerRow, BorderLayout.CENTER);
+
+        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
+        wrapper.setOpaque(false);
+        wrapper.add(card);
+        return wrapper;
+    }
+
     private JComponent createBubbleText(String text, boolean isMe) {
-        RoundedPanel bubble = new RoundedPanel(14);
-        bubble.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
-        if (isMe) {
-            bubble.setBackground(DiscordTheme.BLURPLE);
-        } else {
-            bubble.setBackground(new Color(0x2B, 0x2D, 0x31));
-        }
+        RoundedPanel bubble = new RoundedPanel(12);
+        bubble.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
+        bubble.setBackground(new Color(0x2B, 0x2D, 0x31));
 
         int maxBubbleWidth = Math.max(80, Math.min(520, currentWrapWidth - 60));
 
         if (EmojiAssets.containsEmoji(text)) {
             String html = EmojiAssets.toHtml(text, maxBubbleWidth);
-            if (isMe) {
-                html = html.replace("color:#D9DADE", "color:#FFFFFF");
-            }
             JLabel emoLabel = new JLabel(html);
             emoLabel.setBorder(null);
             bubble.add(emoLabel);
         } else {
             normalText = new WrappedTextArea(text, maxBubbleWidth);
             normalText.setFont(DiscordTheme.font(13.5f));
-            normalText.setForeground(isMe ? Color.WHITE : new Color(0xDB, 0xDE, 0xE1));
+            if (text != null && (text.contains("http://") || text.contains("https://"))) {
+                normalText.setForeground(new Color(0x00, 0xA8, 0xFC));
+            } else {
+                normalText.setForeground(new Color(0xDB, 0xDE, 0xE1));
+            }
             normalText.setBorder(null);
             bubble.add(normalText);
         }

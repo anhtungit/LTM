@@ -16,7 +16,6 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.lang.reflect.InvocationTargetException;
 
 /**
  * Dev-only helper: renders the real panels offscreen to PNG so layout regressions can be checked

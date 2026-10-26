@@ -40,6 +40,7 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -79,8 +80,7 @@ public final class ChatWorkspace extends JPanel {
     private final Map<String, Integer> visibleLimits = new ConcurrentHashMap<>();
 
     // Rail navigation
-    private final JPanel rail = new JPanel();
-    private String activeRailGroupId = "dm"; // "dm" or conversationId of group
+    private final ChatRailPanel railPanel;
 
     // Main workspace center switching
     private final CardLayout centerLayout = new CardLayout();
@@ -104,13 +104,10 @@ public final class ChatWorkspace extends JPanel {
     private final JScrollPane transcriptScroll = new JScrollPane(transcript);
     private final RichComposerPane composer = new RichComposerPane(this::sendCurrentMessage);
     private final JScrollPane composerScroll = new JScrollPane(composer);
-    private final JLabel conversationTitle = new JLabel();
-    private final JLabel conversationSubtitle = new JLabel();
+    private final ChatHeaderPanel headerPanel;
     private final JLabel composerHint = new JLabel("Bản nháp riêng cho cuộc trò chuyện này");
-    private final JPanel headerAvatarHolder = new JPanel(new BorderLayout());
     private final ChatInfoPanel infoPane = new ChatInfoPanel(this::resolveMemberDisplayName, this::resolveMemberOnline);
     private final JButton sendButton = new JButton();
-    private final JLabel connectionBadgeLabel = new JLabel();
 
     private final JPanel accountFooterDm = new JPanel(new BorderLayout());
     private final JPanel accountFooterGroup = new JPanel(new BorderLayout());
@@ -134,6 +131,33 @@ public final class ChatWorkspace extends JPanel {
                 ? Collections.emptyList()
                 : chatService.conversations());
 
+        this.railPanel = new ChatRailPanel(
+                () -> this.conversations,
+                () -> {
+                    sidebarLayout.show(sidebarHost, "dm-sidebar");
+                    showChatView();
+                    for (Conversation c : conversations) {
+                        if (!c.isGroup()) {
+                            selectConversation(c);
+                            break;
+                        }
+                    }
+                },
+                conv -> {
+                    selectConversation(conv);
+                    sidebarLayout.show(sidebarHost, "group-sidebar");
+                    showChatView();
+                },
+                this::openCreateGroupDialog
+        );
+
+        this.headerPanel = new ChatHeaderPanel(
+                this::showMeetLobby,
+                this::showMeetRoom,
+                this::openInboxDialog,
+                this::toggleInfoPane
+        );
+
         setLayout(new BorderLayout());
         setBackground(DiscordTheme.TRANSCRIPT);
 
@@ -144,7 +168,7 @@ public final class ChatWorkspace extends JPanel {
         body.add(buildSidebarHost(), BorderLayout.WEST);
         body.add(centerHost, BorderLayout.CENTER);
 
-        add(buildRail(), BorderLayout.WEST);
+        add(railPanel, BorderLayout.WEST);
         add(body, BorderLayout.CENTER);
 
         setMinimumSize(new Dimension(780, 520));
@@ -165,7 +189,7 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void handlePresenceUpdate() {
-        refreshConnectionBadge();
+        headerPanel.refreshConnectionBadge(chatService.isServerConnected());
         rebuildConversationButtons();
         Conversation conv = currentConversation();
         if (conv != null) {
@@ -175,7 +199,7 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void handleServerBroadcast() {
-        refreshConnectionBadge();
+        headerPanel.refreshConnectionBadge(chatService.isServerConnected());
         CompletableFuture.supplyAsync(() -> {
             if (userProfileCache.isEmpty()) {
                 try {
@@ -199,7 +223,7 @@ public final class ChatWorkspace extends JPanel {
             if (latest != null && !latest.isEmpty()) {
                 conversations.addAll(latest);
             }
-            rebuildRail();
+            railPanel.rebuild();
             rebuildConversationButtons();
 
             if (conversations.isEmpty()) {
@@ -243,108 +267,6 @@ public final class ChatWorkspace extends JPanel {
 
     private void showGames() {
         centerLayout.show(centerHost, "game");
-    }
-
-    // ---------------------------------------------------------------- rail
-
-    private JComponent buildRail() {
-        rail.setLayout(new BoxLayout(rail, BoxLayout.Y_AXIS));
-        rail.setBackground(DiscordTheme.RAIL);
-        rail.setBorder(BorderFactory.createEmptyBorder(14, 6, 14, 6));
-        rail.setPreferredSize(new Dimension(72, 0));
-
-        rebuildRail();
-        return rail;
-    }
-
-    private void rebuildRail() {
-        rail.removeAll();
-
-        // 1. Direct Messages Tile
-        boolean isDmActive = "dm".equals(activeRailGroupId);
-        RailTile dmTile = new RailTile(null,
-                IconFactory.phosphor("chat-circle-dots.svg", 25, Color.WHITE),
-                isDmActive, true, 48);
-        dmTile.setToolTipText("Tin nhắn trực tiếp");
-        dmTile.addActionListener(e -> {
-            activeRailGroupId = "dm";
-            sidebarLayout.show(sidebarHost, "dm-sidebar");
-            showChatView();
-            for (Conversation c : conversations) {
-                if (!c.isGroup()) {
-                    selectConversation(c);
-                    break;
-                }
-            }
-            rebuildRail();
-        });
-        rail.add(railEntry(dmTile, isDmActive));
-        rail.add(Box.createVerticalStrut(10));
-        rail.add(railDivider());
-        rail.add(Box.createVerticalStrut(10));
-
-        // 2. Dynamic Group Tiles for all group servers
-        for (Conversation conv : conversations) {
-            if (conv.isGroup()) {
-                boolean isActiveGroup = conv.id().equals(activeRailGroupId);
-                RailTile groupTile = new RailTile(conv.initials(), null, isActiveGroup, true, 48);
-                groupTile.setToolTipText(conv.displayName() + " · Bấm để vào nhóm");
-                groupTile.addActionListener(e -> {
-                    activeRailGroupId = conv.id();
-                    selectConversation(conv);
-                    sidebarLayout.show(sidebarHost, "group-sidebar");
-                    showChatView();
-                    rebuildRail();
-                });
-                rail.add(railEntry(groupTile, isActiveGroup));
-                rail.add(Box.createVerticalStrut(8));
-            }
-        }
-
-        // 3. Add Group Tile (+)
-        RailTile addTile = new RailTile(null,
-                IconFactory.phosphor("plus.svg", 20, DiscordTheme.SUCCESS), false, false, 48);
-        addTile.setToolTipText("Tạo nhóm mới");
-        addTile.addActionListener(e -> openCreateGroupDialog());
-        rail.add(railEntry(addTile, false));
-
-        rail.add(Box.createVerticalGlue());
-        rail.revalidate();
-        rail.repaint();
-    }
-
-    private JComponent railEntry(JComponent tile, boolean active) {
-        JPanel row = new JPanel();
-        row.setOpaque(false);
-        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
-        row.setAlignmentX(CENTER_ALIGNMENT);
-        row.setMaximumSize(new Dimension(60, 48));
-
-        JComponent pill = new JPanel();
-        pill.setOpaque(false);
-        if (active) {
-            RoundedPanel marker = new RoundedPanel(4);
-            marker.setBackground(DiscordTheme.TEXT_PRIMARY);
-            pill = marker;
-        }
-        Dimension pillSize = new Dimension(4, 32);
-        pill.setPreferredSize(pillSize);
-        pill.setMinimumSize(pillSize);
-        pill.setMaximumSize(pillSize);
-        row.add(pill);
-        row.add(Box.createHorizontalStrut(8));
-        row.add(tile);
-        return row;
-    }
-
-    private JComponent railDivider() {
-        JPanel divider = new JPanel();
-        divider.setBackground(new Color(0x34, 0x36, 0x3B));
-        divider.setAlignmentX(CENTER_ALIGNMENT);
-        divider.setPreferredSize(new Dimension(32, 1));
-        divider.setMaximumSize(new Dimension(32, 1));
-        divider.setMinimumSize(new Dimension(32, 1));
-        return divider;
     }
 
     // ------------------------------------------------------------- sidebars
@@ -561,7 +483,8 @@ public final class ChatWorkspace extends JPanel {
                         if (selectedChannel.equals(chan)) {
                             selectedChannel = updated.channels().isEmpty() ? "chung" : updated.channels().getFirst();
                         }
-                        conversationTitle.setText("#" + selectedChannel);
+                        headerPanel.setTitle("#" + selectedChannel);
+                        composer.setPlaceholder("Message #" + selectedChannel);
                         showChatView();
                         rebuildTranscript();
                         rebuildInfoPane(updated);
@@ -591,7 +514,8 @@ public final class ChatWorkspace extends JPanel {
                 @Override
                 public void mouseClicked(MouseEvent e) {
                     selectedChannel = chan;
-                    conversationTitle.setText("#" + selectedChannel);
+                    headerPanel.setTitle("#" + selectedChannel);
+                    composer.setPlaceholder("Message #" + selectedChannel);
                     showChatView();
                     rebuildTranscript();
                     rebuildInfoPane(group);
@@ -718,7 +642,8 @@ public final class ChatWorkspace extends JPanel {
             Conversation updated = group.withAddedChannel(sanitized);
             updateConversationInList(updated);
             selectedChannel = sanitized;
-            conversationTitle.setText("#" + selectedChannel);
+            headerPanel.setTitle("#" + selectedChannel);
+            composer.setPlaceholder("Message #" + selectedChannel);
             showChatView();
             rebuildTranscript();
             rebuildInfoPane(updated);
@@ -937,7 +862,7 @@ public final class ChatWorkspace extends JPanel {
 
         JPanel messageColumn = new JPanel(new BorderLayout());
         messageColumn.setOpaque(false);
-        messageColumn.add(buildChatHeader(), BorderLayout.NORTH);
+        messageColumn.add(headerPanel, BorderLayout.NORTH);
         messageColumn.add(buildTranscriptArea(), BorderLayout.CENTER);
         messageColumn.add(buildComposer(), BorderLayout.SOUTH);
 
@@ -968,83 +893,6 @@ public final class ChatWorkspace extends JPanel {
         infoPane.setVisible(!infoPane.isVisible());
         revalidate();
         repaint();
-    }
-
-    private JComponent buildChatHeader() {
-        JPanel header = new JPanel(new BorderLayout(12, 0));
-        header.setBackground(DiscordTheme.TRANSCRIPT);
-        header.setPreferredSize(new Dimension(0, 62));
-        header.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, DiscordTheme.HAIRLINE),
-                BorderFactory.createEmptyBorder(0, 18, 0, 14)));
-
-        JPanel identity = new JPanel(new BorderLayout(11, 0));
-        identity.setOpaque(false);
-        identity.setMinimumSize(new Dimension(0, 0));
-
-        headerAvatarHolder.setOpaque(false);
-        identity.add(headerAvatarHolder, BorderLayout.WEST);
-
-        JPanel titleStack = new JPanel();
-        titleStack.setOpaque(false);
-        titleStack.setLayout(new BoxLayout(titleStack, BoxLayout.Y_AXIS));
-        titleStack.setMinimumSize(new Dimension(0, 0));
-        conversationTitle.setFont(DiscordTheme.extrabold(15f));
-        conversationTitle.setForeground(DiscordTheme.TEXT_PRIMARY);
-        conversationTitle.setAlignmentX(LEFT_ALIGNMENT);
-        conversationTitle.setMinimumSize(new Dimension(0, 0));
-        padRight(conversationTitle);
-        conversationSubtitle.setFont(DiscordTheme.font(11f));
-        conversationSubtitle.setForeground(DiscordTheme.TEXT_SECONDARY);
-        conversationSubtitle.setAlignmentX(LEFT_ALIGNMENT);
-        conversationSubtitle.setMinimumSize(new Dimension(0, 0));
-        titleStack.add(conversationTitle);
-        titleStack.add(Box.createVerticalStrut(1));
-        titleStack.add(conversationSubtitle);
-        identity.add(titleStack, BorderLayout.CENTER);
-        header.add(identity, BorderLayout.CENTER);
-
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-        actions.setOpaque(false);
-
-        JButton callVoice = iconButton("phone.svg", "Gọi thoại · Vào sảnh gặp mặt", 18, DiscordTheme.TEXT_SECONDARY);
-        callVoice.addActionListener(e -> showMeetLobby());
-        actions.add(callVoice);
-
-        JButton callVideo = iconButton("video-camera.svg", "Gọi video · Vào phòng trực tiếp", 18, DiscordTheme.TEXT_SECONDARY);
-        callVideo.addActionListener(e -> showMeetRoom());
-        actions.add(callVideo);
-
-        JButton headerInbox = iconButton("envelope-simple-open.svg", "Hộp thư thông báo (Canvas 04)", 18, DiscordTheme.TEXT_SECONDARY);
-        headerInbox.addActionListener(e -> openInboxDialog());
-        actions.add(headerInbox);
-
-        JButton memberToggle = iconButton("users.svg", "Ẩn/hiện danh sách thành viên", 18, DiscordTheme.TEXT_SECONDARY);
-        memberToggle.addActionListener(e -> toggleInfoPane());
-        actions.add(memberToggle);
-
-        actions.add(Box.createHorizontalStrut(6));
-        actions.add(connectionBadge());
-        header.add(actions, BorderLayout.EAST);
-        return header;
-    }
-
-    private JComponent connectionBadge() {
-        connectionBadgeLabel.setFont(DiscordTheme.extrabold(9f));
-        refreshConnectionBadge();
-        return connectionBadgeLabel;
-    }
-
-    private void refreshConnectionBadge() {
-        boolean online = chatService.isServerConnected();
-        connectionBadgeLabel.setText(online ? "MÁY CHỦ: ĐÃ KẾT NỐI" : "DEMO CỤC BỘ");
-        connectionBadgeLabel.setForeground(online ? DiscordTheme.SUCCESS : DiscordTheme.ACCENT_SOFT);
-        connectionBadgeLabel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(online ? DiscordTheme.SUCCESS : new Color(0x4A, 0x50, 0x99)),
-                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
-        connectionBadgeLabel.setToolTipText(online
-                ? "Đã tự động kết nối tới máy chủ chat (TCP)."
-                : "Đang chạy chế độ ngoại tuyến; sẽ tự kết nối khi phát hiện máy chủ.");
     }
 
     private JComponent buildTranscriptArea() {
@@ -1386,22 +1234,23 @@ public final class ChatWorkspace extends JPanel {
         selectedConversationId = conversation.id();
 
         if (conversation.isGroup()) {
-            activeRailGroupId = conversation.id();
+            railPanel.setActiveGroupId(conversation.id());
             if (!conversation.channels().contains(selectedChannel)) {
                 selectedChannel = conversation.channels().isEmpty() ? "chung" : conversation.channels().getFirst();
             }
             sidebarLayout.show(sidebarHost, "group-sidebar");
-            conversationTitle.setText("#" + selectedChannel);
             rebuildGroupChannels(conversation);
         } else {
-            activeRailGroupId = "dm";
+            railPanel.setActiveGroupId("dm");
             sidebarLayout.show(sidebarHost, "dm-sidebar");
-            conversationTitle.setText(conversation.displayName());
         }
-        rebuildRail();
 
-        conversationSubtitle.setText(conversation.about());
         updateHeaderAvatar(conversation);
+
+        String placeholder = conversation.isGroup()
+                ? "Message #" + selectedChannel
+                : "Message @" + conversation.displayName();
+        composer.setPlaceholder(placeholder);
 
         composer.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
         showHint("Bản nháp riêng cho cuộc trò chuyện này", DiscordTheme.TEXT_MUTED);
@@ -1412,13 +1261,11 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void updateHeaderAvatar(Conversation conversation) {
-        headerAvatarHolder.removeAll();
         boolean isPeerOnline = !conversation.isGroup() && resolveMemberOnline(conversation.id());
         AvatarBadge headerAvatar = new AvatarBadge(conversation.initials(), conversation.id(), AVATAR_SIZE,
                 isPeerOnline ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
-        headerAvatarHolder.add(headerAvatar, BorderLayout.CENTER);
-        headerAvatarHolder.revalidate();
-        headerAvatarHolder.repaint();
+        String title = conversation.isGroup() ? ("#" + selectedChannel) : conversation.displayName();
+        headerPanel.update(title, conversation.about(), headerAvatar);
     }
 
     private static void clearPanel(JComponent panel) {
@@ -1436,9 +1283,9 @@ public final class ChatWorkspace extends JPanel {
 
     private void renderEmptyWorkspaceState() {
         if (loadingConversations) {
-            conversationTitle.setText("Đang tải dữ liệu...");
-            conversationSubtitle.setText("Đang kết nối và đồng bộ dữ liệu từ máy chủ TCP.");
-            clearPanel(headerAvatarHolder);
+            headerPanel.setTitle("Đang tải dữ liệu...");
+            headerPanel.setSubtitle("Đang kết nối và đồng bộ dữ liệu từ máy chủ TCP.");
+            headerPanel.clearAvatar();
             clearPanel(infoPane);
 
             transcript.removeAll();
@@ -1455,9 +1302,9 @@ public final class ChatWorkspace extends JPanel {
             return;
         }
 
-        conversationTitle.setText("Chào mừng, " + user.displayName() + "!");
-        conversationSubtitle.setText("Bấm dấu (+) ở mục Tin nhắn trực tiếp hoặc Tạo nhóm để bắt đầu trò chuyện.");
-        clearPanel(headerAvatarHolder);
+        headerPanel.setTitle("Chào mừng, " + user.displayName() + "!");
+        headerPanel.setSubtitle("Bấm dấu (+) ở mục Tin nhắn trực tiếp hoặc Tạo nhóm để bắt đầu trò chuyện.");
+        headerPanel.clearAvatar();
         clearPanel(infoPane);
 
         transcript.removeAll();
@@ -1658,9 +1505,17 @@ public final class ChatWorkspace extends JPanel {
             }
 
             String previousSenderId = null;
+            LocalDate lastDate = null;
             MessageRow.MessageActionListener actionListener = createActionListener(chan);
 
             for (ChatMessage message : visible) {
+                LocalDate msgDate = message.sentAt().toLocalDate();
+                if (lastDate == null || !lastDate.equals(msgDate)) {
+                    transcript.add(new DateDividerRow(msgDate));
+                    lastDate = msgDate;
+                    previousSenderId = null;
+                }
+
                 boolean beginsGroup = !message.senderId().equals(previousSenderId);
                 transcript.add(new MessageRow(message, defaultWrapWidth(), beginsGroup, actionListener));
                 previousSenderId = message.senderId();
@@ -2010,10 +1865,9 @@ public final class ChatWorkspace extends JPanel {
     private void openCreateGroupDialog() {
         WorkspaceDialogs.openCreateGroupDialog(this, chatService, createdGroup -> {
             conversations.add(createdGroup);
-            activeRailGroupId = createdGroup.id();
+            railPanel.setActiveGroupId(createdGroup.id());
             selectConversation(createdGroup);
             showChatView();
-            rebuildRail();
         });
     }
 

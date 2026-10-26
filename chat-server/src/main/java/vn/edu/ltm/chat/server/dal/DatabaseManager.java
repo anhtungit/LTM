@@ -21,13 +21,9 @@ import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
-import java.util.HashSet;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
@@ -808,7 +804,7 @@ public final class DatabaseManager {
         String chan = channel == null ? "" : channel;
         String sql = """
             SELECT id, conversation_id, channel, sender_id, sender_name, sender_initials,
-                   content, sent_at, edited, recalled, attachment_name, attachment_size, attachment_failed
+                    content, sent_at, edited, recalled, attachment_name, attachment_size, attachment_failed
             FROM messages
             WHERE conversation_id = ? AND channel = ?
             ORDER BY sent_at ASC, id ASC

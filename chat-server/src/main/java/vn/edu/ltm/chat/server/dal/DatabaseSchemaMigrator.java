@@ -322,7 +322,7 @@ final class DatabaseSchemaMigrator {
     }
 
     private static void insertUserIfAbsent(Connection conn, String id, String email, String password, String displayName,
-                                           String username, String bio, String status) throws SQLException {
+                                            String username, String bio, String status) throws SQLException {
         String sql = "INSERT INTO users(id, email, password, display_name, username, bio, status) VALUES(?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -336,3 +336,4 @@ final class DatabaseSchemaMigrator {
         }
     }
 }
+
