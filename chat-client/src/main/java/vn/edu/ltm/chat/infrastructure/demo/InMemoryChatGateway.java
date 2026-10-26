@@ -30,7 +30,7 @@ public final class InMemoryChatGateway implements ChatGateway {
 
         // Group 1: Nhóm bạn thân (HB)
         Conversation groupStudy = new Conversation("nhom-ban-than", "Nhóm bạn thân", "HB",
-                "Cùng nhau học, cùng nhau tiến bộ.", true, true,
+                "Cùng nhau học, cùng nhau tiến bộ.", false, true,
                 List.of("Thảo Nguyễn", "Mai Linh", "Bảo Long", "Đức Minh"),
                 List.of("tổng-quan", "học-tập", "ảnh-chia-sẻ"),
                 List.of("Phòng chill", "Góc học chung"));
@@ -38,7 +38,7 @@ public final class InMemoryChatGateway implements ChatGateway {
 
         // Group 2: LTM Studio (LT)
         Conversation groupStudio = new Conversation("ltm-studio", "LTM Studio", "LT",
-                "Nhóm phát triển hệ thống mạng máy tính.", true, true,
+                "Nhóm phát triển hệ thống mạng máy tính.", false, true,
                 List.of("Minh Anh", "Khánh Linh", "Hữu Phúc", "Thành Đạt"),
                 List.of("chung", "chia-sẻ-tài-liệu"),
                 List.of("phòng-họp", "Thảo luận nhanh"));
@@ -238,7 +238,7 @@ public final class InMemoryChatGateway implements ChatGateway {
         String name = (groupName == null || groupName.isBlank()) ? "Nhóm mới" : groupName.trim();
         String initials = name.length() >= 2 ? name.substring(0, 2).toUpperCase() : name.toUpperCase();
         Conversation group = new Conversation(id, name, initials, "Nhóm mới tạo trong phiên demo",
-                true, true, memberNames, List.of("tổng-quan", "học-tập"), List.of("Phòng chill"));
+                false, true, memberNames, List.of("tổng-quan", "học-tập"), List.of("Phòng chill"));
         addConversation(group);
         return group;
     }

@@ -984,13 +984,13 @@ public final class ChatWorkspace extends JPanel {
 
     private void refreshConnectionBadge() {
         boolean online = chatService.isServerConnected();
-        connectionBadgeLabel.setText(online ? "TRỰC TUYẾN" : "DEMO CỤC BỘ");
+        connectionBadgeLabel.setText(online ? "MÁY CHỦ: ĐÃ KẾT NỐI" : "DEMO CỤC BỘ");
         connectionBadgeLabel.setForeground(online ? DiscordTheme.SUCCESS : DiscordTheme.ACCENT_SOFT);
         connectionBadgeLabel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(online ? DiscordTheme.SUCCESS : new Color(0x4A, 0x50, 0x99)),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)));
         connectionBadgeLabel.setToolTipText(online
-                ? "Đã tự động kết nối tới máy chủ chat (TCP/SQLite)."
+                ? "Đã tự động kết nối tới máy chủ chat (TCP)."
                 : "Đang chạy chế độ ngoại tuyến; sẽ tự kết nối khi phát hiện máy chủ.");
     }
 
@@ -1270,8 +1270,9 @@ public final class ChatWorkspace extends JPanel {
             JPanel identity = new JPanel(new GridBagLayout());
             identity.setOpaque(false);
 
+            boolean isPeerOnline = resolveMemberOnline(conversation.id());
             AvatarBadge avatar = new AvatarBadge(conversation.initials(), conversation.id(), 74,
-                    conversation.online() ? DiscordTheme.SUCCESS : null,
+                    isPeerOnline ? DiscordTheme.SUCCESS : null,
                     DiscordTheme.SIDEBAR, true);
             identity.add(avatar, centeredCell(GridBagConstraints.NONE, 0));
 
@@ -1287,9 +1288,9 @@ public final class ChatWorkspace extends JPanel {
             handle.setHorizontalAlignment(SwingConstants.CENTER);
             identity.add(handle, centeredCell(GridBagConstraints.HORIZONTAL, 2));
 
-            JLabel presence = new JLabel(conversation.online() ? "Đang hoạt động" : "Ngoại tuyến");
+            JLabel presence = new JLabel(isPeerOnline ? "Đang hoạt động" : "Ngoại tuyến");
             presence.setFont(DiscordTheme.semibold(10f));
-            presence.setForeground(conversation.online() ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_MUTED);
+            presence.setForeground(isPeerOnline ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_MUTED);
             presence.setHorizontalAlignment(SwingConstants.CENTER);
             padRight(presence);
             identity.add(presence, centeredCell(GridBagConstraints.HORIZONTAL, 3));
@@ -1470,8 +1471,9 @@ public final class ChatWorkspace extends JPanel {
         row.setPreferredSize(new Dimension(SIDEBAR_WIDTH - 20, 46));
         row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
+        boolean isPeerOnline = !conversation.isGroup() && resolveMemberOnline(conversation.id());
         AvatarBadge avatar = new AvatarBadge(conversation.initials(), conversation.id(), 30,
-                conversation.online() ? DiscordTheme.SUCCESS : null,
+                isPeerOnline ? DiscordTheme.SUCCESS : null,
                 selected ? DiscordTheme.SELECTED : DiscordTheme.SIDEBAR, true);
         row.add(avatar, BorderLayout.WEST);
 
@@ -1517,8 +1519,9 @@ public final class ChatWorkspace extends JPanel {
         conversationSubtitle.setText(conversation.about());
 
         headerAvatarHolder.removeAll();
+        boolean isPeerOnline = !conversation.isGroup() && resolveMemberOnline(conversation.id());
         AvatarBadge headerAvatar = new AvatarBadge(conversation.initials(), conversation.id(), AVATAR_SIZE,
-                (!conversation.isGroup() && conversation.online()) ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
+                isPeerOnline ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
         headerAvatarHolder.add(headerAvatar, BorderLayout.CENTER);
         headerAvatarHolder.revalidate();
         headerAvatarHolder.repaint();

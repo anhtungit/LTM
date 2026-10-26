@@ -45,6 +45,10 @@ public record UserProfile(
         return (parts[0].substring(0, 1) + parts[parts.length - 1].substring(0, 1)).toUpperCase();
     }
 
+    public boolean online() {
+        return !"offline".equalsIgnoreCase(status);
+    }
+
     public Color statusColor() {
         return switch (status) {
             case "idle" -> new Color(0xF0, 0xBB, 0x3B);

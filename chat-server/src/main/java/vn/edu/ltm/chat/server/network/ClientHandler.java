@@ -14,6 +14,7 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -163,14 +164,42 @@ public final class ClientHandler implements Runnable {
 
     private void handleListConversations(Packet req, String reqId) {
         String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
-        List<ConversationDto> conversations = db.listConversationsForUser(userId);
+        List<ConversationDto> raw = db.listConversationsForUser(userId);
+        List<ConversationDto> conversations = new ArrayList<>();
+        for (ConversationDto c : raw) {
+            boolean isLiveOnline = !c.isGroup() && server.isUserOnline(c.id());
+            conversations.add(new ConversationDto(
+                    c.id(),
+                    c.displayName(),
+                    c.initials(),
+                    c.about(),
+                    isLiveOnline,
+                    c.isGroup(),
+                    c.members(),
+                    c.channels(),
+                    c.voiceChannels()
+            ));
+        }
         sendPacket(Packet.response("LIST_CONVERSATIONS_RES", reqId)
                 .putObj("conversations", conversations));
     }
 
     private void handleListUsers(Packet req, String reqId) {
         String excludeUserId = req.getString("excludeUserId", currentUser != null ? currentUser.id() : null);
-        List<UserDto> users = db.listUsers(excludeUserId);
+        List<UserDto> raw = db.listUsers(excludeUserId);
+        List<UserDto> users = new ArrayList<>();
+        for (UserDto u : raw) {
+            boolean liveOnline = server.isUserOnline(u.id());
+            users.add(new UserDto(
+                    u.id(),
+                    u.displayName(),
+                    u.email(),
+                    u.username(),
+                    u.bio(),
+                    liveOnline ? (u.status() == null || "offline".equalsIgnoreCase(u.status()) ? "online" : u.status()) : "offline",
+                    u.avatarPath()
+            ));
+        }
         sendPacket(Packet.response("LIST_USERS_RES", reqId)
                 .putObj("users", users));
     }
@@ -179,8 +208,12 @@ public final class ClientHandler implements Runnable {
         String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
         String peerId = req.getString("peerId", "");
         ConversationDto conv = db.openDirectMessage(userId, peerId);
+        boolean liveOnline = !conv.isGroup() && server.isUserOnline(conv.id());
+        ConversationDto liveConv = new ConversationDto(
+                conv.id(), conv.displayName(), conv.initials(), conv.about(),
+                liveOnline, conv.isGroup(), conv.members(), conv.channels(), conv.voiceChannels());
         sendPacket(Packet.response("OPEN_DM_RES", reqId)
-                .putObj("conversation", conv));
+                .putObj("conversation", liveConv));
     }
 
     private void handleGetHistory(Packet req, String reqId) {

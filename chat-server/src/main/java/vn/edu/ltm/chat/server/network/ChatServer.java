@@ -171,6 +171,10 @@ public final class ChatServer {
         return discoverySocket != null ? discoverySocket.getLocalPort() : discoveryPort;
     }
 
+    public boolean isUserOnline(String userId) {
+        return userId != null && onlineRegistry.containsKey(userId);
+    }
+
     public void registerOnlineUser(String userId, ClientHandler handler) {
         if (userId != null) {
             onlineRegistry.put(userId, handler);

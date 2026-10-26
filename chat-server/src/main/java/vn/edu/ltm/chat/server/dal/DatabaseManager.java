@@ -368,6 +368,12 @@ public final class DatabaseManager {
                     ps.executeUpdate();
                 }
             }
+
+            try (Statement stClean = conn.createStatement()) {
+                stClean.executeUpdate("UPDATE conversations SET online = 0 WHERE is_group = 1");
+                stClean.executeUpdate("UPDATE conversations SET online = 0");
+                stClean.executeUpdate("UPDATE users SET status = 'offline'");
+            }
         } catch (SQLException ignored) {
         }
     }
@@ -480,13 +486,13 @@ public final class DatabaseManager {
 
         // Seed Groups (scoped to demo members)
         insertConversation(new ConversationDto("nhom-ban-than", "Nhóm bạn thân", "HB",
-                "Cùng nhau học, cùng nhau tiến bộ.", true, true,
+                "Cùng nhau học, cùng nhau tiến bộ.", false, true,
                 List.of("Mai Phương", "An Nguyễn", "Thảo Nguyễn", "Mai Linh", "Bảo Long", "Đức Minh"),
                 List.of("tổng-quan", "học-tập", "ảnh-chia-sẻ"),
                 List.of("Phòng chill", "Góc học chung")));
 
         insertConversation(new ConversationDto("ltm-studio", "LTM Studio", "LT",
-                "Nhóm phát triển hệ thống mạng máy tính.", true, true,
+                "Nhóm phát triển hệ thống mạng máy tính.", false, true,
                 List.of("Mai Phương", "An Nguyễn", "Minh Anh", "Khánh Linh", "Hữu Phúc", "Thành Đạt"),
                 List.of("chung", "chia-sẻ-tài-liệu"),
                 List.of("phòng-họp", "Thảo luận nhanh")));
