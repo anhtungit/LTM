@@ -80,14 +80,29 @@ class ChatServerTest {
             Packet loginRes2 = readNextNonStatus(in2);
             assertEquals("REGISTER_RES", loginRes2.getType());
             assertTrue(loginRes2.isOk());
+            UserDto bob = loginRes2.getObj("user", UserDto.class);
+            assertNotNull(bob);
 
             // Client 1 receives USER_STATUS_BROADCAST for Bob
             Packet statusBroadcast = Packet.fromJsonLine(in1.readLine());
             assertEquals("USER_STATUS_BROADCAST", statusBroadcast.getType());
 
+            // Alice creates a group with Bob
+            out1.println(new Packet("CREATE_GROUP_REQ", "grp-1")
+                    .put("creatorId", alice.id())
+                    .put("creatorName", alice.displayName())
+                    .put("groupName", "Nhóm Alice & Bob")
+                    .putObj("members", List.of(bob.id())).toJsonLine());
+            Packet grpRes = readNextNonStatus(in1);
+            assertTrue(grpRes.isOk());
+            ConversationDto sharedGroup = grpRes.getObj("conversation", ConversationDto.class);
+            assertNotNull(sharedGroup);
+            Packet bobGrpNotif = readNextNonStatus(in2);
+            assertEquals("CONVERSATION_UPDATED_BROADCAST", bobGrpNotif.getType());
+
             // Client 1 sends message
             out1.println(new Packet("SEND_MSG_REQ", "req-3")
-                    .put("conversationId", "nhom-ban-than")
+                    .put("conversationId", sharedGroup.id())
                     .put("channel", "học-tập")
                     .put("senderId", alice.id())
                     .put("senderName", alice.displayName())
@@ -287,8 +302,32 @@ class ChatServerTest {
                     .put("creatorId", user1.id())
                     .put("creatorName", user1.displayName())
                     .put("groupName", "Nhóm kín User 1")
-                    .putObj("members", List.of("An Nguyễn")).toJsonLine());
-            assertTrue(readNextNonStatus(in1).isOk());
+                    .putObj("members", List.of("an-nguyen")).toJsonLine());
+            Packet grpRes = readNextNonStatus(in1);
+            assertTrue(grpRes.isOk());
+            ConversationDto createdGroup = grpRes.getObj("conversation", ConversationDto.class);
+            assertNotNull(createdGroup);
+
+            // User 2 (non-member) tries to send a message into User 1's group -> REJECTED
+            out2.println(new Packet("SEND_MSG_REQ", "u2-unauth-send")
+                    .put("conversationId", createdGroup.id())
+                    .put("channel", "học-tập")
+                    .put("senderId", user2.id())
+                    .put("senderName", user2.displayName())
+                    .put("content", "Hack group").toJsonLine());
+            Packet rejectSend = readNextNonStatus(in2);
+            assertFalse(rejectSend.isOk());
+            assertTrue(rejectSend.getError().contains("không phải thành viên"));
+
+            // User 2 (non-member) tries to read messages of User 1's group -> returns 0 messages
+            out2.println(new Packet("GET_CHAT_HISTORY_REQ", "u2-unauth-read")
+                    .put("userId", user2.id())
+                    .put("conversationId", createdGroup.id())
+                    .put("channel", "học-tập").toJsonLine());
+            Packet rejectRead = readNextNonStatus(in2);
+            assertTrue(rejectRead.isOk());
+            MessageDto[] unauthMsgs = rejectRead.getObj("messages", MessageDto[].class);
+            assertEquals(0, unauthMsgs.length);
 
             // User 1 now has 2 conversations (an-nguyen DM + private group)
             out1.println(new Packet("LIST_CONVERSATIONS_REQ", "u1-list-1")

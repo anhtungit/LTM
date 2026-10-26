@@ -187,6 +187,15 @@ public final class ClientHandler implements Runnable {
         String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
         String convId = req.getString("conversationId", "");
         String channel = req.getString("channel", "");
+        if (db.isGroupConversation(convId)) {
+            if (userId == null || !db.isUserMemberOfGroup(userId, convId)) {
+                sendPacket(Packet.response("CHAT_HISTORY_RES", reqId)
+                        .put("conversationId", convId)
+                        .put("channel", channel)
+                        .putObj("messages", List.of()));
+                return;
+            }
+        }
         List<MessageDto> messages = db.loadMessagesForUser(userId, convId, channel);
         sendPacket(Packet.response("CHAT_HISTORY_RES", reqId)
                 .put("conversationId", convId)
@@ -201,6 +210,13 @@ public final class ClientHandler implements Runnable {
         String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Người dùng");
         String senderInitials = req.getString("senderInitials", DatabaseManager.computeInitials(senderName));
         String content = req.getString("content", "");
+
+        if (db.isGroupConversation(convId)) {
+            if (senderId == null || !db.isUserMemberOfGroup(senderId, convId)) {
+                sendPacket(Packet.error("SEND_MSG_RES", reqId, "Bạn không phải thành viên của nhóm này."));
+                return;
+            }
+        }
 
         MessageDto msg = new MessageDto(
                 UUID.randomUUID().toString(),
@@ -225,7 +241,13 @@ public final class ClientHandler implements Runnable {
 
     private void broadcastNewMessage(String convId, String senderId, MessageDto msg) {
         if (db.isGroupConversation(convId)) {
-            server.broadcastExcept(this, Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", msg));
+            for (ClientHandler h : server.getActiveHandlers()) {
+                if (h == this) continue;
+                UserDto targetUser = h.getCurrentUser();
+                if (targetUser != null && db.isUserMemberOfGroup(targetUser.id(), convId)) {
+                    h.sendPacket(Packet.broadcast("NEW_MSG_BROADCAST").putObj("message", msg));
+                }
+            }
             return;
         }
         // 1-1 Direct Message between senderId and peerId (convId)
@@ -289,6 +311,18 @@ public final class ClientHandler implements Runnable {
                 return;
             }
         }
+        if (db.isGroupConversation(rawConvId)) {
+            for (ClientHandler h : server.getActiveHandlers()) {
+                if (h == this) continue;
+                UserDto u = h.getCurrentUser();
+                if (u != null && db.isUserMemberOfGroup(u.id(), rawConvId)) {
+                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
+                            .put("action", action)
+                            .putObj("message", rawUpdated));
+                }
+            }
+            return;
+        }
         server.broadcastExcept(this, Packet.broadcast("MSG_UPDATED_BROADCAST")
                 .put("action", action)
                 .putObj("message", rawUpdated));
@@ -327,10 +361,16 @@ public final class ClientHandler implements Runnable {
                 .put("conversationId", convId)
                 .put("messageId", msgId));
         if (db.isGroupConversation(convId)) {
-            server.broadcastExcept(this, Packet.broadcast("MSG_UPDATED_BROADCAST")
-                    .put("action", "DELETE")
-                    .put("conversationId", convId)
-                    .put("messageId", msgId));
+            for (ClientHandler h : server.getActiveHandlers()) {
+                if (h == this) continue;
+                UserDto u = h.getCurrentUser();
+                if (u != null && db.isUserMemberOfGroup(u.id(), convId)) {
+                    h.sendPacket(Packet.broadcast("MSG_UPDATED_BROADCAST")
+                            .put("action", "DELETE")
+                            .put("conversationId", convId)
+                            .put("messageId", msgId));
+                }
+            }
         } else {
             String senderId = currentUser != null ? currentUser.id() : "";
             for (ClientHandler h : server.getActiveHandlers()) {
@@ -362,6 +402,13 @@ public final class ClientHandler implements Runnable {
         long fileSize = req.getLong("fileSize", 0L);
         boolean failed = req.getBoolean("failed", false);
         String base64Data = req.getString("base64Data", null);
+
+        if (db.isGroupConversation(convId)) {
+            if (senderId == null || !db.isUserMemberOfGroup(senderId, convId)) {
+                sendPacket(Packet.error("FILE_UPLOAD_RES", reqId, "Bạn không phải thành viên của nhóm này."));
+                return;
+            }
+        }
 
         String msgId = UUID.randomUUID().toString();
         if (!failed && base64Data != null && !base64Data.isBlank()) {
@@ -413,7 +460,7 @@ public final class ClientHandler implements Runnable {
             if (h == this) continue;
             UserDto u = h.getCurrentUser();
             if (u != null && created.members() != null && created.members().stream()
-                    .anyMatch(m -> m.equalsIgnoreCase(u.id()) || m.equalsIgnoreCase(u.displayName()))) {
+                    .anyMatch(m -> m.equalsIgnoreCase(u.id()))) {
                 h.sendPacket(Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
                         .putObj("conversation", created));
             }
@@ -423,6 +470,14 @@ public final class ClientHandler implements Runnable {
     private void handleModifyChannel(Packet req, String reqId, boolean isAdd, boolean isVoice) {
         String convId = req.getString("conversationId", "");
         String chanName = req.getString("channelName", "");
+        String userId = currentUser != null ? currentUser.id() : null;
+        if (db.isGroupConversation(convId)) {
+            if (userId == null || !db.isUserMemberOfGroup(userId, convId)) {
+                String resType = req.getType().replace("_REQ", "_RES");
+                sendPacket(Packet.error(resType, reqId, "Bạn không có quyền quản lý kênh trong nhóm này."));
+                return;
+            }
+        }
         ConversationDto updated = isAdd
                 ? db.addChannel(convId, chanName, isVoice)
                 : db.removeChannel(convId, chanName, isVoice);
@@ -430,8 +485,14 @@ public final class ClientHandler implements Runnable {
         String resType = req.getType().replace("_REQ", "_RES");
         sendPacket(Packet.response(resType, reqId).putObj("conversation", updated));
         if (updated != null) {
-            server.broadcastExcept(this, Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
-                    .putObj("conversation", updated));
+            for (ClientHandler h : server.getActiveHandlers()) {
+                if (h == this) continue;
+                UserDto u = h.getCurrentUser();
+                if (u != null && db.isUserMemberOfGroup(u.id(), convId)) {
+                    h.sendPacket(Packet.broadcast("CONVERSATION_UPDATED_BROADCAST")
+                            .putObj("conversation", updated));
+                }
+            }
         }
     }
 

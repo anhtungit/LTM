@@ -23,9 +23,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
@@ -299,6 +301,74 @@ public final class DatabaseManager {
             seedDefaultData();
         } else {
             migrateLegacyDmMessages();
+        }
+        migrateGroupMembersToUserIds();
+    }
+
+    private void migrateGroupMembersToUserIds() {
+        try (Connection conn = connect()) {
+            Map<String, String> displayNameToId = new HashMap<>();
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT id, display_name FROM users ORDER BY rowid ASC")) {
+                while (rs.next()) {
+                    String uid = rs.getString("id");
+                    String dname = rs.getString("display_name");
+                    if (dname != null && !dname.isBlank()) {
+                        displayNameToId.putIfAbsent(dname.trim().toLowerCase(Locale.ROOT), uid);
+                    }
+                    if (uid != null && !uid.isBlank()) {
+                        displayNameToId.putIfAbsent(uid.trim().toLowerCase(Locale.ROOT), uid);
+                    }
+                }
+            }
+
+            List<String[]> groupsToUpdate = new ArrayList<>();
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT id, members_json FROM conversations WHERE is_group = 1")) {
+                while (rs.next()) {
+                    String gid = rs.getString("id");
+                    String mJson = rs.getString("members_json");
+                    if ("nhom-ban-than".equals(gid) || "ltm-studio".equals(gid) || "phong-chill".equals(gid)) {
+                        continue;
+                    }
+                    if (mJson != null && !mJson.isBlank()) {
+                        String[] members = GSON.fromJson(mJson, String[].class);
+                        if (members != null) {
+                            List<String> updated = new ArrayList<>();
+                            boolean changed = false;
+                            for (String m : members) {
+                                if (m == null) continue;
+                                String trimmed = m.trim();
+                                String resolvedId = displayNameToId.get(trimmed.toLowerCase(Locale.ROOT));
+                                if (resolvedId != null) {
+                                    if (!resolvedId.equals(trimmed)) {
+                                        changed = true;
+                                    }
+                                    if (!updated.contains(resolvedId)) {
+                                        updated.add(resolvedId);
+                                    }
+                                } else {
+                                    if (!updated.contains(trimmed)) {
+                                        updated.add(trimmed);
+                                    }
+                                }
+                            }
+                            if (changed) {
+                                groupsToUpdate.add(new String[]{gid, GSON.toJson(updated)});
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (String[] g : groupsToUpdate) {
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE conversations SET members_json = ? WHERE id = ?")) {
+                    ps.setString(1, g[1]);
+                    ps.setString(2, g[0]);
+                    ps.executeUpdate();
+                }
+            }
+        } catch (SQLException ignored) {
         }
     }
 
@@ -820,25 +890,31 @@ public final class DatabaseManager {
 
         // 2. Add groups where user is a member
         for (ConversationDto c : all) {
-            if (c.isGroup() && isMemberOfGroup(c.id(), userId, userDisplayName, c.members())) {
+            if (c.isGroup() && isUserMemberOfGroup(userId, c.id())) {
                 result.add(c);
             }
         }
         return result;
     }
 
-    private boolean isMemberOfGroup(String groupConvId, String userId, String displayName, List<String> members) {
-        if (members == null || members.isEmpty()) return false;
+    public synchronized boolean isUserMemberOfGroup(String userId, String groupConvId) {
+        if (userId == null || userId.isBlank() || groupConvId == null || groupConvId.isBlank()) {
+            return false;
+        }
+        ConversationDto conv = getConversation(groupConvId);
+        if (conv == null || !conv.isGroup()) {
+            return false;
+        }
         // Demo seed groups only belong to demo accounts (mai-phuong, an-nguyen)
         if ("nhom-ban-than".equals(groupConvId) || "ltm-studio".equals(groupConvId) || "phong-chill".equals(groupConvId)) {
             return "mai-phuong".equalsIgnoreCase(userId) || "an-nguyen".equalsIgnoreCase(userId);
         }
+        List<String> members = conv.members();
+        if (members == null || members.isEmpty()) {
+            return false;
+        }
         for (String m : members) {
-            if (m == null) continue;
-            if (userId != null && !userId.isBlank() && m.equalsIgnoreCase(userId)) {
-                return true;
-            }
-            if (displayName != null && !displayName.isBlank() && m.equalsIgnoreCase(displayName)) {
+            if (m != null && m.equalsIgnoreCase(userId)) {
                 return true;
             }
         }
@@ -864,21 +940,21 @@ public final class DatabaseManager {
         String initials = computeInitials(name);
 
         List<String> finalMembers = new ArrayList<>();
-        if (creatorName != null && !creatorName.isBlank()) {
-            finalMembers.add(creatorName);
-        } else if (creatorId != null && !creatorId.isBlank()) {
-            finalMembers.add(creatorId);
+        if (creatorId != null && !creatorId.isBlank()) {
+            finalMembers.add(creatorId.trim());
+        } else if (creatorName != null && !creatorName.isBlank()) {
+            finalMembers.add(creatorName.trim());
         }
         if (members != null) {
             for (String m : members) {
-                if (m != null && !m.isBlank() && finalMembers.stream().noneMatch(x -> x.equalsIgnoreCase(m))) {
-                    finalMembers.add(m);
+                if (m != null && !m.isBlank() && finalMembers.stream().noneMatch(x -> x.equalsIgnoreCase(m.trim()))) {
+                    finalMembers.add(m.trim());
                 }
             }
         }
 
         ConversationDto dto = new ConversationDto(
-                id, name, initials, "Nhóm trò chuyện trên máy chủ", true, true,
+                id, name, initials, "Nhóm trò chuyện trên máy chủ", false, true,
                 finalMembers,
                 List.of("tổng-quan", "học-tập"),
                 List.of("Phòng chill")
@@ -997,6 +1073,11 @@ public final class DatabaseManager {
     public synchronized List<MessageDto> loadMessagesForUser(String userId, String conversationId, String channel) {
         if (conversationId == null || conversationId.isBlank()) {
             return List.of();
+        }
+        if (isGroupConversation(conversationId)) {
+            if (userId == null || !isUserMemberOfGroup(userId, conversationId)) {
+                return List.of();
+            }
         }
         String storageConvId = conversationId;
         boolean isDm = !isGroupConversation(conversationId) && !conversationId.startsWith("dm:");

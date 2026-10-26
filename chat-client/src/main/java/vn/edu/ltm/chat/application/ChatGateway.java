@@ -24,6 +24,10 @@ public interface ChatGateway {
         return false;
     }
 
+    default boolean isUserOnline(String userId) {
+        return false;
+    }
+
     default void setOnRealtimeUpdate(Runnable callback) {
     }
 

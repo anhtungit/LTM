@@ -301,13 +301,13 @@ public final class CreateGroupDialog extends JDialog {
             if (name.isEmpty()) {
                 name = "Nhóm bạn thân";
             }
-            List<String> memberNames = new ArrayList<>();
+            List<String> memberIds = new ArrayList<>();
             for (FriendCandidate c : candidates) {
                 if (selectedIds.contains(c.id())) {
-                    memberNames.add(c.name());
+                    memberIds.add(c.id());
                 }
             }
-            Conversation created = chatService.createGroup(name, memberNames);
+            Conversation created = chatService.createGroup(name, memberIds);
             if (onCreated != null) {
                 onCreated.accept(created);
             }

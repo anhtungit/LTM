@@ -119,6 +119,7 @@ public final class ChatWorkspace extends JPanel {
 
     private final JPanel accountFooterDm = new JPanel(new BorderLayout());
     private final JPanel accountFooterGroup = new JPanel(new BorderLayout());
+    private final Map<String, UserProfile> userProfileCache = new ConcurrentHashMap<>();
 
     private String selectedConversationId;
     private String selectedChannel = "học-tập";
@@ -169,6 +170,15 @@ public final class ChatWorkspace extends JPanel {
     private void handleServerBroadcast() {
         refreshConnectionBadge();
         CompletableFuture.supplyAsync(() -> {
+            try {
+                List<UserProfile> users = chatService.listUsers();
+                if (users != null) {
+                    for (UserProfile u : users) {
+                        userProfileCache.put(u.id(), u);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
             try {
                 return chatService.conversations();
             } catch (Exception e) {
@@ -1157,6 +1167,52 @@ public final class ChatWorkspace extends JPanel {
         return infoPane;
     }
 
+    private String resolveMemberDisplayName(String memberId) {
+        if (memberId == null || memberId.isBlank()) return "Người dùng";
+        if (user != null && memberId.equalsIgnoreCase(user.id())) {
+            return user.displayName();
+        }
+        UserProfile p = userProfileCache.get(memberId);
+        if (p != null && p.displayName() != null && !p.displayName().isBlank()) {
+            return p.displayName();
+        }
+        for (Conversation c : conversations) {
+            if (!c.isGroup() && c.id().equalsIgnoreCase(memberId)) {
+                return c.displayName();
+            }
+        }
+        return memberId;
+    }
+
+    private boolean resolveMemberOnline(String memberId) {
+        if (memberId == null || memberId.isBlank()) return false;
+        if (user != null && memberId.equalsIgnoreCase(user.id())) {
+            return true;
+        }
+        if (chatService.isUserOnline(memberId)) {
+            return true;
+        }
+        UserProfile p = userProfileCache.get(memberId);
+        if (p != null) {
+            return p.online();
+        }
+        for (Conversation c : conversations) {
+            if (!c.isGroup() && c.id().equalsIgnoreCase(memberId)) {
+                return c.online();
+            }
+        }
+        return false;
+    }
+
+    private static String computeInitials(String name) {
+        if (name == null || name.isBlank()) return "?";
+        String[] parts = name.trim().split("\\s+");
+        if (parts.length == 1) {
+            return parts[0].substring(0, 1).toUpperCase();
+        }
+        return (parts[0].substring(0, 1) + parts[parts.length - 1].substring(0, 1)).toUpperCase();
+    }
+
     private void rebuildInfoPane(Conversation conversation) {
         infoPane.removeAll();
         int innerWidth = INFO_WIDTH - 28;
@@ -1171,10 +1227,13 @@ public final class ChatWorkspace extends JPanel {
             for (String member : conversation.members()) {
                 JPanel memberRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
                 memberRow.setOpaque(false);
-                String initials = member.length() >= 2 ? member.substring(0, 2).toUpperCase() : member.toUpperCase();
-                memberRow.add(new AvatarBadge(initials, member, 26, DiscordTheme.SUCCESS, DiscordTheme.SIDEBAR, true));
+                String displayName = resolveMemberDisplayName(member);
+                boolean isOnline = resolveMemberOnline(member);
+                String initials = computeInitials(displayName);
+                Color presence = isOnline ? DiscordTheme.SUCCESS : null;
+                memberRow.add(new AvatarBadge(initials, member, 26, presence, DiscordTheme.SIDEBAR, true));
 
-                JLabel mName = new JLabel(member);
+                JLabel mName = new JLabel(displayName);
                 mName.setFont(DiscordTheme.semibold(12f));
                 mName.setForeground(DiscordTheme.TEXT_PRIMARY);
                 memberRow.add(mName);
@@ -1459,7 +1518,7 @@ public final class ChatWorkspace extends JPanel {
 
         headerAvatarHolder.removeAll();
         AvatarBadge headerAvatar = new AvatarBadge(conversation.initials(), conversation.id(), AVATAR_SIZE,
-                conversation.online() ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
+                (!conversation.isGroup() && conversation.online()) ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
         headerAvatarHolder.add(headerAvatar, BorderLayout.CENTER);
         headerAvatarHolder.revalidate();
         headerAvatarHolder.repaint();

@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,6 +40,7 @@ public final class TcpChatGateway implements ChatGateway {
     private final String explicitHost;
     private final int explicitPort;
     private final InMemoryChatGateway fallback = new InMemoryChatGateway();
+    private final Map<String, Boolean> userPresenceMap = new ConcurrentHashMap<>();
 
     private Socket socket;
     private PrintWriter out;
@@ -137,10 +139,26 @@ public final class TcpChatGateway implements ChatGateway {
     }
 
     private void handleBroadcast(TcpPacket packet) {
+        if ("USER_STATUS_BROADCAST".equals(packet.getType())) {
+            String uid = packet.getString("userId", "");
+            boolean online = packet.getBoolean("online", false);
+            if (!uid.isBlank()) {
+                userPresenceMap.put(uid, online);
+            }
+        }
         Runnable cb = this.onRealtimeUpdate;
         if (cb != null) {
             SwingUtilities.invokeLater(cb);
         }
+    }
+
+    @Override
+    public boolean isUserOnline(String userId) {
+        if (userId == null || userId.isBlank()) return false;
+        if (currentUserId != null && userId.equalsIgnoreCase(currentUserId)) {
+            return true;
+        }
+        return userPresenceMap.getOrDefault(userId, false);
     }
 
     private TcpPacket request(TcpPacket req) {
@@ -198,6 +216,7 @@ public final class TcpChatGateway implements ChatGateway {
         UserDto u = res.getObj("user", UserDto.class);
         this.currentUserId = u.id();
         this.currentUserName = u.displayName();
+        userPresenceMap.put(u.id(), true);
         return toDomainUser(u);
     }
 
@@ -214,6 +233,7 @@ public final class TcpChatGateway implements ChatGateway {
         UserDto u = res.getObj("user", UserDto.class);
         this.currentUserId = u.id();
         this.currentUserName = u.displayName();
+        userPresenceMap.put(u.id(), true);
         return toDomainUser(u);
     }
 
@@ -250,6 +270,7 @@ public final class TcpChatGateway implements ChatGateway {
             if (arr != null) {
                 for (UserDto u : arr) {
                     list.add(toDomainUser(u));
+                    userPresenceMap.put(u.id(), !"offline".equalsIgnoreCase(u.status()));
                 }
             }
             return list;
@@ -287,6 +308,9 @@ public final class TcpChatGateway implements ChatGateway {
                     // Hide own self-DM row if another user logged in
                     if (!c.isGroup() && c.id().equals(currentUserId)) {
                         continue;
+                    }
+                    if (!c.isGroup()) {
+                        userPresenceMap.put(c.id(), c.online());
                     }
                     result.add(toDomainConversation(c));
                 }

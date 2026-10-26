@@ -21,6 +21,10 @@ public final class ChatService {
         return gateway.isServerConnected();
     }
 
+    public boolean isUserOnline(String userId) {
+        return gateway.isUserOnline(userId);
+    }
+
     public void setOnRealtimeUpdate(Runnable callback) {
         gateway.setOnRealtimeUpdate(callback);
     }
