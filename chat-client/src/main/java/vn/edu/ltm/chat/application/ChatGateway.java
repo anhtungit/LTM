@@ -31,6 +31,9 @@ public interface ChatGateway {
     default void setOnRealtimeUpdate(Runnable callback) {
     }
 
+    default void setOnPresenceUpdate(Runnable callback) {
+    }
+
     default byte[] downloadAttachment(String messageId, String fileName) {
         return null;
     }

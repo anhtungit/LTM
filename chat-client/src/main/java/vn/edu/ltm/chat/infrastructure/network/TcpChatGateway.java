@@ -49,6 +49,7 @@ public final class TcpChatGateway implements ChatGateway {
     private String currentUserId;
     private String currentUserName;
     private volatile Runnable onRealtimeUpdate;
+    private volatile Runnable onPresenceUpdate;
 
     private final Map<String, CompletableFuture<TcpPacket>> pendingRequests = new ConcurrentHashMap<>();
 
@@ -139,12 +140,21 @@ public final class TcpChatGateway implements ChatGateway {
     }
 
     private void handleBroadcast(TcpPacket packet) {
-        if ("USER_STATUS_BROADCAST".equals(packet.getType())) {
+        String type = packet.getType();
+        if ("USER_STATUS_BROADCAST".equals(type)) {
             String uid = packet.getString("userId", "");
             boolean online = packet.getBoolean("online", false);
             if (!uid.isBlank()) {
                 userPresenceMap.put(uid, online);
             }
+            Runnable presenceCb = this.onPresenceUpdate != null ? this.onPresenceUpdate : this.onRealtimeUpdate;
+            if (presenceCb != null) {
+                SwingUtilities.invokeLater(presenceCb);
+            }
+            return;
+        }
+        if ("TYPING_BROADCAST".equals(type)) {
+            return;
         }
         Runnable cb = this.onRealtimeUpdate;
         if (cb != null) {
@@ -202,6 +212,11 @@ public final class TcpChatGateway implements ChatGateway {
     @Override
     public void setOnRealtimeUpdate(Runnable callback) {
         this.onRealtimeUpdate = callback;
+    }
+
+    @Override
+    public void setOnPresenceUpdate(Runnable callback) {
+        this.onPresenceUpdate = callback;
     }
 
     @Override

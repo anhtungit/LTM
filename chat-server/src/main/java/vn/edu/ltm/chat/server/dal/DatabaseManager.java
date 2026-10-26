@@ -181,53 +181,49 @@ public final class DatabaseManager {
         return null;
     }
 
-    private Connection connect() throws SQLException {
-        if (isPostgres && dbUser != null && dbPassword != null) {
-            boolean needReconnect = (sharedPostgresConn == null);
-            if (!needReconnect) {
+    private synchronized Connection connect() throws SQLException {
+        boolean needReconnect = (sharedPostgresConn == null);
+        if (!needReconnect) {
+            try {
+                needReconnect = sharedPostgresConn.isClosed() || (isPostgres && !sharedPostgresConn.isValid(2));
+            } catch (SQLException e) {
+                needReconnect = true;
+            }
+        }
+        if (needReconnect) {
+            if (sharedPostgresConn != null) {
                 try {
-                    needReconnect = sharedPostgresConn.isClosed() || !sharedPostgresConn.isValid(2);
-                } catch (SQLException e) {
-                    needReconnect = true;
+                    sharedPostgresConn.close();
+                } catch (SQLException ignored) {
                 }
             }
-            if (needReconnect) {
-                if (sharedPostgresConn != null) {
+            sharedPostgresConn = (dbUser != null && dbPassword != null)
+                    ? DriverManager.getConnection(jdbcUrl, dbUser, dbPassword)
+                    : DriverManager.getConnection(jdbcUrl);
+        }
+        final Connection delegate = sharedPostgresConn;
+        return (Connection) java.lang.reflect.Proxy.newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[]{Connection.class},
+                (proxy, method, args) -> {
+                    if ("close".equals(method.getName())) {
+                        return null;
+                    }
                     try {
-                        sharedPostgresConn.close();
-                    } catch (SQLException ignored) {
+                        return method.invoke(delegate, args);
+                    } catch (java.lang.reflect.InvocationTargetException ite) {
+                        Throwable cause = ite.getTargetException();
+                        if (cause instanceof SQLException) {
+                            try {
+                                delegate.close();
+                            } catch (SQLException ignored) {
+                            }
+                            sharedPostgresConn = null;
+                        }
+                        throw cause;
                     }
                 }
-                sharedPostgresConn = DriverManager.getConnection(jdbcUrl, dbUser, dbPassword);
-            }
-            final Connection delegate = sharedPostgresConn;
-            return (Connection) java.lang.reflect.Proxy.newProxyInstance(
-                    Connection.class.getClassLoader(),
-                    new Class<?>[]{Connection.class},
-                    (proxy, method, args) -> {
-                        if ("close".equals(method.getName())) {
-                            return null;
-                        }
-                        try {
-                            return method.invoke(delegate, args);
-                        } catch (java.lang.reflect.InvocationTargetException ite) {
-                            Throwable cause = ite.getTargetException();
-                            if (cause instanceof SQLException) {
-                                try {
-                                    delegate.close();
-                                } catch (SQLException ignored) {
-                                }
-                                sharedPostgresConn = null;
-                            }
-                            throw cause;
-                        }
-                    }
-            );
-        }
-        if (dbUser != null && dbPassword != null) {
-            return DriverManager.getConnection(jdbcUrl, dbUser, dbPassword);
-        }
-        return DriverManager.getConnection(jdbcUrl);
+        );
     }
 
     public boolean isPostgres() {
@@ -825,6 +821,23 @@ public final class DatabaseManager {
         }
     }
 
+    private ConversationDto mapConversation(ResultSet rs) throws SQLException {
+        String[] members = GSON.fromJson(rs.getString("members_json"), String[].class);
+        String[] channels = GSON.fromJson(rs.getString("channels_json"), String[].class);
+        String[] voiceChannels = GSON.fromJson(rs.getString("voice_channels_json"), String[].class);
+        return new ConversationDto(
+                rs.getString("id"),
+                rs.getString("display_name"),
+                rs.getString("initials"),
+                rs.getString("about"),
+                rs.getInt("online") != 0,
+                rs.getInt("is_group") != 0,
+                members != null ? Arrays.asList(members) : List.of(),
+                channels != null ? Arrays.asList(channels) : List.of(),
+                voiceChannels != null ? Arrays.asList(voiceChannels) : List.of()
+        );
+    }
+
     public synchronized List<ConversationDto> listConversations() {
         List<ConversationDto> list = new ArrayList<>();
         String sql = "SELECT id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json FROM conversations";
@@ -832,20 +845,7 @@ public final class DatabaseManager {
              Statement st = conn.createStatement();
              ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) {
-                String[] members = GSON.fromJson(rs.getString("members_json"), String[].class);
-                String[] channels = GSON.fromJson(rs.getString("channels_json"), String[].class);
-                String[] voiceChannels = GSON.fromJson(rs.getString("voice_channels_json"), String[].class);
-                list.add(new ConversationDto(
-                        rs.getString("id"),
-                        rs.getString("display_name"),
-                        rs.getString("initials"),
-                        rs.getString("about"),
-                        rs.getInt("online") != 0,
-                        rs.getInt("is_group") != 0,
-                        members != null ? Arrays.asList(members) : List.of(),
-                        channels != null ? Arrays.asList(channels) : List.of(),
-                        voiceChannels != null ? Arrays.asList(voiceChannels) : List.of()
-                ));
+                list.add(mapConversation(rs));
             }
         } catch (SQLException e) {
             throw new RuntimeException("Lỗi tải danh sách hội thoại: " + e.getMessage(), e);
@@ -856,15 +856,12 @@ public final class DatabaseManager {
     /**
      * Returns ONLY the conversations belonging to {@code userId}:
      * 1. Direct Messages (1-1) that {@code userId} has opened or received messages in ({@code user_dms}).
-     * 2. Groups where {@code userId} (or their display name) is a member.
+     * 2. Groups where {@code userId} is a member.
      */
     public synchronized List<ConversationDto> listConversationsForUser(String userId) {
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
-        UserDto user = findUser(userId);
-        String userDisplayName = user != null ? user.displayName() : "";
-
         Set<String> allowedDmPeers = new LinkedHashSet<>();
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(
@@ -894,9 +891,9 @@ public final class DatabaseManager {
             }
         }
 
-        // 2. Add groups where user is a member
+        // 2. Add groups where user is a member (in-memory check, no N+1 query)
         for (ConversationDto c : all) {
-            if (c.isGroup() && isUserMemberOfGroup(userId, c.id())) {
+            if (c.isGroup() && isUserMemberOfGroup(userId, c)) {
                 result.add(c);
             }
         }
@@ -907,10 +904,14 @@ public final class DatabaseManager {
         if (userId == null || userId.isBlank() || groupConvId == null || groupConvId.isBlank()) {
             return false;
         }
-        ConversationDto conv = getConversation(groupConvId);
-        if (conv == null || !conv.isGroup()) {
+        return isUserMemberOfGroup(userId, getConversation(groupConvId));
+    }
+
+    private boolean isUserMemberOfGroup(String userId, ConversationDto conv) {
+        if (userId == null || userId.isBlank() || conv == null || !conv.isGroup()) {
             return false;
         }
+        String groupConvId = conv.id();
         // Demo seed groups only belong to demo accounts (mai-phuong, an-nguyen)
         if ("nhom-ban-than".equals(groupConvId) || "ltm-studio".equals(groupConvId) || "phong-chill".equals(groupConvId)) {
             return "mai-phuong".equalsIgnoreCase(userId) || "an-nguyen".equalsIgnoreCase(userId);
@@ -934,10 +935,19 @@ public final class DatabaseManager {
     }
 
     public synchronized ConversationDto getConversation(String id) {
-        return listConversations().stream()
-                .filter(c -> c.id().equals(id))
-                .findFirst()
-                .orElse(null);
+        if (id == null || id.isBlank()) return null;
+        String sql = "SELECT id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json FROM conversations WHERE id = ?";
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return mapConversation(rs);
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+        return null;
     }
 
     public synchronized ConversationDto createGroup(String creatorId, String creatorName, String groupName, List<String> members) {
@@ -1080,13 +1090,13 @@ public final class DatabaseManager {
         if (conversationId == null || conversationId.isBlank()) {
             return List.of();
         }
-        if (isGroupConversation(conversationId)) {
-            if (userId == null || !isUserMemberOfGroup(userId, conversationId)) {
-                return List.of();
-            }
+        ConversationDto conv = getConversation(conversationId);
+        boolean isGroup = conv != null && conv.isGroup();
+        if (isGroup && !isUserMemberOfGroup(userId, conv)) {
+            return List.of();
         }
         String storageConvId = conversationId;
-        boolean isDm = !isGroupConversation(conversationId) && !conversationId.startsWith("dm:");
+        boolean isDm = !isGroup && !conversationId.startsWith("dm:");
         if (isDm && userId != null && !userId.isBlank()) {
             storageConvId = dmThreadId(userId, conversationId);
         }
