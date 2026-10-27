@@ -109,16 +109,18 @@ public final class ChatInputBar extends JPanel {
         // Emoji & Sticker popup button
         JButton emojiBtn = createIconButton("smiley.svg", "Emoji & Sticker", 19, DiscordTheme.TEXT_SECONDARY);
         emojiBtn.addActionListener(e -> {
-            EmojiPickerPopup popup = new EmojiPickerPopup(
-                    selectedEmoji -> {
-                        composer.insertEmoji(selectedEmoji);
-                        adjustComposerHeight();
-                    },
-                    selectedSticker -> {
-                        if (listener != null) listener.onSendSticker(selectedSticker);
-                    }
-            );
-            popup.showAbove(emojiBtn);
+            if (emojiBtn.isShowing()) {
+                EmojiPickerPopup popup = new EmojiPickerPopup(
+                        selectedEmoji -> {
+                            composer.insertEmoji(selectedEmoji);
+                            adjustComposerHeight();
+                        },
+                        selectedSticker -> {
+                            if (listener != null) listener.onSendSticker(selectedSticker);
+                        }
+                );
+                popup.showAbove(emojiBtn);
+            }
         });
         actions.add(emojiBtn);
 
@@ -299,7 +301,11 @@ public final class ChatInputBar extends JPanel {
         });
         menu.add(failFile);
 
-        menu.show(source, 0, source.getHeight());
+        if (source != null && source.isShowing()) {
+            try {
+                menu.show(source, 0, source.getHeight());
+            } catch (Exception ignored) {}
+        }
     }
 
     private static JButton createIconButton(String iconName, String tooltip, int iconSize, Color iconColor) {

@@ -19,6 +19,8 @@ import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -76,6 +78,7 @@ final class MessageRow extends JPanel {
     private final JLabel compactTimeLabel;
     private final MouseAdapter hoverAdapter;
     private boolean isHovered = false;
+    private boolean isPopupShowing = false;
     private WrappedTextArea normalText;
     private boolean isEditing = false;
     private int currentWrapWidth;
@@ -96,6 +99,9 @@ final class MessageRow extends JPanel {
         parseReplyHeader();
 
         this.hideToolbarTimer = new Timer(200, e -> {
+            if (isPopupShowing) {
+                return;
+            }
             try {
                 PointerInfo pi = MouseInfo.getPointerInfo();
                 if (pi != null && isShowing()) {
@@ -179,10 +185,14 @@ final class MessageRow extends JPanel {
 
             @Override
             public void mouseExited(MouseEvent e) {
-                Point p = getMousePosition();
-                if (p != null) {
-                    return;
-                }
+                try {
+                    if (isShowing()) {
+                        Point p = getMousePosition();
+                        if (p != null) {
+                            return;
+                        }
+                    }
+                } catch (Exception ignored) {}
                 hideToolbarTimer.restart();
             }
         };
@@ -206,6 +216,9 @@ final class MessageRow extends JPanel {
     }
 
     public void hideToolbar() {
+        if (isPopupShowing) {
+            return;
+        }
         hideToolbarTimer.stop();
         isHovered = false;
         if (actionToolbar.isVisible()) {
@@ -215,6 +228,29 @@ final class MessageRow extends JPanel {
             compactTimeLabel.setText("");
         }
         repaint();
+    }
+
+    private void bindPopupLifecycle(JPopupMenu popup) {
+        if (popup == null) return;
+        popup.addPopupMenuListener(new PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
+                isPopupShowing = true;
+                hideToolbarTimer.stop();
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
+                isPopupShowing = false;
+                hideToolbarTimer.restart();
+            }
+
+            @Override
+            public void popupMenuCanceled(PopupMenuEvent e) {
+                isPopupShowing = false;
+                hideToolbarTimer.restart();
+            }
+        });
     }
 
     @Override
@@ -339,7 +375,11 @@ final class MessageRow extends JPanel {
     }
 
     private void showMoreMenu(JButton anchor, boolean isMe) {
+        if (anchor == null || !anchor.isShowing()) {
+            return;
+        }
         JPopupMenu menu = new JPopupMenu();
+        bindPopupLifecycle(menu);
         menu.setBackground(new Color(0x11, 0x12, 0x14));
         menu.setBorder(BorderFactory.createLineBorder(new Color(0x23, 0x24, 0x28)));
 
@@ -376,7 +416,11 @@ final class MessageRow extends JPanel {
         menu.addSeparator();
 
         JMenuItem addReactionItem = createMenuItem("Thêm biểu cảm...", "smiley.svg", () -> {
-            showQuickReactionPopup(anchor);
+            if (anchor != null && anchor.isShowing()) {
+                showQuickReactionPopup(anchor);
+            } else if (this.isShowing()) {
+                showQuickReactionPopup(this);
+            }
         });
         menu.add(addReactionItem);
 
@@ -413,7 +457,11 @@ final class MessageRow extends JPanel {
             menu.add(deleteItem);
         }
 
-        menu.show(anchor, 0, anchor.getHeight() + 2);
+        try {
+            if (anchor.isShowing()) {
+                menu.show(anchor, 0, anchor.getHeight() + 2);
+            }
+        } catch (Exception ignored) {}
     }
 
     private JMenuItem createMenuItem(String text, String iconName, Runnable action) {
@@ -563,7 +611,11 @@ final class MessageRow extends JPanel {
     }
 
     private void showQuickReactionPopup(Component invoker) {
+        if (invoker == null || !invoker.isShowing()) {
+            return;
+        }
         javax.swing.JPopupMenu popup = new javax.swing.JPopupMenu();
+        bindPopupLifecycle(popup);
         popup.setBackground(new Color(0x2B, 0x2D, 0x31));
         popup.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1),
@@ -599,12 +651,20 @@ final class MessageRow extends JPanel {
         setupHoverButton(moreBtn);
         moreBtn.addActionListener(e -> {
             popup.setVisible(false);
+            if (invoker == null || !invoker.isShowing()) {
+                return;
+            }
             EmojiPickerPopup picker = new EmojiPickerPopup(emo -> {
                 if (listener != null) {
                     listener.onReact(message, emo);
                 }
             }, null);
-            picker.show(invoker, 0, -365);
+            bindPopupLifecycle(picker);
+            try {
+                if (invoker.isShowing()) {
+                    picker.show(invoker, 0, -365);
+                }
+            } catch (Exception ignored) {}
         });
         panel.add(moreBtn);
 
@@ -628,7 +688,11 @@ final class MessageRow extends JPanel {
                 }
             }
         } catch (Exception ignored) {}
-        popup.show(invoker, popX, popY);
+        try {
+            if (invoker.isShowing()) {
+                popup.show(invoker, popX, popY);
+            }
+        } catch (Exception ignored) {}
     }
 
     private static void setupHoverButton(JButton btn) {

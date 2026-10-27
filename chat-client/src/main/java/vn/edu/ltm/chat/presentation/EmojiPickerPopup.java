@@ -203,6 +203,10 @@ public final class EmojiPickerPopup extends JPopupMenu {
     }
 
     public void showAbove(JComponent invoker) {
-        show(invoker, 0, -365);
+        if (invoker != null && invoker.isShowing()) {
+            try {
+                show(invoker, 0, -365);
+            } catch (Exception ignored) {}
+        }
     }
 }
