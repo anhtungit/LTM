@@ -31,10 +31,10 @@ final class ChatHeaderPanel extends JPanel {
                     Runnable onToggleInfoPane) {
         super(new BorderLayout(12, 0));
         setBackground(DiscordTheme.TRANSCRIPT);
-        setPreferredSize(new Dimension(0, 62));
+        setPreferredSize(new Dimension(0, 48));
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, DiscordTheme.HAIRLINE),
-                BorderFactory.createEmptyBorder(0, 18, 0, 14)));
+                BorderFactory.createEmptyBorder(0, 16, 0, 12)));
 
         JPanel identity = new JPanel(new BorderLayout(11, 0));
         identity.setOpaque(false);

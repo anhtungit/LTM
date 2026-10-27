@@ -705,7 +705,7 @@ public final class ChatWorkspace extends JPanel {
         searchField.setForeground(DiscordTheme.TEXT_PRIMARY);
         searchField.setCaretColor(DiscordTheme.TEXT_PRIMARY);
         searchField.setFont(DiscordTheme.font(12f));
-        searchField.putClientProperty("JTextField.placeholderText", "Tìm kiếm");
+        searchField.putClientProperty("JTextField.placeholderText", "Tìm kiếm hoặc bắt đầu cuộc trò chuyện");
         searchField.getAccessibleContext().setAccessibleName("Tìm cuộc trò chuyện trực tiếp");
         searchField.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent event) { updateFilter(); }
@@ -916,8 +916,6 @@ public final class ChatWorkspace extends JPanel {
     private JComponent buildTranscriptArea() {
         JPanel area = new JPanel(new BorderLayout());
         area.setBackground(DiscordTheme.TRANSCRIPT);
-
-        area.add(buildDemoBanner(), BorderLayout.NORTH);
 
         transcript.setLayout(new ColumnLayout(MAX_CONTENT_WIDTH, AVATAR_SIZE + AVATAR_GAP));
         transcript.setBackground(DiscordTheme.TRANSCRIPT);
@@ -1222,10 +1220,15 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void updateHeaderAvatar(Conversation conversation) {
-        boolean isPeerOnline = !conversation.isGroup() && resolveMemberOnline(conversation.id());
-        AvatarBadge headerAvatar = new AvatarBadge(conversation.initials(), conversation.id(), AVATAR_SIZE,
-                isPeerOnline ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
-        String title = conversation.isGroup() ? ("#" + selectedChannel) : conversation.displayName();
+        JComponent headerAvatar;
+        if (conversation.isGroup()) {
+            headerAvatar = new JLabel(IconFactory.phosphor("hash.svg", 22, DiscordTheme.TEXT_MUTED));
+        } else {
+            boolean isPeerOnline = resolveMemberOnline(conversation.id());
+            headerAvatar = new AvatarBadge(conversation.initials(), conversation.id(), 28,
+                    isPeerOnline ? DiscordTheme.SUCCESS : null, DiscordTheme.TRANSCRIPT, true);
+        }
+        String title = conversation.isGroup() ? selectedChannel : conversation.displayName();
         headerPanel.update(title, conversation.about(), headerAvatar);
     }
 
@@ -1670,21 +1673,63 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private JComponent buildIntroRow() {
-        JPanel intro = new JPanel(new BorderLayout(8, 0));
+        JPanel intro = new JPanel();
+        intro.setLayout(new BoxLayout(intro, BoxLayout.Y_AXIS));
         intro.setOpaque(false);
-        intro.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(0x35, 0x37, 0x3D)),
-                BorderFactory.createEmptyBorder(0, 0, 10, 0)));
-
-        JLabel icon = new JLabel(IconFactory.phosphor("chat-circle-dots.svg", 16, DiscordTheme.TEXT_SECONDARY));
-        intro.add(icon, BorderLayout.WEST);
+        intro.setBorder(BorderFactory.createEmptyBorder(16, 8, 20, 8));
 
         Conversation conv = currentConversation();
-        String name = conv != null ? (conv.isGroup() ? ("#" + selectedChannel) : conv.displayName()) : "";
-        JLabel text = new JLabel("<html>Chào mừng đến với <b>" + name + "</b>!</html>");
-        text.setFont(DiscordTheme.font(11f));
-        text.setForeground(DiscordTheme.TEXT_SECONDARY);
-        intro.add(text, BorderLayout.CENTER);
+        if (conv == null) return intro;
+
+        if (!conv.isGroup()) {
+            boolean isPeerOnline = resolveMemberOnline(conv.id());
+            AvatarBadge bigAvatar = new AvatarBadge(
+                    conv.initials(),
+                    conv.id(),
+                    72,
+                    isPeerOnline ? DiscordTheme.SUCCESS : null,
+                    DiscordTheme.TRANSCRIPT,
+                    true
+            );
+            bigAvatar.setAlignmentX(0.0f);
+            intro.add(bigAvatar);
+            intro.add(Box.createVerticalStrut(10));
+
+            JLabel title = new JLabel(conv.displayName());
+            title.setFont(DiscordTheme.extrabold(24f));
+            title.setForeground(DiscordTheme.TEXT_PRIMARY);
+            title.setAlignmentX(0.0f);
+            intro.add(title);
+
+            JLabel subtitle = new JLabel("Đây là phần đầu của lịch sử tin nhắn trực tiếp của bạn với @" + conv.id().toLowerCase() + ".");
+            subtitle.setFont(DiscordTheme.font(13f));
+            subtitle.setForeground(DiscordTheme.TEXT_SECONDARY);
+            subtitle.setAlignmentX(0.0f);
+            intro.add(subtitle);
+        } else {
+            RoundedPanel hashCircle = new RoundedPanel(48);
+            hashCircle.setBackground(new Color(0x3F, 0x42, 0x48));
+            hashCircle.setPreferredSize(new Dimension(52, 52));
+            hashCircle.setMaximumSize(new Dimension(52, 52));
+            hashCircle.setLayout(new BorderLayout());
+            JLabel hashIcon = new JLabel(IconFactory.phosphor("hash.svg", 30, Color.WHITE), SwingConstants.CENTER);
+            hashCircle.add(hashIcon, BorderLayout.CENTER);
+            hashCircle.setAlignmentX(0.0f);
+            intro.add(hashCircle);
+            intro.add(Box.createVerticalStrut(10));
+
+            JLabel title = new JLabel("Chào mừng bạn đến với #" + selectedChannel + "!");
+            title.setFont(DiscordTheme.extrabold(24f));
+            title.setForeground(DiscordTheme.TEXT_PRIMARY);
+            title.setAlignmentX(0.0f);
+            intro.add(title);
+
+            JLabel subtitle = new JLabel("Đây là phần đầu của kênh #" + selectedChannel + ".");
+            subtitle.setFont(DiscordTheme.font(13f));
+            subtitle.setForeground(DiscordTheme.TEXT_SECONDARY);
+            subtitle.setAlignmentX(0.0f);
+            intro.add(subtitle);
+        }
         return intro;
     }
 

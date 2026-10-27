@@ -103,11 +103,29 @@ public final class ChatInputBar extends JPanel {
         composerScroll.setPreferredSize(new Dimension(0, 32));
         inputRow.add(composerScroll, BorderLayout.CENTER);
 
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         actions.setOpaque(false);
 
-        // Emoji & Sticker popup button
-        JButton emojiBtn = createIconButton("smiley.svg", "Emoji & Sticker", 19, DiscordTheme.TEXT_SECONDARY);
+        // Sticker popup button (Discord style)
+        JButton stickerBtn = createIconButton("sticker.svg", "Hình dán (Sticker)", 20, DiscordTheme.TEXT_SECONDARY);
+        stickerBtn.addActionListener(e -> {
+            if (stickerBtn.isShowing()) {
+                EmojiPickerPopup popup = new EmojiPickerPopup(
+                        selectedEmoji -> {
+                            composer.insertEmoji(selectedEmoji);
+                            adjustComposerHeight();
+                        },
+                        selectedSticker -> {
+                            if (listener != null) listener.onSendSticker(selectedSticker);
+                        }
+                );
+                popup.showAbove(stickerBtn);
+            }
+        });
+        actions.add(stickerBtn);
+
+        // Emoji popup button (Discord style)
+        JButton emojiBtn = createIconButton("smiley.svg", "Chọn biểu cảm Emoji", 20, DiscordTheme.TEXT_SECONDARY);
         emojiBtn.addActionListener(e -> {
             if (emojiBtn.isShowing()) {
                 EmojiPickerPopup popup = new EmojiPickerPopup(
@@ -125,42 +143,30 @@ public final class ChatInputBar extends JPanel {
         actions.add(emojiBtn);
 
         // Send button
-        sendButton.setIcon(IconFactory.phosphor("paper-plane-tilt.svg", 17, Color.WHITE));
-        sendButton.setToolTipText("Gửi tin nhắn");
-        sendButton.setPreferredSize(new Dimension(32, 32));
-        sendButton.setFocusPainted(true);
+        sendButton.setIcon(IconFactory.phosphor("paper-plane-tilt.svg", 16, Color.WHITE));
+        sendButton.setToolTipText("Gửi tin nhắn (Enter)");
+        sendButton.setPreferredSize(new Dimension(30, 30));
+        sendButton.setFocusPainted(false);
         DiscordTheme.stylePrimaryButton(sendButton);
-        sendButton.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+        sendButton.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         sendButton.addActionListener(event -> submitMessage());
         actions.add(sendButton);
 
         inputRow.add(actions, BorderLayout.EAST);
         shell.add(inputRow, BorderLayout.CENTER);
 
-        // Footer hint bar
-        JPanel footer = new JPanel(new BorderLayout(12, 0));
-        footer.setOpaque(false);
-        footer.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(0x3A, 0x3C, 0x42)),
-                BorderFactory.createEmptyBorder(5, 10, 6, 10)));
+        JPanel container = new JPanel(new BorderLayout(0, 3));
+        container.setOpaque(false);
+        container.add(shell, BorderLayout.CENTER);
 
         composerHint.setFont(DiscordTheme.font(10f));
         composerHint.setForeground(DiscordTheme.TEXT_MUTED);
-        composerHint.setMinimumSize(new Dimension(0, 0));
-        footer.add(composerHint, BorderLayout.CENTER);
-
-        JLabel keys = new JLabel("Enter để gửi · Shift + Enter xuống dòng");
-        keys.setFont(DiscordTheme.font(10f));
-        keys.setForeground(DiscordTheme.TEXT_MUTED);
-        keys.setHorizontalAlignment(SwingConstants.RIGHT);
-        keys.setMinimumSize(new Dimension(0, 0));
-        footer.add(keys, BorderLayout.EAST);
-
-        shell.add(footer, BorderLayout.SOUTH);
+        composerHint.setBorder(BorderFactory.createEmptyBorder(2, 6, 0, 0));
+        container.add(composerHint, BorderLayout.SOUTH);
 
         JPanel row = new JPanel(new ColumnLayout(1000, 0));
         row.setOpaque(false);
-        row.add(shell);
+        row.add(container);
         add(row, BorderLayout.CENTER);
     }
 
