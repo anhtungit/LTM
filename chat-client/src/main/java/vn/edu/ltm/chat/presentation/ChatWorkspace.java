@@ -1123,16 +1123,68 @@ public final class ChatWorkspace extends JPanel {
                 selected ? DiscordTheme.SELECTED : DiscordTheme.SIDEBAR, true);
         row.add(avatar, BorderLayout.WEST);
 
+        JPanel centerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        centerPanel.setOpaque(false);
         JLabel name = new JLabel(conversation.displayName());
         name.setFont(DiscordTheme.semibold(13f));
         name.setForeground(selected ? Color.WHITE : new Color(0xB9, 0xBA, 0xC2));
-        row.add(name, BorderLayout.CENTER);
+        centerPanel.add(name);
+
+        String role = MessageRow.resolveRoleBadge(conversation.id());
+        if (role != null) {
+            centerPanel.add(MessageRow.buildRoleBadge(role));
+        }
+        row.add(centerPanel, BorderLayout.CENTER);
+
+        if (!conversation.isGroup()) {
+            JButton closeBtn = new JButton(IconFactory.phosphor("x.svg", 12, DiscordTheme.TEXT_MUTED));
+            closeBtn.setContentAreaFilled(false);
+            closeBtn.setBorderPainted(false);
+            closeBtn.setFocusPainted(false);
+            closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            closeBtn.setPreferredSize(new Dimension(20, 20));
+            closeBtn.setVisible(false);
+            closeBtn.setToolTipText("Đóng cuộc trò chuyện");
+            closeBtn.addActionListener(e -> closeDmConversation(conversation));
+            row.add(closeBtn, BorderLayout.EAST);
+
+            row.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    closeBtn.setVisible(true);
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    if (!row.contains(e.getPoint())) {
+                        closeBtn.setVisible(false);
+                    }
+                }
+            });
+        }
 
         row.addActionListener(e -> {
             selectConversation(conversation);
             showChatView();
         });
         return row;
+    }
+
+    private void closeDmConversation(Conversation conversation) {
+        if (conversation == null) return;
+        synchronized (conversations) {
+            conversations.removeIf(c -> c.id().equals(conversation.id()));
+        }
+        if (conversation.id().equals(selectedConversationId)) {
+            selectedConversationId = null;
+            if (!conversations.isEmpty()) {
+                selectConversation(conversations.getFirst());
+            } else {
+                renderEmptyWorkspaceState();
+            }
+        }
+        rebuildConversationButtons();
+        railPanel.rebuild();
     }
 
     private void selectConversation(Conversation conversation) {
@@ -1595,11 +1647,18 @@ public final class ChatWorkspace extends JPanel {
             transcript.remove(1);
         }
         String previousSenderId = null;
+        LocalDate lastDate = null;
         for (int i = transcript.getComponentCount() - 1; i >= 0; i--) {
             if (transcript.getComponent(i) instanceof MessageRow row) {
+                lastDate = row.getMessage().sentAt().toLocalDate();
                 previousSenderId = row.getMessage().senderId();
                 break;
             }
+        }
+        LocalDate msgDate = msg.sentAt().toLocalDate();
+        if (lastDate == null || !lastDate.equals(msgDate)) {
+            transcript.add(new DateDividerRow(msgDate));
+            previousSenderId = null;
         }
         boolean beginsGroup = (previousSenderId == null || !previousSenderId.equals(msg.senderId()));
         transcript.add(new MessageRow(msg, defaultWrapWidth(), beginsGroup, user != null ? user.id() : null, createActionListener(chan)));

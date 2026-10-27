@@ -149,6 +149,25 @@ final class ChatInfoPanel extends JPanel {
         );
         avatar.setBounds(16, 32, 68, 68);
         bannerHeader.add(avatar);
+
+        JButton addFriendBtn = new JButton(IconFactory.phosphor("user-plus.svg", 13, Color.WHITE));
+        addFriendBtn.setBounds(PANEL_WIDTH - 60, 10, 24, 24);
+        addFriendBtn.setContentAreaFilled(false);
+        addFriendBtn.setBorderPainted(false);
+        addFriendBtn.setFocusPainted(false);
+        addFriendBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        addFriendBtn.setToolTipText("Thêm bạn bè");
+        bannerHeader.add(addFriendBtn);
+
+        JButton bannerMoreBtn = new JButton(IconFactory.phosphor("dots-three.svg", 14, Color.WHITE));
+        bannerMoreBtn.setBounds(PANEL_WIDTH - 32, 10, 24, 24);
+        bannerMoreBtn.setContentAreaFilled(false);
+        bannerMoreBtn.setBorderPainted(false);
+        bannerMoreBtn.setFocusPainted(false);
+        bannerMoreBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        bannerMoreBtn.setToolTipText("Tùy chọn khác");
+        bannerHeader.add(bannerMoreBtn);
+
         contentPanel.add(bannerHeader);
 
         // 2. Profile Card Body Container
@@ -182,6 +201,22 @@ final class ChatInfoPanel extends JPanel {
         badgesRow.add(buildBadgeLabel(IconFactory.phosphor("compass.svg", 14, new Color(0xF0, 0xBB, 0x3B)), "HypeSquad Bravery"));
         badgesRow.add(buildBadgeLabel(IconFactory.phosphor("check.svg", 14, DiscordTheme.SUCCESS), "Tài khoản đã xác thực"));
         card.add(badgesRow);
+
+        card.add(Box.createVerticalStrut(8));
+
+        // Mutual info
+        JPanel mutualRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        mutualRow.setOpaque(false);
+        mutualRow.setAlignmentX(0.0f);
+        JLabel mutualDot = new JLabel("•");
+        mutualDot.setForeground(DiscordTheme.SUCCESS);
+        mutualDot.setFont(DiscordTheme.bold(12f));
+        mutualRow.add(mutualDot);
+        JLabel mutualLabel = new JLabel("1 bạn chung • 2 máy chủ chung");
+        mutualLabel.setFont(DiscordTheme.font(11f));
+        mutualLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        mutualRow.add(mutualLabel);
+        card.add(mutualRow);
 
         card.add(Box.createVerticalStrut(10));
         card.add(createDivider(cardWidth - 24));

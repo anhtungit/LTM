@@ -307,6 +307,27 @@ final class MessageRow extends JPanel {
         return spinePanel;
     }
 
+    static String resolveRoleBadge(String userId) {
+        if (userId == null) return null;
+        String lower = userId.toLowerCase();
+        if (lower.contains("tai")) return "DEVG";
+        if (lower.contains("lkd")) return "MASS";
+        if (lower.contains("khoa")) return "BIBO";
+        if (lower.contains("dunggawr") || lower.contains("mai-phuong")) return "Gura";
+        if (lower.contains("bot")) return "BOT";
+        return null;
+    }
+
+    static JLabel buildRoleBadge(String text) {
+        JLabel badge = new JLabel(text);
+        badge.setFont(DiscordTheme.extrabold(9f));
+        badge.setForeground(Color.WHITE);
+        badge.setBackground(new Color(0x3B, 0x3D, 0x44));
+        badge.setOpaque(true);
+        badge.setBorder(BorderFactory.createEmptyBorder(1, 4, 1, 4));
+        return badge;
+    }
+
     private JPanel buildAuthorRow(ChatMessage message) {
         JPanel authorRow = new JPanel(new BorderLayout(8, 0));
         authorRow.setOpaque(false);
@@ -319,6 +340,11 @@ final class MessageRow extends JPanel {
         author.setFont(DiscordTheme.bold(13.5f));
         author.setForeground(isMe ? new Color(0x58, 0x65, 0xF2) : Color.WHITE);
         left.add(author);
+
+        String role = resolveRoleBadge(message.senderId());
+        if (role != null) {
+            left.add(buildRoleBadge(role));
+        }
 
         String timeStr = TIME_FORMAT.format(message.sentAt());
         JLabel time = new JLabel(timeStr);
@@ -520,6 +546,13 @@ final class MessageRow extends JPanel {
         } else {
             JComponent mainContentComp = null;
             String text = parsedMainContent != null ? parsedMainContent : (message.content() != null ? message.content() : "");
+            if (isCallLogMessage(text)) {
+                contentHolder.add(buildCallLogRow(text, message.sentAt()), BorderLayout.CENTER);
+                contentHolder.revalidate();
+                contentHolder.repaint();
+                attachHoverRecursively(this);
+                return;
+            }
             boolean hasAttachment = message.hasAttachment();
             boolean isDefaultAttachmentText = hasAttachment && (text == null || text.isBlank() || text.startsWith("Đã gửi tệp:") || text.equals(message.attachmentName()));
 
@@ -840,6 +873,40 @@ final class MessageRow extends JPanel {
 
         card.add(meta, BorderLayout.CENTER);
         return card;
+    }
+
+    private boolean isCallLogMessage(String text) {
+        if (text == null) return false;
+        return text.startsWith("[call:") || text.contains("đã bắt đầu cuộc gọi") || text.contains("started a call");
+    }
+
+    private JPanel buildCallLogRow(String text, java.time.LocalDateTime sentAt) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        row.setOpaque(false);
+        row.setBorder(BorderFactory.createEmptyBorder(2, 4, 4, 4));
+
+        JLabel phoneIcon = new JLabel(IconFactory.phosphor("phone.svg", 16, DiscordTheme.SUCCESS));
+        row.add(phoneIcon);
+
+        String displayText = text;
+        if (displayText.startsWith("[call:")) {
+            displayText = displayText.substring(6).replace("]", "").trim();
+            displayText = "Đã bắt đầu cuộc gọi kéo dài " + displayText + ".";
+        }
+
+        JLabel textLabel = new JLabel(displayText);
+        textLabel.setFont(DiscordTheme.semibold(12f));
+        textLabel.setForeground(DiscordTheme.TEXT_SECONDARY);
+        row.add(textLabel);
+
+        if (sentAt != null) {
+            JLabel timeLabel = new JLabel(TIME_FORMAT.format(sentAt));
+            timeLabel.setFont(DiscordTheme.font(10.5f));
+            timeLabel.setForeground(DiscordTheme.TEXT_MUTED);
+            row.add(timeLabel);
+        }
+
+        return row;
     }
 
     private JComponent buildAttachmentCard() {
