@@ -475,12 +475,40 @@ class ChatServerTest {
             ConversationDto[] convs2 = listRes2.getObj("conversations", ConversationDto[].class);
             assertEquals("an-nguyen", convs2[0].id());
             assertEquals("ha-linh", convs2[1].id());
+
+            // Close DM with an-nguyen: it must disappear from conversation list even after relogin!
+            out1.println(new Packet("CLOSE_DM_REQ", "close-an")
+                    .put("userId", u.id())
+                    .put("peerId", "an-nguyen").toJsonLine());
+            Packet closeRes = readResponse(in1, "close-an");
+            assertNotNull(closeRes);
+            assertTrue(closeRes.isOk());
+
+            out1.println(new Packet("LIST_CONVERSATIONS_REQ", "list-after-close")
+                    .put("userId", u.id()).toJsonLine());
+            Packet listAfterClose = readResponse(in1, "list-after-close");
+            assertNotNull(listAfterClose);
+            ConversationDto[] convsAfterClose = listAfterClose.getObj("conversations", ConversationDto[].class);
+            assertEquals(1, convsAfterClose.length);
+            assertEquals("ha-linh", convsAfterClose[0].id());
+        }
+    }
+
+    private Packet readResponse(BufferedReader in, String reqId) throws Exception {
+        while (true) {
+            String line = in.readLine();
+            if (line == null) return null;
+            Packet p = Packet.fromJsonLine(line);
+            if (p != null && reqId.equals(p.getRequestId())) {
+                return p;
+            }
         }
     }
 
     private Packet readNextNonStatus(BufferedReader in) throws Exception {
         while (true) {
             String line = in.readLine();
+            if (line == null) return null;
             Packet p = Packet.fromJsonLine(line);
             if (!"USER_STATUS_BROADCAST".equals(p.getType())) {
                 return p;

@@ -100,6 +100,7 @@ public final class ClientHandler implements Runnable {
                 case "LIST_CONVERSATIONS_REQ" -> handleListConversations(req, reqId);
                 case "LIST_USERS_REQ" -> handleListUsers(req, reqId);
                 case "OPEN_DM_REQ" -> handleOpenDirectMessage(req, reqId);
+                case "CLOSE_DM_REQ" -> handleCloseDirectMessage(req, reqId);
                 case "GET_CHAT_HISTORY_REQ" -> handleGetHistory(req, reqId);
                 case "SEND_MSG_REQ" -> handleSendMessage(req, reqId);
                 case "EDIT_MSG_REQ" -> handleEditMessage(req, reqId);
@@ -227,6 +228,16 @@ public final class ClientHandler implements Runnable {
         ConversationDto conv = db.openDirectMessage(userId, peerId);
         sendPacket(Packet.response("OPEN_DM_RES", reqId)
                 .putObj("conversation", withLivePresence(conv)));
+    }
+
+    private void handleCloseDirectMessage(Packet req, String reqId) {
+        String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
+        String peerId = req.getString("peerId", "");
+        if (userId != null && !userId.isBlank() && !peerId.isBlank()) {
+            db.closeDirectMessage(userId, peerId);
+        }
+        sendPacket(Packet.response("CLOSE_DM_RES", reqId)
+                .put("peerId", peerId));
     }
 
     private void handleGetHistory(Packet req, String reqId) {

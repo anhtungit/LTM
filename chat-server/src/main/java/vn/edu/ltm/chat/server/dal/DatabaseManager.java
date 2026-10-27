@@ -438,6 +438,21 @@ public final class DatabaseManager implements AutoCloseable {
         throw new IllegalArgumentException("Không tìm thấy người dùng: " + peerId);
     }
 
+    public synchronized void closeDirectMessage(String userId, String peerId) {
+        if (userId == null || userId.isBlank() || peerId == null || peerId.isBlank()) {
+            return;
+        }
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(
+                     "DELETE FROM user_dms WHERE user_id = ? AND peer_id = ?")) {
+            ps.setString(1, userId);
+            ps.setString(2, peerId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[DatabaseManager] Không thể đóng cuộc trò chuyện: " + e.getMessage());
+        }
+    }
+
     public synchronized UserDto updateProfile(UserDto updated) {
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(

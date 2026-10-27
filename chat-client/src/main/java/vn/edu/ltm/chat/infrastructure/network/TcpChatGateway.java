@@ -307,6 +307,22 @@ public final class TcpChatGateway implements ChatGateway {
     }
 
     @Override
+    public void closeDirectMessage(String peerId) {
+        if (peerId == null || peerId.isBlank()) return;
+        fallback.closeDirectMessage(peerId);
+        if (!tryConnect()) {
+            return;
+        }
+        try {
+            TcpPacket req = new TcpPacket("CLOSE_DM_REQ", UUID.randomUUID().toString())
+                    .put("userId", currentUserId != null ? currentUserId : "")
+                    .put("peerId", peerId);
+            request(req);
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
     public List<Conversation> listConversations() {
         if (!tryConnect()) {
             return fallback.listConversations();

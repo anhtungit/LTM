@@ -53,6 +53,10 @@ public final class ChatService {
         return gateway.openDirectMessage(peerId);
     }
 
+    public void closeDirectMessage(String peerId) {
+        gateway.closeDirectMessage(peerId);
+    }
+
     public List<ChatMessage> messages(String conversationId) {
         return gateway.loadMessages(conversationId, "");
     }

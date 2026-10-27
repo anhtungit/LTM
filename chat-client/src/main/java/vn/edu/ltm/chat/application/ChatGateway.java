@@ -48,6 +48,9 @@ public interface ChatGateway {
         return null;
     }
 
+    default void closeDirectMessage(String peerId) {
+    }
+
     default List<ChatMessage> loadMessages(String conversationId) {
         return loadMessages(conversationId, "");
     }

@@ -163,6 +163,12 @@ public final class InMemoryChatGateway implements ChatGateway {
     }
 
     @Override
+    public synchronized void closeDirectMessage(String peerId) {
+        if (peerId == null || peerId.isBlank()) return;
+        conversations.remove(peerId);
+    }
+
+    @Override
     public synchronized List<ChatMessage> loadMessages(String conversationId, String channel) {
         String key = makeKey(conversationId, channel);
         List<ChatMessage> history = messages.get(key);

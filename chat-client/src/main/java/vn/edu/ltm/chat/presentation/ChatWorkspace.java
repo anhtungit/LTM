@@ -1181,6 +1181,7 @@ public final class ChatWorkspace extends JPanel {
         }
         rebuildConversationButtons();
         railPanel.rebuild();
+        CompletableFuture.runAsync(() -> chatService.closeDirectMessage(conversation.id()));
     }
 
     private void selectConversation(Conversation conversation) {
