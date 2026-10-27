@@ -4,6 +4,7 @@ import vn.edu.ltm.chat.domain.ChatMessage;
 import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.ImageIcon;
@@ -15,6 +16,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
@@ -30,6 +32,8 @@ import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.PointerInfo;
 import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.time.format.DateTimeFormatter;
@@ -76,6 +80,9 @@ final class MessageRow extends JPanel {
     private boolean isEditing = false;
     private int currentWrapWidth;
     private final String currentUserId;
+    private String parsedReplyAuthor = null;
+    private String parsedReplySnippet = null;
+    private String parsedMainContent = null;
 
     MessageRow(ChatMessage message, int wrapWidth, boolean beginsSenderGroup, MessageActionListener listener) {
         this(message, wrapWidth, beginsSenderGroup, null, listener);
@@ -86,6 +93,7 @@ final class MessageRow extends JPanel {
         this.currentUserId = currentUserId;
         this.listener = listener;
         this.currentWrapWidth = wrapWidth;
+        parseReplyHeader();
 
         this.hideToolbarTimer = new Timer(200, e -> {
             try {
@@ -135,7 +143,16 @@ final class MessageRow extends JPanel {
         }
 
         body.setOpaque(false);
-        if (beginsSenderGroup) {
+        if (parsedReplyAuthor != null) {
+            JPanel topStack = new JPanel();
+            topStack.setOpaque(false);
+            topStack.setLayout(new BoxLayout(topStack, BoxLayout.Y_AXIS));
+            topStack.add(buildReplySpineRow(parsedReplyAuthor, parsedReplySnippet));
+            if (beginsSenderGroup) {
+                topStack.add(buildAuthorRow(message));
+            }
+            body.add(topStack, BorderLayout.NORTH);
+        } else if (beginsSenderGroup) {
             body.add(buildAuthorRow(message), BorderLayout.NORTH);
         }
 
@@ -209,6 +226,51 @@ final class MessageRow extends JPanel {
         super.paintComponent(g);
     }
 
+    private void parseReplyHeader() {
+        String raw = message.content();
+        parsedReplyAuthor = null;
+        parsedReplySnippet = null;
+        if (raw != null && raw.startsWith("> @")) {
+            int newlineIdx = raw.indexOf('\n');
+            if (newlineIdx > 0) {
+                String headerLine = raw.substring(0, newlineIdx).trim();
+                int colonIdx = headerLine.indexOf(':');
+                if (colonIdx > 3) {
+                    parsedReplyAuthor = headerLine.substring(3, colonIdx).trim();
+                    parsedReplySnippet = headerLine.substring(colonIdx + 1).trim();
+                    parsedMainContent = raw.substring(newlineIdx + 1).trim();
+                    return;
+                }
+            }
+        }
+        parsedMainContent = raw != null ? raw : "";
+    }
+
+    private JComponent buildReplySpineRow(String replyAuthor, String replySnippet) {
+        JPanel spinePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        spinePanel.setOpaque(false);
+        spinePanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 2, 0));
+
+        JLabel branchIcon = new JLabel("╭─");
+        branchIcon.setFont(new Font("Monospaced", Font.BOLD, 12));
+        branchIcon.setForeground(new Color(0x4E, 0x50, 0x58));
+        spinePanel.add(branchIcon);
+
+        JLabel authorLabel = new JLabel("@" + replyAuthor);
+        authorLabel.setFont(DiscordTheme.bold(11f));
+        authorLabel.setForeground(new Color(0x58, 0x65, 0xF2));
+        spinePanel.add(authorLabel);
+
+        String snippet = replySnippet != null ? replySnippet.replace("\n", " ").trim() : "";
+        if (snippet.length() > 65) snippet = snippet.substring(0, 62) + "...";
+        JLabel snippetLabel = new JLabel(snippet);
+        snippetLabel.setFont(DiscordTheme.font(11f));
+        snippetLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        spinePanel.add(snippetLabel);
+
+        return spinePanel;
+    }
+
     private JPanel buildAuthorRow(ChatMessage message) {
         JPanel authorRow = new JPanel(new BorderLayout(8, 0));
         authorRow.setOpaque(false);
@@ -223,9 +285,6 @@ final class MessageRow extends JPanel {
         left.add(author);
 
         String timeStr = TIME_FORMAT.format(message.sentAt());
-        if (message.edited()) {
-            timeStr += " (đã sửa)";
-        }
         JLabel time = new JLabel(timeStr);
         time.setFont(DiscordTheme.font(10.5f));
         time.setForeground(DiscordTheme.TEXT_MUTED);
@@ -284,8 +343,55 @@ final class MessageRow extends JPanel {
         menu.setBackground(new Color(0x11, 0x12, 0x14));
         menu.setBorder(BorderFactory.createLineBorder(new Color(0x23, 0x24, 0x28)));
 
+        // Top quick reaction emoji row (matching Discord video)
+        JPanel quickEmojiRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 4));
+        quickEmojiRow.setOpaque(true);
+        quickEmojiRow.setBackground(new Color(0x1E, 0x1F, 0x22));
+        quickEmojiRow.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+
+        String[][] quickEmojis = {
+                {"1f4a9", "💩", ":poop: Click to react"},
+                {"2764", "❤️", ":heart: Click to react"},
+                {"1f44d", "👍", ":thumbsup: Click to react"},
+                {"1f602", "😂", ":joy: Click to react"}
+        };
+        for (String[] emo : quickEmojis) {
+            JButton emoBtn = new JButton();
+            ImageIcon icon = EmojiAssets.getIconByHex(emo[0], 18);
+            if (icon != null) emoBtn.setIcon(icon);
+            else emoBtn.setText(emo[1]);
+            emoBtn.setToolTipText(emo[2]);
+            emoBtn.setPreferredSize(new Dimension(34, 30));
+            emoBtn.setBackground(new Color(0x2B, 0x2D, 0x31));
+            emoBtn.setBorder(BorderFactory.createLineBorder(new Color(0x38, 0x3A, 0x40), 1));
+            emoBtn.setFocusPainted(false);
+            emoBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            emoBtn.addActionListener(e -> {
+                menu.setVisible(false);
+                if (listener != null) listener.onReact(message, emo[1]);
+            });
+            quickEmojiRow.add(emoBtn);
+        }
+        menu.add(quickEmojiRow);
+        menu.addSeparator();
+
+        JMenuItem addReactionItem = createMenuItem("Thêm biểu cảm...", "smiley.svg", () -> {
+            showQuickReactionPopup(anchor);
+        });
+        menu.add(addReactionItem);
+
+        if (isMe && !message.hasAttachment()) {
+            JMenuItem editItem = createMenuItem("Chỉnh sửa tin nhắn", "note-pencil.svg", this::startEdit);
+            menu.add(editItem);
+        }
+
+        JMenuItem replyItem = createMenuItem("Trả lời", "arrow-u-up-left.svg", () -> {
+            if (listener != null) listener.onReply(message);
+        });
+        menu.add(replyItem);
+
         JMenuItem copyItem = createMenuItem("Sao chép văn bản", "file-text.svg", () -> {
-            String c = message.content();
+            String c = parsedMainContent != null ? parsedMainContent : message.content();
             if (c != null && !c.isBlank()) {
                 java.awt.datatransfer.StringSelection sel = new java.awt.datatransfer.StringSelection(c);
                 java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(sel, null);
@@ -295,10 +401,6 @@ final class MessageRow extends JPanel {
 
         if (isMe) {
             menu.addSeparator();
-            if (!message.hasAttachment()) {
-                JMenuItem editItem = createMenuItem("Chỉnh sửa tin nhắn", "note-pencil.svg", this::startEdit);
-                menu.add(editItem);
-            }
             JMenuItem recallItem = createMenuItem("Thu hồi tin nhắn", "arrow-clockwise.svg", () -> {
                 if (listener != null) listener.onRecall(message);
             });
@@ -335,9 +437,9 @@ final class MessageRow extends JPanel {
         actionToolbar.removeAll();
         if (!message.recalled()) {
             // Quick 1-click reaction buttons (matching Discord)
-            actionToolbar.add(createEmojiToolbarButton("1f4a9", "💩", "Cục phân (Poop)"));
-            actionToolbar.add(createEmojiToolbarButton("2764", "❤️", "Yêu thích (Heart)"));
-            actionToolbar.add(createEmojiToolbarButton("1f44d", "👍", "Thích (Like)"));
+            actionToolbar.add(createEmojiToolbarButton("1f4a9", "💩", ":poop: Click to react"));
+            actionToolbar.add(createEmojiToolbarButton("2764", "❤️", ":heart: Click to react"));
+            actionToolbar.add(createEmojiToolbarButton("1f44d", "👍", ":thumbsup: Click to react"));
 
             actionToolbar.add(createToolbarSeparator());
 
@@ -369,7 +471,7 @@ final class MessageRow extends JPanel {
             contentHolder.add(holder, BorderLayout.NORTH);
         } else {
             JComponent mainContentComp = null;
-            String text = message.content();
+            String text = parsedMainContent != null ? parsedMainContent : (message.content() != null ? message.content() : "");
             boolean hasAttachment = message.hasAttachment();
             boolean isDefaultAttachmentText = hasAttachment && (text == null || text.isBlank() || text.startsWith("Đã gửi tệp:") || text.equals(message.attachmentName()));
 
@@ -615,7 +717,20 @@ final class MessageRow extends JPanel {
         normalText.setForeground(DiscordTheme.TEXT_PRIMARY);
         normalText.setOpaque(false);
         normalText.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-        return normalText;
+
+        if (!message.edited()) {
+            return normalText;
+        }
+
+        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        wrapper.setOpaque(false);
+        wrapper.add(normalText);
+
+        JLabel editedTag = new JLabel("(đã chỉnh sửa)");
+        editedTag.setFont(DiscordTheme.font(10f));
+        editedTag.setForeground(DiscordTheme.TEXT_MUTED);
+        wrapper.add(editedTag);
+        return wrapper;
     }
 
     private JComponent buildStickerCard(String stickerId) {
@@ -726,9 +841,10 @@ final class MessageRow extends JPanel {
                 BorderFactory.createLineBorder(new Color(0x3D, 0x3F, 0x46), 1),
                 BorderFactory.createEmptyBorder(8, 10, 8, 10)
         ));
-        editCard.setLayout(new BorderLayout(0, 8));
+        editCard.setLayout(new BorderLayout(0, 6));
 
-        JTextArea editArea = new JTextArea(message.content(), 2, 20);
+        String editInitialText = parsedMainContent != null ? parsedMainContent : message.content();
+        JTextArea editArea = new JTextArea(editInitialText, 2, 20);
         editArea.setLineWrap(true);
         editArea.setWrapStyleWord(true);
         editArea.setOpaque(false);
@@ -737,57 +853,81 @@ final class MessageRow extends JPanel {
         editArea.setCaretColor(Color.WHITE);
         editArea.setBorder(null);
 
+        Runnable saveAction = () -> {
+            String newText = editArea.getText().trim();
+            if (!newText.isEmpty() && listener != null && !newText.equals(editInitialText)) {
+                String fullNewContent = parsedReplyAuthor != null
+                        ? ("> @" + parsedReplyAuthor + ": " + parsedReplySnippet + "\n" + newText)
+                        : newText;
+                listener.onEdit(message, fullNewContent);
+            }
+            isEditing = false;
+            buildNormalContent();
+        };
+
+        Runnable cancelAction = () -> {
+            isEditing = false;
+            buildNormalContent();
+        };
+
+        editArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "save-edit");
+        editArea.getActionMap().put("save-edit", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { saveAction.run(); }
+        });
+        editArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.SHIFT_DOWN_MASK), "insert-newline");
+        editArea.getActionMap().put("insert-newline", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { editArea.replaceSelection("\n"); }
+        });
+        editArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "cancel-edit");
+        editArea.getActionMap().put("cancel-edit", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { cancelAction.run(); }
+        });
+
         JScrollPane scroll = new JScrollPane(editArea);
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         scroll.setBorder(null);
         editCard.add(scroll, BorderLayout.CENTER);
 
-        JPanel bottomRow = new JPanel(new BorderLayout());
+        JPanel bottomRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         bottomRow.setOpaque(false);
 
-        JLabel editHint = new JLabel("Đang chỉnh sửa tin nhắn · nhấn Esc để hủy");
-        editHint.setFont(DiscordTheme.font(10f));
-        editHint.setForeground(DiscordTheme.TEXT_MUTED);
-        bottomRow.add(editHint, BorderLayout.WEST);
+        JLabel escPrefix = new JLabel("escape để");
+        escPrefix.setFont(DiscordTheme.font(10.5f));
+        escPrefix.setForeground(DiscordTheme.TEXT_MUTED);
 
-        JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-        btns.setOpaque(false);
-
-        JButton cancelBtn = new JButton("Hủy");
-        cancelBtn.setFont(DiscordTheme.semibold(11f));
-        cancelBtn.setForeground(DiscordTheme.TEXT_SECONDARY);
-        cancelBtn.setContentAreaFilled(false);
-        cancelBtn.setBorderPainted(false);
-        cancelBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        cancelBtn.addActionListener(e -> {
-            isEditing = false;
-            buildNormalContent();
+        JLabel cancelLink = new JLabel("huỷ");
+        cancelLink.setFont(DiscordTheme.font(10.5f));
+        cancelLink.setForeground(new Color(0x00, 0xA8, 0xFC));
+        cancelLink.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        cancelLink.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) { cancelAction.run(); }
         });
-        btns.add(cancelBtn);
 
-        JButton saveBtn = new JButton("Lưu thay đổi");
-        saveBtn.setFont(DiscordTheme.bold(11f));
-        saveBtn.setForeground(Color.WHITE);
-        saveBtn.setBackground(DiscordTheme.ACCENT);
-        saveBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        saveBtn.addActionListener(e -> {
-            String newText = editArea.getText().trim();
-            if (!newText.isEmpty() && listener != null) {
-                listener.onEdit(message, newText);
-            }
-            isEditing = false;
-            buildNormalContent();
+        JLabel dot = new JLabel("• enter để");
+        dot.setFont(DiscordTheme.font(10.5f));
+        dot.setForeground(DiscordTheme.TEXT_MUTED);
+
+        JLabel saveLink = new JLabel("lưu");
+        saveLink.setFont(DiscordTheme.font(10.5f));
+        saveLink.setForeground(new Color(0x00, 0xA8, 0xFC));
+        saveLink.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        saveLink.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) { saveAction.run(); }
         });
-        btns.add(saveBtn);
 
-        bottomRow.add(btns, BorderLayout.EAST);
+        bottomRow.add(escPrefix);
+        bottomRow.add(cancelLink);
+        bottomRow.add(dot);
+        bottomRow.add(saveLink);
+
         editCard.add(bottomRow, BorderLayout.SOUTH);
 
         contentHolder.add(editCard, BorderLayout.CENTER);
         contentHolder.revalidate();
         contentHolder.repaint();
         editArea.requestFocusInWindow();
+        editArea.selectAll();
     }
 
     private String formatFileSize(long bytes) {
@@ -802,6 +942,7 @@ final class MessageRow extends JPanel {
 
     public void markRecalled(ChatMessage updated) {
         this.message = updated;
+        parseReplyHeader();
         if (actionToolbar != null) {
             actionToolbar.setVisible(false);
         }
@@ -812,6 +953,7 @@ final class MessageRow extends JPanel {
 
     public void updateMessage(ChatMessage updated) {
         this.message = updated;
+        parseReplyHeader();
         buildNormalContent();
         revalidate();
         repaint();

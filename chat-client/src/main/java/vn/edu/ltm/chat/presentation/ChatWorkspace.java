@@ -1136,6 +1136,7 @@ public final class ChatWorkspace extends JPanel {
 
         updateHeaderAvatar(conversation);
 
+        inputBar.cancelReply();
         inputBar.setTarget(conversation.isGroup() ? selectedChannel : conversation.displayName(), !conversation.isGroup());
         inputBar.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
         inputBar.resetHint();
@@ -1556,9 +1557,7 @@ public final class ChatWorkspace extends JPanel {
 
             @Override
             public void onReply(ChatMessage message) {
-                String replyPrefix = "> @" + message.senderName() + ": " + (message.content() != null ? message.content() : "") + "\n";
-                inputBar.setMessageText(replyPrefix);
-                inputBar.requestFocusInWindow();
+                inputBar.setReplyingTo(message);
             }
         };
     }

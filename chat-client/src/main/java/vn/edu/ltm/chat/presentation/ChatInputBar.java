@@ -1,5 +1,6 @@
 package vn.edu.ltm.chat.presentation;
 
+import vn.edu.ltm.chat.domain.ChatMessage;
 import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
@@ -39,6 +40,9 @@ public final class ChatInputBar extends JPanel {
     private final JScrollPane composerScroll;
     private final JLabel composerHint = new JLabel("Bản nháp riêng cho cuộc trò chuyện này");
     private final JButton sendButton = new JButton();
+    private final JPanel replyBanner = new JPanel(new BorderLayout(8, 0));
+    private final JLabel replyToLabel = new JLabel();
+    private ChatMessage replyingMessage = null;
     private ChatInputListener listener;
 
     public ChatInputBar() {
@@ -51,6 +55,28 @@ public final class ChatInputBar extends JPanel {
         RoundedPanel shell = new RoundedPanel(10);
         shell.setBackground(DiscordTheme.COMPOSER);
         shell.setLayout(new BorderLayout());
+
+        // Reply banner bar
+        replyBanner.setOpaque(true);
+        replyBanner.setBackground(new Color(0x2B, 0x2D, 0x31));
+        replyBanner.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(0x38, 0x3A, 0x40)),
+                BorderFactory.createEmptyBorder(5, 12, 5, 8)
+        ));
+        replyBanner.setVisible(false);
+
+        JPanel leftReply = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        leftReply.setOpaque(false);
+        leftReply.add(new JLabel(IconFactory.phosphor("arrow-u-up-left.svg", 13, DiscordTheme.TEXT_MUTED)));
+        replyToLabel.setFont(DiscordTheme.font(11.5f));
+        leftReply.add(replyToLabel);
+        replyBanner.add(leftReply, BorderLayout.CENTER);
+
+        JButton cancelReplyBtn = createIconButton("x.svg", "Hủy trả lời", 13, DiscordTheme.TEXT_MUTED);
+        cancelReplyBtn.addActionListener(e -> cancelReply());
+        replyBanner.add(cancelReplyBtn, BorderLayout.EAST);
+
+        shell.add(replyBanner, BorderLayout.NORTH);
 
         JPanel inputRow = new JPanel(new BorderLayout(8, 0));
         inputRow.setOpaque(false);
@@ -107,7 +133,7 @@ public final class ChatInputBar extends JPanel {
         actions.add(sendButton);
 
         inputRow.add(actions, BorderLayout.EAST);
-        shell.add(inputRow, BorderLayout.NORTH);
+        shell.add(inputRow, BorderLayout.CENTER);
 
         // Footer hint bar
         JPanel footer = new JPanel(new BorderLayout(12, 0));
@@ -188,16 +214,46 @@ public final class ChatInputBar extends JPanel {
         composerHint.setForeground(DiscordTheme.TEXT_MUTED);
     }
 
+    public void setReplyingTo(ChatMessage message) {
+        if (message == null) {
+            cancelReply();
+            return;
+        }
+        this.replyingMessage = message;
+        replyToLabel.setText("<html><font color='#949ba4'>Đang trả lời </font><b><font color='#ffffff'>@"
+                + (message.senderName() != null ? message.senderName() : "người dùng") + "</font></b></html>");
+        replyBanner.setVisible(true);
+        revalidate();
+        repaint();
+        requestFocusInWindow();
+    }
+
+    public void cancelReply() {
+        this.replyingMessage = null;
+        replyBanner.setVisible(false);
+        revalidate();
+        repaint();
+    }
+
     private void submitMessage() {
         String content = composer.getMessageText();
         if (content == null || content.trim().isEmpty()) {
             composer.requestFocusInWindow();
             return;
         }
+        ChatMessage target = this.replyingMessage;
         clear();
+        cancelReply();
         composer.requestFocusInWindow();
         if (listener != null) {
-            listener.onSendMessage(content);
+            if (target != null) {
+                String quote = target.content() != null ? target.content().replace("\n", " ").trim() : "";
+                if (quote.length() > 65) quote = quote.substring(0, 62) + "...";
+                String finalContent = "> @" + target.senderName() + ": " + quote + "\n" + content.trim();
+                listener.onSendMessage(finalContent);
+            } else {
+                listener.onSendMessage(content.trim());
+            }
         }
     }
 
