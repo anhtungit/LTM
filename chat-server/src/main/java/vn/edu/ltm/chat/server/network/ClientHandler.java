@@ -230,7 +230,7 @@ public final class ClientHandler implements Runnable {
     }
 
     private void handleGetHistory(Packet req, String reqId) {
-        String userId = req.getString("userId", currentUser != null ? currentUser.id() : null);
+        String userId = currentUser != null ? currentUser.id() : "";
         String convId = req.getString("conversationId", "");
         String channel = req.getString("channel", "");
         List<MessageDto> messages = db.loadMessagesForUser(userId, convId, channel);
@@ -243,9 +243,9 @@ public final class ClientHandler implements Runnable {
     private void handleSendMessage(Packet req, String reqId) {
         String convId = req.getString("conversationId", "");
         String channel = req.getString("channel", "");
-        String senderId = req.getString("senderId", currentUser != null ? currentUser.id() : "user");
-        String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Người dùng");
-        String senderInitials = req.getString("senderInitials", DatabaseManager.computeInitials(senderName));
+        String senderId = currentUser != null ? currentUser.id() : "user";
+        String senderName = currentUser != null ? currentUser.displayName() : "Người dùng";
+        String senderInitials = DatabaseManager.computeInitials(senderName);
         String content = req.getString("content", "");
 
         if (denyGroupAccess(senderId, convId, "SEND_MSG_RES", reqId, "Bạn không phải thành viên của nhóm này.")) {
@@ -301,8 +301,18 @@ public final class ClientHandler implements Runnable {
     private void handleEditMessage(Packet req, String reqId) {
         String msgId = req.getString("messageId", "");
         String newContent = req.getString("newContent", "");
+        MessageDto existing = db.findMessageById(msgId);
+        if (existing == null) {
+            sendPacket(Packet.error("EDIT_MSG_RES", reqId, "Tin nhắn không tồn tại."));
+            return;
+        }
+        if (currentUser == null || !currentUser.id().equals(existing.senderId())) {
+            sendPacket(Packet.error("EDIT_MSG_RES", reqId, "Bạn không có quyền chỉnh sửa tin nhắn này."));
+            return;
+        }
+
         MessageDto updated = db.editMessage(msgId, newContent);
-        String callerId = currentUser != null ? currentUser.id() : updated.senderId();
+        String callerId = currentUser.id();
         MessageDto callerView = withConversationId(updated, resolveClientConversationId(updated.conversationId(), callerId));
 
         sendPacket(Packet.response("EDIT_MSG_RES", reqId).putObj("message", callerView));
@@ -311,8 +321,18 @@ public final class ClientHandler implements Runnable {
 
     private void handleRecallMessage(Packet req, String reqId) {
         String msgId = req.getString("messageId", "");
+        MessageDto existing = db.findMessageById(msgId);
+        if (existing == null) {
+            sendPacket(Packet.error("RECALL_MSG_RES", reqId, "Tin nhắn không tồn tại."));
+            return;
+        }
+        if (currentUser == null || !currentUser.id().equals(existing.senderId())) {
+            sendPacket(Packet.error("RECALL_MSG_RES", reqId, "Bạn không có quyền thu hồi tin nhắn này."));
+            return;
+        }
+
         MessageDto recalled = db.recallMessage(msgId);
-        String callerId = currentUser != null ? currentUser.id() : recalled.senderId();
+        String callerId = currentUser.id();
         MessageDto callerView = withConversationId(recalled, resolveClientConversationId(recalled.conversationId(), callerId));
 
         sendPacket(Packet.response("RECALL_MSG_RES", reqId).putObj("message", callerView));
@@ -382,9 +402,13 @@ public final class ClientHandler implements Runnable {
             sendPacket(Packet.error("REACT_MSG_RES", reqId, "messageId and emoji are required"));
             return;
         }
-        String uid = req.getString("userId", currentUser != null ? currentUser.id() : "");
-        if (uid.isBlank() && currentUser != null) {
-            uid = currentUser.id();
+        String uid = currentUser != null ? currentUser.id() : "";
+        if (uid.isBlank()) {
+            sendPacket(Packet.error("REACT_MSG_RES", reqId, "Bạn chưa đăng nhập"));
+            return;
+        }
+        if (denyGroupAccess(uid, convId, "REACT_MSG_RES", reqId, "Bạn không phải thành viên của nhóm này.")) {
+            return;
         }
         db.toggleMessageReaction(msgId, uid, emoji);
         sendPacket(Packet.response("REACT_MSG_RES", reqId)
@@ -420,6 +444,16 @@ public final class ClientHandler implements Runnable {
     private void handleDeleteMessage(Packet req, String reqId) {
         String convId = req.getString("conversationId", "");
         String msgId = req.getString("messageId", "");
+        MessageDto existing = db.findMessageById(msgId);
+        if (existing == null) {
+            sendPacket(Packet.error("DELETE_MSG_RES", reqId, "Tin nhắn không tồn tại."));
+            return;
+        }
+        if (currentUser == null || !currentUser.id().equals(existing.senderId())) {
+            sendPacket(Packet.error("DELETE_MSG_RES", reqId, "Bạn không có quyền xoá tin nhắn này."));
+            return;
+        }
+
         db.deleteMessage(msgId);
 
         sendPacket(Packet.response("DELETE_MSG_RES", reqId)
@@ -450,9 +484,9 @@ public final class ClientHandler implements Runnable {
     private void handleFileUpload(Packet req, String reqId) {
         String convId = req.getString("conversationId", "");
         String channel = req.getString("channel", "");
-        String senderId = req.getString("senderId", currentUser != null ? currentUser.id() : "user");
-        String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Người dùng");
-        String senderInitials = req.getString("senderInitials", DatabaseManager.computeInitials(senderName));
+        String senderId = currentUser != null ? currentUser.id() : "user";
+        String senderName = currentUser != null ? currentUser.displayName() : "Người dùng";
+        String senderInitials = DatabaseManager.computeInitials(senderName);
         String fileName = req.getString("fileName", "attachment.dat");
         long fileSize = req.getLong("fileSize", 0L);
         boolean failed = req.getBoolean("failed", false);

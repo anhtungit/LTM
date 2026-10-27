@@ -149,11 +149,11 @@ public final class DatabaseManager implements AutoCloseable {
                 return new DatabaseManager(dbUrl.trim(), "server_storage", true);
             } catch (Exception e) {
                 System.err.println("[DatabaseManager] Kết nối Supabase trực tiếp thất bại: " + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()));
-                if (!dbUrl.contains("pooler.supabase.com")) {
+                String poolerUrl = System.getenv("DATABASE_POOLER_URL");
+                if (poolerUrl != null && !poolerUrl.isBlank()) {
                     try {
-                        String poolerUrl = "postgresql://postgres.tlijesqjobgwlkzsgzxy:Gawr-gura206@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres";
-                        System.out.println("[DatabaseManager] Đang chuyển sang Supabase IPv4 Pooler (Seoul)...");
-                        return new DatabaseManager(poolerUrl, "server_storage", true);
+                        System.out.println("[DatabaseManager] Đang chuyển sang Supabase IPv4 Pooler...");
+                        return new DatabaseManager(poolerUrl.trim(), "server_storage", true);
                     } catch (Exception e2) {
                         System.err.println("[DatabaseManager] Kết nối Pooler thất bại: " + e2.getMessage());
                     }
@@ -956,6 +956,15 @@ public final class DatabaseManager implements AutoCloseable {
             del.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Lỗi xóa tin nhắn: " + e.getMessage(), e);
+        }
+    }
+
+    public synchronized MessageDto findMessageById(String messageId) {
+        if (messageId == null || messageId.isBlank()) return null;
+        try (Connection conn = connect()) {
+            return findMessageById(conn, messageId);
+        } catch (Exception e) {
+            return null;
         }
     }
 

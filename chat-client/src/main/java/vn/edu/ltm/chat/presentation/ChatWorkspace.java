@@ -100,15 +100,12 @@ public final class ChatWorkspace extends JPanel {
     private final JPanel groupChannelsPanel = new JPanel();
     private final JLabel groupSidebarTitle = new JLabel("Nhóm");
 
-    // Chat transcript & composer
+    // Chat transcript & input bar
     private final JPanel transcript = new JPanel();
     private final JScrollPane transcriptScroll = new JScrollPane(transcript);
-    private final RichComposerPane composer = new RichComposerPane(this::sendCurrentMessage);
-    private final JScrollPane composerScroll = new JScrollPane(composer);
+    private final ChatInputBar inputBar = new ChatInputBar();
     private final ChatHeaderPanel headerPanel;
-    private final JLabel composerHint = new JLabel("Bản nháp riêng cho cuộc trò chuyện này");
     private final ChatInfoPanel infoPane = new ChatInfoPanel(this::resolveMemberDisplayName, this::resolveMemberOnline);
-    private final JButton sendButton = new JButton();
 
     private final JPanel accountFooterDm = new JPanel(new BorderLayout());
     private final JPanel accountFooterGroup = new JPanel(new BorderLayout());
@@ -158,6 +155,23 @@ public final class ChatWorkspace extends JPanel {
                 this::openInboxDialog,
                 this::toggleInfoPane
         );
+
+        this.inputBar.setListener(new ChatInputBar.ChatInputListener() {
+            @Override
+            public void onSendMessage(String content) {
+                sendTextAsync(content);
+            }
+
+            @Override
+            public void onSendAttachment(String filePath, String fileName, long fileSize, boolean failed) {
+                sendAttachmentAsync(filePath, fileName, fileSize, failed);
+            }
+
+            @Override
+            public void onSendSticker(String stickerName) {
+                sendTextAsync("[Sticker: " + stickerName + "]");
+            }
+        });
 
         setLayout(new BorderLayout());
         setBackground(DiscordTheme.TRANSCRIPT);
@@ -485,7 +499,7 @@ public final class ChatWorkspace extends JPanel {
                             selectedChannel = updated.channels().isEmpty() ? "chung" : updated.channels().getFirst();
                         }
                         headerPanel.setTitle("#" + selectedChannel);
-                        composer.setPlaceholder("Message #" + selectedChannel);
+                        inputBar.setTarget(selectedChannel, false);
                         showChatView();
                         rebuildTranscript();
                         rebuildInfoPane(updated);
@@ -516,7 +530,7 @@ public final class ChatWorkspace extends JPanel {
                 public void mouseClicked(MouseEvent e) {
                     selectedChannel = chan;
                     headerPanel.setTitle("#" + selectedChannel);
-                    composer.setPlaceholder("Message #" + selectedChannel);
+                    inputBar.setTarget(selectedChannel, false);
                     showChatView();
                     rebuildTranscript();
                     rebuildInfoPane(group);
@@ -644,7 +658,7 @@ public final class ChatWorkspace extends JPanel {
             updateConversationInList(updated);
             selectedChannel = sanitized;
             headerPanel.setTitle("#" + selectedChannel);
-            composer.setPlaceholder("Message #" + selectedChannel);
+            inputBar.setTarget(selectedChannel, false);
             showChatView();
             rebuildTranscript();
             rebuildInfoPane(updated);
@@ -865,7 +879,7 @@ public final class ChatWorkspace extends JPanel {
         messageColumn.setOpaque(false);
         messageColumn.add(headerPanel, BorderLayout.NORTH);
         messageColumn.add(buildTranscriptArea(), BorderLayout.CENTER);
-        messageColumn.add(buildComposer(), BorderLayout.SOUTH);
+        messageColumn.add(inputBar, BorderLayout.SOUTH);
 
         chatArea.add(messageColumn, BorderLayout.CENTER);
         chatArea.add(infoPane, BorderLayout.EAST);
@@ -933,125 +947,7 @@ public final class ChatWorkspace extends JPanel {
         return banner;
     }
 
-    private JComponent buildComposer() {
-        JPanel wrapper = new JPanel(new BorderLayout());
-        wrapper.setBackground(DiscordTheme.TRANSCRIPT);
-        wrapper.setBorder(BorderFactory.createEmptyBorder(4, 24, 12, 24));
 
-        RoundedPanel shell = new RoundedPanel(10);
-        shell.setBackground(DiscordTheme.COMPOSER);
-        shell.setLayout(new BorderLayout());
-
-        JPanel inputRow = new JPanel(new BorderLayout(8, 0));
-        inputRow.setOpaque(false);
-        inputRow.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 8));
-
-        // Attach button with real FileChooser & mock options
-        JButton attach = iconButton("plus-circle.svg", "Đính kèm tệp", 22, DiscordTheme.TEXT_SECONDARY);
-        attach.addActionListener(e -> showAttachMenu(attach));
-        inputRow.add(attach, BorderLayout.WEST);
-
-        composer.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent event) { adjustComposerHeight(); }
-            @Override public void removeUpdate(DocumentEvent event) { adjustComposerHeight(); }
-            @Override public void changedUpdate(DocumentEvent event) { adjustComposerHeight(); }
-        });
-        composer.getAccessibleContext().setAccessibleName("Soạn tin nhắn");
-
-        composerScroll.setBorder(null);
-        composerScroll.setOpaque(false);
-        composerScroll.getViewport().setOpaque(false);
-        composerScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        composerScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        composerScroll.setPreferredSize(new Dimension(0, 32));
-        inputRow.add(composerScroll, BorderLayout.CENTER);
-
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
-        actions.setOpaque(false);
-
-        // Emoji & Sticker button opening rich EmojiPickerPopup
-        JButton emojiBtn = iconButton("smiley.svg", "Emoji & Sticker", 19, DiscordTheme.TEXT_SECONDARY);
-        emojiBtn.addActionListener(e -> {
-            EmojiPickerPopup popup = new EmojiPickerPopup(
-                    selectedEmoji -> {
-                        composer.insertEmoji(selectedEmoji);
-                        adjustComposerHeight();
-                    },
-                    selectedSticker -> sendTextAsync("[Sticker: " + selectedSticker + "]")
-            );
-            popup.showAbove(emojiBtn);
-        });
-        actions.add(emojiBtn);
-
-        actions.add(buildSendButton());
-        inputRow.add(actions, BorderLayout.EAST);
-        shell.add(inputRow, BorderLayout.NORTH);
-
-        JPanel footer = new JPanel(new BorderLayout(12, 0));
-        footer.setOpaque(false);
-        footer.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(0x3A, 0x3C, 0x42)),
-                BorderFactory.createEmptyBorder(5, 10, 6, 10)));
-        composerHint.setFont(DiscordTheme.font(10f));
-        composerHint.setForeground(DiscordTheme.TEXT_MUTED);
-        composerHint.setMinimumSize(new Dimension(0, 0));
-        padRight(composerHint);
-        footer.add(composerHint, BorderLayout.CENTER);
-        JLabel keys = new JLabel("Enter để gửi · Shift + Enter xuống dòng");
-        keys.setFont(DiscordTheme.font(10f));
-        keys.setForeground(DiscordTheme.TEXT_MUTED);
-        keys.setHorizontalAlignment(SwingConstants.RIGHT);
-        keys.setMinimumSize(new Dimension(0, 0));
-        padRight(keys);
-        footer.add(keys, BorderLayout.EAST);
-        shell.add(footer, BorderLayout.SOUTH);
-
-        wrapper.add(centeredColumn(shell), BorderLayout.CENTER);
-        return wrapper;
-    }
-
-    private void showAttachMenu(JButton source) {
-        JPopupMenu menu = new JPopupMenu();
-
-        JMenuItem chooseFile = new JMenuItem("Chọn tệp từ máy tính...");
-        chooseFile.addActionListener(e -> {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Chọn tệp đính kèm để gửi");
-            int res = chooser.showOpenDialog(this);
-            if (res == JFileChooser.APPROVE_OPTION) {
-                File file = chooser.getSelectedFile();
-                sendAttachmentAsync(file.getAbsolutePath(), file.getName(), file.length(), false);
-            }
-        });
-        menu.add(chooseFile);
-
-        menu.addSeparator();
-
-        JMenuItem sampleFile = new JMenuItem("Gửi tệp mẫu thành công (PDF 2.4 MB)");
-        sampleFile.addActionListener(e -> {
-            sendAttachmentAsync("Tong_hop_bai_giang.pdf", "Tong_hop_bai_giang.pdf", 2_400_000L, false);
-        });
-        menu.add(sampleFile);
-
-        JMenuItem failFile = new JMenuItem("Gửi tệp mẫu thất bại (Màn 09 demo)");
-        failFile.addActionListener(e -> {
-            sendAttachmentAsync("architecture-chat-flow-v2.png", "architecture-chat-flow-v2.png", 2_400_000L, true);
-        });
-        menu.add(failFile);
-
-        menu.show(source, 0, source.getHeight());
-    }
-
-    private JButton buildSendButton() {
-        sendButton.setIcon(IconFactory.phosphor("paper-plane-tilt.svg", 17, Color.WHITE));
-        sendButton.setToolTipText("Gửi tin nhắn");
-        sendButton.setPreferredSize(new Dimension(32, 32));
-        sendButton.setFocusPainted(true);
-        DiscordTheme.stylePrimaryButton(sendButton);
-        sendButton.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
-        sendButton.addActionListener(event -> sendCurrentMessage());
-        return sendButton;
-    }
 
     private JComponent centeredColumn(JComponent content) {
         JPanel row = new JPanel(new ColumnLayout(MAX_CONTENT_WIDTH, 0));
@@ -1231,7 +1127,7 @@ public final class ChatWorkspace extends JPanel {
         }
 
         if (selectedConversationId != null) {
-            drafts.put(selectedConversationId, composer.getMessageText());
+            drafts.put(selectedConversationId, inputBar.getMessageText());
         }
         selectedConversationId = conversation.id();
 
@@ -1249,13 +1145,9 @@ public final class ChatWorkspace extends JPanel {
 
         updateHeaderAvatar(conversation);
 
-        String placeholder = conversation.isGroup()
-                ? "Message #" + selectedChannel
-                : "Message @" + conversation.displayName();
-        composer.setPlaceholder(placeholder);
-
-        composer.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
-        showHint("Bản nháp riêng cho cuộc trò chuyện này", DiscordTheme.TEXT_MUTED);
+        inputBar.setTarget(conversation.isGroup() ? selectedChannel : conversation.displayName(), !conversation.isGroup());
+        inputBar.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
+        inputBar.resetHint();
         visibleLimits.remove(transcriptCacheKey(conversation.id(), conversation.isGroup() ? selectedChannel : ""));
         rebuildConversationButtons();
         rebuildInfoPane(conversation);
@@ -1670,6 +1562,13 @@ public final class ChatWorkspace extends JPanel {
                             return null;
                         });
             }
+
+            @Override
+            public void onReply(ChatMessage message) {
+                String replyPrefix = "> @" + message.senderName() + ": " + (message.content() != null ? message.content() : "") + "\n";
+                inputBar.setMessageText(replyPrefix);
+                inputBar.requestFocusInWindow();
+            }
         };
     }
 
@@ -1734,37 +1633,8 @@ public final class ChatWorkspace extends JPanel {
         return (max - extent - val) <= 50;
     }
 
-    private void adjustComposerHeight() {
-        int lines = Math.max(1, composer.getMessageText().split("\n", -1).length);
-        int visibleLines = Math.min(4, lines);
-        int height = 32 + (visibleLines - 1) * 18;
-        composerScroll.setPreferredSize(new Dimension(0, height));
-        composerScroll.revalidate();
-    }
-
     private void showHint(String text, Color color) {
-        composerHint.setText(text);
-        composerHint.setForeground(color);
-    }
-
-    private void sendCurrentMessage() {
-        String content = composer.getMessageText();
-        if (content == null || content.isBlank()) {
-            showHint("Nhập tin nhắn trước khi gửi.", DiscordTheme.DANGER);
-            composer.requestFocusInWindow();
-            return;
-        }
-
-        final String convId = selectedConversationId;
-        final String text = content.trim();
-
-        // 1. Instant UI update: clear composer & reset draft immediately
-        composer.clear();
-        drafts.put(convId, "");
-        adjustComposerHeight();
-        composer.requestFocusInWindow();
-
-        sendTextAsync(text);
+        inputBar.setHint(text, color);
     }
 
     private void sendAttachmentAsync(String filePath, String fileName, long fileSize, boolean failed) {
@@ -1876,7 +1746,7 @@ public final class ChatWorkspace extends JPanel {
                             }
                         }
                         if (!text.startsWith("[Sticker:")) {
-                            composer.setMessageText(text);
+                            inputBar.setMessageText(text);
                         }
                         showHint("Lỗi gửi tin nhắn: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()), DiscordTheme.DANGER);
                     });

@@ -10,7 +10,9 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
@@ -24,7 +26,6 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
-import java.awt.Insets;
 import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.PointerInfo;
@@ -267,6 +268,65 @@ final class MessageRow extends JPanel {
         return btn;
     }
 
+    private JComponent createToolbarSeparator() {
+        JPanel sep = new JPanel();
+        sep.setPreferredSize(new Dimension(1, 14));
+        sep.setBackground(new Color(0x4E, 0x50, 0x58));
+        sep.setOpaque(true);
+        JPanel wrap = new JPanel(new FlowLayout(FlowLayout.CENTER, 3, 5));
+        wrap.setOpaque(false);
+        wrap.add(sep);
+        return wrap;
+    }
+
+    private void showMoreMenu(JButton anchor, boolean isMe) {
+        JPopupMenu menu = new JPopupMenu();
+        menu.setBackground(new Color(0x11, 0x12, 0x14));
+        menu.setBorder(BorderFactory.createLineBorder(new Color(0x23, 0x24, 0x28)));
+
+        JMenuItem copyItem = createMenuItem("Sao chép văn bản", "file-text.svg", () -> {
+            String c = message.content();
+            if (c != null && !c.isBlank()) {
+                java.awt.datatransfer.StringSelection sel = new java.awt.datatransfer.StringSelection(c);
+                java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(sel, null);
+            }
+        });
+        menu.add(copyItem);
+
+        if (isMe) {
+            menu.addSeparator();
+            if (!message.hasAttachment()) {
+                JMenuItem editItem = createMenuItem("Chỉnh sửa tin nhắn", "note-pencil.svg", this::startEdit);
+                menu.add(editItem);
+            }
+            JMenuItem recallItem = createMenuItem("Thu hồi tin nhắn", "arrow-clockwise.svg", () -> {
+                if (listener != null) listener.onRecall(message);
+            });
+            menu.add(recallItem);
+
+            JMenuItem deleteItem = createMenuItem("Xóa tin nhắn", "trash.svg", () -> {
+                if (listener != null) listener.onDelete(message);
+            });
+            deleteItem.setForeground(new Color(0xF2, 0x3F, 0x43));
+            menu.add(deleteItem);
+        }
+
+        menu.show(anchor, 0, anchor.getHeight() + 2);
+    }
+
+    private JMenuItem createMenuItem(String text, String iconName, Runnable action) {
+        JMenuItem item = new JMenuItem(text, IconFactory.phosphor(iconName, 14, DiscordTheme.TEXT_SECONDARY));
+        item.setFont(DiscordTheme.font(12f));
+        item.setForeground(DiscordTheme.TEXT_PRIMARY);
+        item.setBackground(new Color(0x11, 0x12, 0x14));
+        item.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        item.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        item.addActionListener(e -> {
+            if (action != null) action.run();
+        });
+        return item;
+    }
+
     private void buildNormalContent() {
         contentHolder.removeAll();
         boolean isMe = message.fromCurrentUser();
@@ -274,10 +334,12 @@ final class MessageRow extends JPanel {
         // Re-setup actionToolbar buttons according to current message state
         actionToolbar.removeAll();
         if (!message.recalled()) {
-            // Quick 1-click reaction buttons
-            actionToolbar.add(createEmojiToolbarButton("1f44d", "👍", "Thích (Like)"));
+            // Quick 1-click reaction buttons (matching Discord)
+            actionToolbar.add(createEmojiToolbarButton("1f4a9", "💩", "Cục phân (Poop)"));
             actionToolbar.add(createEmojiToolbarButton("2764", "❤️", "Yêu thích (Heart)"));
-            actionToolbar.add(createEmojiToolbarButton("1f602", "😂", "Haha"));
+            actionToolbar.add(createEmojiToolbarButton("1f44d", "👍", "Thích (Like)"));
+
+            actionToolbar.add(createToolbarSeparator());
 
             JButton reactBtn = createToolbarButton("smiley.svg", "Thêm biểu cảm khác...", null);
             reactBtn.addActionListener(e -> showQuickReactionPopup(reactBtn));
@@ -288,21 +350,9 @@ final class MessageRow extends JPanel {
             });
             actionToolbar.add(replyBtn);
 
-            if (isMe) {
-                if (!message.hasAttachment()) {
-                    JButton editBtn = createToolbarButton("note-pencil.svg", "Chỉnh sửa tin nhắn", () -> startEdit());
-                    actionToolbar.add(editBtn);
-                }
-                JButton recallBtn = createToolbarButton("arrow-clockwise.svg", "Thu hồi tin nhắn", () -> {
-                    if (listener != null) listener.onRecall(message);
-                });
-                recallBtn.setToolTipText("Thu hồi tin nhắn");
-                JButton deleteBtn = createToolbarButton("trash.svg", "Xóa tin nhắn", () -> {
-                    if (listener != null) listener.onDelete(message);
-                });
-                actionToolbar.add(recallBtn);
-                actionToolbar.add(deleteBtn);
-            }
+            JButton moreBtn = createToolbarButton("dots-three.svg", "Tùy chọn khác", null);
+            moreBtn.addActionListener(e -> showMoreMenu(moreBtn, isMe));
+            actionToolbar.add(moreBtn);
         } else {
             actionToolbar.setVisible(false);
         }
@@ -375,6 +425,15 @@ final class MessageRow extends JPanel {
                 attachHolder.add(buildAttachmentCard());
                 attachHolder.setAlignmentX(0.0f);
                 stack.add(attachHolder);
+            }
+
+            if (DiscordInviteCard.containsInvite(text)) {
+                String code = DiscordInviteCard.extractInviteCode(text);
+                JPanel inviteHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 6));
+                inviteHolder.setOpaque(false);
+                inviteHolder.add(new DiscordInviteCard(code));
+                inviteHolder.setAlignmentX(0.0f);
+                stack.add(inviteHolder);
             }
 
             JComponent reactionsRow = buildReactionsRow();
