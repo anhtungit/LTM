@@ -416,6 +416,68 @@ class ChatServerTest {
         }
     }
 
+    @Test
+    void conversationJumpsToTopOnNewMessage() throws Exception {
+        try (Socket s1 = new Socket("127.0.0.1", port);
+             BufferedReader in1 = new BufferedReader(new InputStreamReader(s1.getInputStream(), StandardCharsets.UTF_8));
+             PrintWriter out1 = new PrintWriter(new OutputStreamWriter(s1.getOutputStream(), StandardCharsets.UTF_8), true)) {
+
+            out1.println(new Packet("REGISTER_REQ", "r-top")
+                    .put("email", "top_user@example.com")
+                    .put("password", "secret")
+                    .put("displayName", "Top User").toJsonLine());
+            UserDto u = readNextNonStatus(in1).getObj("user", UserDto.class);
+
+            // Send message to An Nguyen first
+            out1.println(new Packet("SEND_MSG_REQ", "s-an")
+                    .put("conversationId", "an-nguyen")
+                    .put("channel", "")
+                    .put("senderId", u.id())
+                    .put("senderName", u.displayName())
+                    .put("senderInitials", "TU")
+                    .put("content", "Hello An").toJsonLine());
+            assertTrue(readNextNonStatus(in1).isOk());
+
+            // Then send message to Ha Linh
+            out1.println(new Packet("SEND_MSG_REQ", "s-halinh")
+                    .put("conversationId", "ha-linh")
+                    .put("channel", "")
+                    .put("senderId", u.id())
+                    .put("senderName", u.displayName())
+                    .put("senderInitials", "TU")
+                    .put("content", "Hello Ha Linh").toJsonLine());
+            assertTrue(readNextNonStatus(in1).isOk());
+
+            // List conversations for user: ha-linh must be FIRST (most recent message)
+            out1.println(new Packet("LIST_CONVERSATIONS_REQ", "list-1")
+                    .put("userId", u.id()).toJsonLine());
+            Packet listRes = readNextNonStatus(in1);
+            assertTrue(listRes.isOk());
+            ConversationDto[] convs = listRes.getObj("conversations", ConversationDto[].class);
+            assertTrue(convs.length >= 2);
+            assertEquals("ha-linh", convs[0].id());
+            assertEquals("an-nguyen", convs[1].id());
+
+            // Now send another message to an-nguyen: an-nguyen must JUMP back to TOP!
+            out1.println(new Packet("SEND_MSG_REQ", "s-an2")
+                    .put("conversationId", "an-nguyen")
+                    .put("channel", "")
+                    .put("senderId", u.id())
+                    .put("senderName", u.displayName())
+                    .put("senderInitials", "TU")
+                    .put("content", "Hello An again").toJsonLine());
+            assertTrue(readNextNonStatus(in1).isOk());
+
+            out1.println(new Packet("LIST_CONVERSATIONS_REQ", "list-2")
+                    .put("userId", u.id()).toJsonLine());
+            Packet listRes2 = readNextNonStatus(in1);
+            assertTrue(listRes2.isOk());
+            ConversationDto[] convs2 = listRes2.getObj("conversations", ConversationDto[].class);
+            assertEquals("an-nguyen", convs2[0].id());
+            assertEquals("ha-linh", convs2[1].id());
+        }
+    }
+
     private Packet readNextNonStatus(BufferedReader in) throws Exception {
         while (true) {
             String line = in.readLine();

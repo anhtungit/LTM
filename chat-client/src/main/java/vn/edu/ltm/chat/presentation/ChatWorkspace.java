@@ -1648,6 +1648,27 @@ public final class ChatWorkspace extends JPanel {
         return (max - extent - val) <= 50;
     }
 
+    private void moveConversationToTop(String convId) {
+        if (convId == null || convId.isBlank()) return;
+        synchronized (conversations) {
+            int targetIdx = -1;
+            for (int i = 0; i < conversations.size(); i++) {
+                if (conversations.get(i).id().equals(convId)) {
+                    targetIdx = i;
+                    break;
+                }
+            }
+            if (targetIdx > 0) {
+                Conversation c = conversations.remove(targetIdx);
+                conversations.add(0, c);
+                SwingUtilities.invokeLater(() -> {
+                    rebuildConversationButtons();
+                    railPanel.rebuild();
+                });
+            }
+        }
+    }
+
     private void showHint(String text, Color color) {
         inputBar.setHint(text, color);
     }
@@ -1657,6 +1678,7 @@ public final class ChatWorkspace extends JPanel {
             return;
         }
         final String convId = selectedConversationId;
+        moveConversationToTop(convId);
         Conversation conv = currentConversation();
         final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
 
@@ -1692,6 +1714,7 @@ public final class ChatWorkspace extends JPanel {
             return;
         }
         final String convId = selectedConversationId;
+        moveConversationToTop(convId);
         Conversation conv = currentConversation();
         final String chan = (conv != null && conv.isGroup()) ? selectedChannel : "";
 

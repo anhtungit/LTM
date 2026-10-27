@@ -264,11 +264,13 @@ public final class DatabaseManager implements AutoCloseable {
 
     void linkUserDm(Connection conn, String userId, String peerId, String createdAt) throws SQLException {
         if (userId == null || peerId == null || userId.equals(peerId)) return;
+        String time = createdAt != null ? createdAt : LocalDateTime.now().toString();
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO user_dms(user_id, peer_id, created_at) VALUES(?,?,?) ON CONFLICT (user_id, peer_id) DO NOTHING")) {
+                "INSERT INTO user_dms(user_id, peer_id, created_at) VALUES(?,?,?) " +
+                "ON CONFLICT (user_id, peer_id) DO UPDATE SET created_at = EXCLUDED.created_at")) {
             ps.setString(1, userId);
             ps.setString(2, peerId);
-            ps.setString(3, createdAt != null ? createdAt : LocalDateTime.now().toString());
+            ps.setString(3, time);
             ps.executeUpdate();
         }
     }
@@ -569,7 +571,7 @@ public final class DatabaseManager implements AutoCloseable {
         Set<String> allowedDmPeers = new LinkedHashSet<>();
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT peer_id FROM user_dms WHERE user_id = ? ORDER BY created_at ASC")) {
+                     "SELECT peer_id FROM user_dms WHERE user_id = ? ORDER BY created_at DESC")) {
             ps.setString(1, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -585,7 +587,7 @@ public final class DatabaseManager implements AutoCloseable {
         List<ConversationDto> all = listConversations();
         List<ConversationDto> result = new ArrayList<>();
 
-        // 1. Add user's active DMs in order
+        // 1. Add user's active DMs in descending order of activity
         for (String peerId : allowedDmPeers) {
             for (ConversationDto c : all) {
                 if (!c.isGroup() && c.id().equals(peerId)) {
@@ -595,12 +597,31 @@ public final class DatabaseManager implements AutoCloseable {
             }
         }
 
-        // 2. Add groups where user is a member (in-memory check, no N+1 query)
+        // Query max sent_at for groups
+        Map<String, String> lastMessageTime = new HashMap<>();
+        try (Connection conn = connect();
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT conversation_id, MAX(sent_at) AS last_sent FROM messages GROUP BY conversation_id")) {
+            while (rs.next()) {
+                String cId = rs.getString("conversation_id");
+                String lSent = rs.getString("last_sent");
+                if (cId != null && lSent != null) {
+                    lastMessageTime.put(cId, lSent);
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+
+        // 2. Add groups where user is a member, sorted by latest activity descending
+        List<ConversationDto> userGroups = new ArrayList<>();
         for (ConversationDto c : all) {
             if (c.isGroup() && isUserMemberOfGroup(userId, c)) {
-                result.add(c);
+                userGroups.add(c);
             }
         }
+        userGroups.sort((a, b) -> lastMessageTime.getOrDefault(b.id(), "").compareTo(lastMessageTime.getOrDefault(a.id(), "")));
+        result.addAll(userGroups);
+
         return result;
     }
 
