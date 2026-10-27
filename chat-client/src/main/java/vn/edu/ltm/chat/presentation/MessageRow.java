@@ -5,7 +5,6 @@ import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -118,14 +117,18 @@ final class MessageRow extends JPanel {
             add(avatar, BorderLayout.WEST);
             compactTimeLabel = null;
         } else {
-            compactTimeLabel = new JLabel(COMPACT_TIME_FORMAT.format(message.sentAt()), SwingConstants.RIGHT);
+            compactTimeLabel = new JLabel("", SwingConstants.RIGHT);
             compactTimeLabel.setFont(DiscordTheme.font(10f));
             compactTimeLabel.setForeground(DiscordTheme.TEXT_MUTED);
-            compactTimeLabel.setVisible(false);
+            compactTimeLabel.setPreferredSize(new Dimension(AVATAR_SIZE, 18));
+            compactTimeLabel.setMinimumSize(new Dimension(AVATAR_SIZE, 18));
+            compactTimeLabel.setMaximumSize(new Dimension(AVATAR_SIZE, 18));
 
             JPanel westHolder = new JPanel(new BorderLayout());
             westHolder.setOpaque(false);
             westHolder.setPreferredSize(new Dimension(AVATAR_SIZE, 18));
+            westHolder.setMinimumSize(new Dimension(AVATAR_SIZE, 18));
+            westHolder.setMaximumSize(new Dimension(AVATAR_SIZE, 18));
             westHolder.add(compactTimeLabel, BorderLayout.CENTER);
             add(westHolder, BorderLayout.WEST);
         }
@@ -141,7 +144,7 @@ final class MessageRow extends JPanel {
         actionToolbar.setBackground(new Color(0x31, 0x33, 0x38));
         actionToolbar.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0x3F, 0x42, 0x48), 1),
-                BorderFactory.createEmptyBorder(2, 4, 2, 4)
+                BorderFactory.createEmptyBorder(1, 3, 1, 3)
         ));
         actionToolbar.setVisible(false);
 
@@ -179,7 +182,7 @@ final class MessageRow extends JPanel {
             actionToolbar.setVisible(true);
         }
         if (compactTimeLabel != null) {
-            compactTimeLabel.setVisible(true);
+            compactTimeLabel.setText(COMPACT_TIME_FORMAT.format(message.sentAt()));
         }
         repaint();
     }
@@ -191,7 +194,7 @@ final class MessageRow extends JPanel {
             actionToolbar.setVisible(false);
         }
         if (compactTimeLabel != null) {
-            compactTimeLabel.setVisible(false);
+            compactTimeLabel.setText("");
         }
         repaint();
     }
@@ -228,22 +231,38 @@ final class MessageRow extends JPanel {
         left.add(time);
 
         authorRow.add(left, BorderLayout.WEST);
-
-        JPanel tbWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-        tbWrapper.setOpaque(false);
-        tbWrapper.add(actionToolbar);
-        authorRow.add(tbWrapper, BorderLayout.EAST);
+        authorRow.add(createToolbarWrapper(actionToolbar), BorderLayout.EAST);
         return authorRow;
+    }
+
+    private static JPanel createToolbarWrapper(JComponent toolbar) {
+        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0)) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension d = super.getPreferredSize();
+                return new Dimension(d.width, 0); // 0 height prevents vertical layout shift when hovered
+            }
+        };
+        wrapper.setOpaque(false);
+        wrapper.add(toolbar);
+        return wrapper;
+    }
+
+    private JButton createEmojiToolbarButton(String hex, String emojiChar, String tooltip) {
+        ImageIcon icon = EmojiAssets.getIconByHex(hex, 16);
+        JButton btn = icon != null ? new JButton(icon) : new JButton(IconFactory.phosphor("smiley.svg", 14, DiscordTheme.TEXT_SECONDARY));
+        btn.setToolTipText(tooltip);
+        setupHoverButton(btn);
+        btn.addActionListener(e -> {
+            if (listener != null) listener.onReact(message, emojiChar);
+        });
+        return btn;
     }
 
     private JButton createToolbarButton(String iconName, String tooltip, Runnable action) {
         JButton btn = new JButton(IconFactory.phosphor(iconName, 14, DiscordTheme.TEXT_SECONDARY));
         btn.setToolTipText(tooltip);
-        btn.setContentAreaFilled(false);
-        btn.setBorderPainted(false);
-        btn.setFocusable(false);
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.setMargin(new Insets(0, 4, 0, 4));
+        setupHoverButton(btn);
         if (action != null) btn.addActionListener(e -> action.run());
         return btn;
     }
@@ -255,9 +274,19 @@ final class MessageRow extends JPanel {
         // Re-setup actionToolbar buttons according to current message state
         actionToolbar.removeAll();
         if (!message.recalled()) {
-            JButton reactBtn = createToolbarButton("smiley.svg", "Thêm biểu cảm", null);
+            // Quick 1-click reaction buttons
+            actionToolbar.add(createEmojiToolbarButton("1f44d", "👍", "Thích (Like)"));
+            actionToolbar.add(createEmojiToolbarButton("2764", "❤️", "Yêu thích (Heart)"));
+            actionToolbar.add(createEmojiToolbarButton("1f602", "😂", "Haha"));
+
+            JButton reactBtn = createToolbarButton("smiley.svg", "Thêm biểu cảm khác...", null);
             reactBtn.addActionListener(e -> showQuickReactionPopup(reactBtn));
             actionToolbar.add(reactBtn);
+
+            JButton replyBtn = createToolbarButton("arrow-u-up-left.svg", "Trả lời", () -> {
+                if (listener != null) listener.onReply(message);
+            });
+            actionToolbar.add(replyBtn);
 
             if (isMe) {
                 if (!message.hasAttachment()) {
@@ -294,21 +323,34 @@ final class MessageRow extends JPanel {
             boolean hasAttachment = message.hasAttachment();
             boolean isDefaultAttachmentText = hasAttachment && (text == null || text.isBlank() || text.startsWith("Đã gửi tệp:") || text.equals(message.attachmentName()));
 
+            java.util.List<String> emojis = EmojiAssets.parseAllEmojis(text);
             if (hasAttachment && isDefaultAttachmentText) {
                 mainContentComp = buildAttachmentCard();
             } else if (text != null && text.startsWith("[Sticker:") && text.endsWith("]")) {
                 String inner = text.substring(9, text.length() - 1).trim();
                 mainContentComp = buildStickerCard(inner);
-            } else if (text != null && EmojiAssets.hasEmoji(text.trim())) {
-                ImageIcon jumbo = EmojiAssets.getIcon(text.trim(), 44);
+            } else if (emojis.size() == 1) {
+                ImageIcon jumbo = EmojiAssets.getIcon(emojis.get(0), 44);
                 if (jumbo != null) {
                     JLabel emoLabel = new JLabel(jumbo);
                     emoLabel.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
-                    emoLabel.setToolTipText(text.trim());
+                    emoLabel.setToolTipText(emojis.get(0));
                     mainContentComp = emoLabel;
                 } else {
                     mainContentComp = createBubbleText(text, isMe);
                 }
+            } else if (emojis.size() > 1) {
+                JPanel emoStream = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 2));
+                emoStream.setOpaque(false);
+                for (String emo : emojis) {
+                    ImageIcon icon = EmojiAssets.getIcon(emo, 24);
+                    if (icon != null) {
+                        JLabel lbl = new JLabel(icon);
+                        lbl.setToolTipText(emo);
+                        emoStream.add(lbl);
+                    }
+                }
+                mainContentComp = emoStream;
             } else {
                 mainContentComp = createBubbleText(text != null ? text : "", isMe);
             }
@@ -322,10 +364,7 @@ final class MessageRow extends JPanel {
             rowWrapper.add(mainContentComp, BorderLayout.WEST);
 
             if (!body.isAncestorOf(actionToolbar)) {
-                JPanel tbWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-                tbWrapper.setOpaque(false);
-                tbWrapper.add(actionToolbar);
-                rowWrapper.add(tbWrapper, BorderLayout.EAST);
+                rowWrapper.add(createToolbarWrapper(actionToolbar), BorderLayout.EAST);
             }
             rowWrapper.setAlignmentX(0.0f);
             stack.add(rowWrapper);
@@ -523,7 +562,10 @@ final class MessageRow extends JPanel {
     private JComponent buildStickerCard(String stickerId) {
         EmojiAssets.StickerItem item = null;
         for (EmojiAssets.StickerItem s : EmojiAssets.STICKERS) {
-            if (s.id().equals(stickerId)) {
+            if (s.id().equalsIgnoreCase(stickerId)
+                    || s.name().equalsIgnoreCase(stickerId)
+                    || s.id().replace("-", " ").equalsIgnoreCase(stickerId)
+                    || s.id().replace("-", "").equalsIgnoreCase(stickerId.replace(" ", ""))) {
                 item = s;
                 break;
             }

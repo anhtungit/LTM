@@ -43,7 +43,6 @@ import java.io.File;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -1444,9 +1443,9 @@ public final class ChatWorkspace extends JPanel {
         transcript.repaint();
     }
 
-    private void renderTranscriptRows(List<ChatMessage> history, String chan) {
-        renderTranscriptRows(history, chan, true);
-    }
+    // private void renderTranscriptRows(List<ChatMessage> history, String chan) {
+    //     renderTranscriptRows(history, chan, true);
+    // }
 
     private void renderTranscriptRows(List<ChatMessage> history, String chan, boolean scrollToBottom) {
         transcript.removeAll();

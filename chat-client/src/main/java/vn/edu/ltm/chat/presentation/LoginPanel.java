@@ -341,12 +341,12 @@ public final class LoginPanel extends JPanel {
         button.setFocusPainted(true);
     }
 
-    private JComponent separator() {
-        JPanel line = new JPanel();
-        line.setBackground(new Color(0x34, 0x36, 0x3C));
-        line.setPreferredSize(new Dimension(CONTENT_WIDTH, 1));
-        return line;
-    }
+    // private JComponent separator() {
+    //     JPanel line = new JPanel();
+    //     line.setBackground(new Color(0x34, 0x36, 0x3C));
+    //     line.setPreferredSize(new Dimension(CONTENT_WIDTH, 1));
+    //     return line;
+    // }
 
     private JLabel centeredLabel(String text, int size, Color color) {
         JLabel label = new JLabel(text, SwingConstants.CENTER);

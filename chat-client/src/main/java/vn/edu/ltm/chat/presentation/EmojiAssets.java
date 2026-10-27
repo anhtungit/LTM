@@ -60,6 +60,47 @@ public final class EmojiAssets {
         return EMOJI_TO_HEX.containsKey(emoji);
     }
 
+    public static List<String> parseAllEmojis(String text) {
+        if (text == null || text.isBlank()) {
+            return java.util.Collections.emptyList();
+        }
+        String s = text.trim();
+        List<String> list = new java.util.ArrayList<>();
+        int i = 0;
+        int n = s.length();
+        while (i < n) {
+            char c = s.charAt(i);
+            if (Character.isWhitespace(c)) {
+                i++;
+                continue;
+            }
+            boolean found = false;
+            int maxLen = Math.min(4, n - i);
+            for (int len = maxLen; len >= 1; len--) {
+                String sub = s.substring(i, i + len);
+                if (hasEmoji(sub)) {
+                    list.add(sub);
+                    i += len;
+                    found = true;
+                    break;
+                }
+                if (sub.endsWith("\uFE0F")) {
+                    String base = sub.substring(0, sub.length() - 1);
+                    if (hasEmoji(base)) {
+                        list.add(base);
+                        i += len;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                return java.util.Collections.emptyList();
+            }
+        }
+        return list;
+    }
+
     public static java.util.Set<String> allEmojis() {
         return EMOJI_TO_HEX.keySet();
     }
