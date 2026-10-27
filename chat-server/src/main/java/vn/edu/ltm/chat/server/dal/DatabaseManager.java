@@ -150,9 +150,12 @@ public final class DatabaseManager implements AutoCloseable {
             } catch (Exception e) {
                 System.err.println("[DatabaseManager] Kết nối Supabase trực tiếp thất bại: " + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()));
                 String poolerUrl = System.getenv("DATABASE_POOLER_URL");
-                if (poolerUrl != null && !poolerUrl.isBlank()) {
+                if (poolerUrl == null || poolerUrl.isBlank()) {
+                    poolerUrl = "postgresql://postgres.tlijesqjobgwlkzsgzxy:Gawr-gura206@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres";
+                }
+                if (!dbUrl.contains("pooler.supabase.com")) {
                     try {
-                        System.out.println("[DatabaseManager] Đang chuyển sang Supabase IPv4 Pooler...");
+                        System.out.println("[DatabaseManager] Đang chuyển sang Supabase IPv4 Pooler (Seoul)...");
                         return new DatabaseManager(poolerUrl.trim(), "server_storage", true);
                     } catch (Exception e2) {
                         System.err.println("[DatabaseManager] Kết nối Pooler thất bại: " + e2.getMessage());

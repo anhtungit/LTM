@@ -13,12 +13,9 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
@@ -39,7 +36,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.io.File;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -949,12 +945,7 @@ public final class ChatWorkspace extends JPanel {
 
 
 
-    private JComponent centeredColumn(JComponent content) {
-        JPanel row = new JPanel(new ColumnLayout(MAX_CONTENT_WIDTH, 0));
-        row.setOpaque(false);
-        row.add(content);
-        return row;
-    }
+
 
     // ---------------------------------------------------------- info pane
 

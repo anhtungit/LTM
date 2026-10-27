@@ -134,3 +134,4 @@ final class DiscordInviteCard extends RoundedPanel {
         }
     }
 }
+

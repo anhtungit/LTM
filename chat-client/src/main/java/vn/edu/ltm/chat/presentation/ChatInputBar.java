@@ -5,7 +5,6 @@ import vn.edu.ltm.chat.theme.IconFactory;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
-import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
@@ -257,3 +256,4 @@ public final class ChatInputBar extends JPanel {
         return button;
     }
 }
+
