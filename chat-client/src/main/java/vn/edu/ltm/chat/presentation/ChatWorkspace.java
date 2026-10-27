@@ -97,6 +97,7 @@ public final class ChatWorkspace extends JPanel {
     private final JLabel groupSidebarTitle = new JLabel("Nhóm");
 
     // Chat transcript & input bar
+    private final JPanel chatArea = new JPanel(new BorderLayout());
     private final JPanel transcript = new JPanel();
     private final JScrollPane transcriptScroll = new JScrollPane(transcript);
     private final ChatInputBar inputBar = new ChatInputBar();
@@ -872,7 +873,8 @@ public final class ChatWorkspace extends JPanel {
     // ----------------------------------------------------------- chat area
 
     private JComponent buildChatArea() {
-        JPanel chatArea = new JPanel(new BorderLayout());
+        chatArea.removeAll();
+        chatArea.setLayout(new BorderLayout());
         chatArea.setBackground(DiscordTheme.TRANSCRIPT);
 
         JPanel messageColumn = new JPanel(new BorderLayout());
