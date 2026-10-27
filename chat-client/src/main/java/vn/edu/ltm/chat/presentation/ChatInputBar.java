@@ -34,6 +34,7 @@ public final class ChatInputBar extends JPanel {
         void onSendMessage(String content);
         void onSendAttachment(String filePath, String fileName, long fileSize, boolean failed);
         void onSendSticker(String stickerName);
+        default void onTyping() {}
     }
 
     private final RichComposerPane composer;
@@ -43,6 +44,7 @@ public final class ChatInputBar extends JPanel {
     private final JPanel replyBanner = new JPanel(new BorderLayout(8, 0));
     private final JLabel replyToLabel = new JLabel();
     private ChatMessage replyingMessage = null;
+    private long lastTypingSentTime = 0L;
     private ChatInputListener listener;
 
     public ChatInputBar() {
@@ -88,9 +90,9 @@ public final class ChatInputBar extends JPanel {
         inputRow.add(attach, BorderLayout.WEST);
 
         composer.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent event) { adjustComposerHeight(); }
-            @Override public void removeUpdate(DocumentEvent event) { adjustComposerHeight(); }
-            @Override public void changedUpdate(DocumentEvent event) { adjustComposerHeight(); }
+            @Override public void insertUpdate(DocumentEvent event) { adjustComposerHeight(); onTextChanged(); }
+            @Override public void removeUpdate(DocumentEvent event) { adjustComposerHeight(); onTextChanged(); }
+            @Override public void changedUpdate(DocumentEvent event) { adjustComposerHeight(); onTextChanged(); }
         });
         composer.getAccessibleContext().setAccessibleName("Soạn tin nhắn");
 
@@ -243,7 +245,21 @@ public final class ChatInputBar extends JPanel {
         repaint();
     }
 
+    private void onTextChanged() {
+        String txt = composer.getMessageText();
+        if (txt != null && !txt.isBlank()) {
+            long now = System.currentTimeMillis();
+            if (now - lastTypingSentTime > 2500) {
+                lastTypingSentTime = now;
+                if (listener != null) {
+                    listener.onTyping();
+                }
+            }
+        }
+    }
+
     private void submitMessage() {
+        lastTypingSentTime = 0L;
         String content = composer.getMessageText();
         if (content == null || content.trim().isEmpty()) {
             composer.requestFocusInWindow();

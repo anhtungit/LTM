@@ -49,6 +49,7 @@ public final class TcpChatGateway implements ChatGateway {
     private String currentUserName;
     private volatile Runnable onRealtimeUpdate;
     private volatile Runnable onPresenceUpdate;
+    private volatile java.util.function.Consumer<TypingEvent> onTypingUpdate;
 
     private final Map<String, CompletableFuture<TcpPacket>> pendingRequests = new ConcurrentHashMap<>();
 
@@ -153,6 +154,15 @@ public final class TcpChatGateway implements ChatGateway {
             return;
         }
         if ("TYPING_BROADCAST".equals(type)) {
+            String convId = packet.getString("conversationId", "");
+            String chan = packet.getString("channel", "");
+            String sId = packet.getString("senderId", "");
+            String sName = packet.getString("senderName", "Ai đó");
+            boolean typing = packet.getBoolean("typing", true);
+            var cb = this.onTypingUpdate;
+            if (cb != null) {
+                SwingUtilities.invokeLater(() -> cb.accept(new TypingEvent(convId, chan, sId, sName, typing)));
+            }
             return;
         }
         Runnable cb = this.onRealtimeUpdate;
@@ -304,6 +314,31 @@ public final class TcpChatGateway implements ChatGateway {
         TcpPacket res = request(req);
         ConversationDto c = res.getObj("conversation", ConversationDto.class);
         return c != null ? toDomainConversation(c) : null;
+    }
+
+    @Override
+    public void setOnTypingUpdate(java.util.function.Consumer<TypingEvent> callback) {
+        this.onTypingUpdate = callback;
+    }
+
+    @Override
+    public void sendTyping(String conversationId, String channel, boolean typing) {
+        if (!tryConnect() || conversationId == null || conversationId.isBlank()) {
+            return;
+        }
+        try {
+            TcpPacket req = new TcpPacket("TYPING_REQ", UUID.randomUUID().toString())
+                    .put("conversationId", conversationId)
+                    .put("channel", channel != null ? channel : "")
+                    .put("senderName", currentUserName != null ? currentUserName : "Người dùng")
+                    .put("typing", typing);
+            synchronized (this) {
+                if (out != null) {
+                    out.println(req.toJsonLine());
+                }
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @Override

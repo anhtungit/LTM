@@ -494,6 +494,49 @@ class ChatServerTest {
         }
     }
 
+    @Test
+    void routesTypingIndicatorBetweenDmPeers() throws Exception {
+        try (Socket s1 = new Socket("127.0.0.1", port);
+             BufferedReader in1 = new BufferedReader(new InputStreamReader(s1.getInputStream(), StandardCharsets.UTF_8));
+             PrintWriter out1 = new PrintWriter(new OutputStreamWriter(s1.getOutputStream(), StandardCharsets.UTF_8), true);
+             Socket s2 = new Socket("127.0.0.1", port);
+             BufferedReader in2 = new BufferedReader(new InputStreamReader(s2.getInputStream(), StandardCharsets.UTF_8));
+             PrintWriter out2 = new PrintWriter(new OutputStreamWriter(s2.getOutputStream(), StandardCharsets.UTF_8), true)) {
+
+            out1.println(new Packet("REGISTER_REQ", "r-t1")
+                    .put("email", "type1@example.com")
+                    .put("password", "secret")
+                    .put("displayName", "Typer One").toJsonLine());
+            UserDto u1 = readNextNonStatus(in1).getObj("user", UserDto.class);
+
+            out2.println(new Packet("REGISTER_REQ", "r-t2")
+                    .put("email", "type2@example.com")
+                    .put("password", "secret")
+                    .put("displayName", "Typer Two").toJsonLine());
+            UserDto u2 = readNextNonStatus(in2).getObj("user", UserDto.class);
+
+            // User 1 types to User 2
+            out1.println(new Packet("TYPING_REQ", "type-req-1")
+                    .put("conversationId", u2.id())
+                    .put("senderName", u1.displayName())
+                    .put("typing", true).toJsonLine());
+
+            // User 2 must receive TYPING_BROADCAST with conversationId = u1.id()
+            Packet typingBroadcast = null;
+            for (int i = 0; i < 5; i++) {
+                Packet p = readNextNonStatus(in2);
+                if ("TYPING_BROADCAST".equals(p.getType())) {
+                    typingBroadcast = p;
+                    break;
+                }
+            }
+            assertNotNull(typingBroadcast);
+            assertEquals(u1.id(), typingBroadcast.getString("conversationId"));
+            assertEquals("Typer One", typingBroadcast.getString("senderName"));
+            assertTrue(typingBroadcast.getBoolean("typing", false));
+        }
+    }
+
     private Packet readResponse(BufferedReader in, String reqId) throws Exception {
         while (true) {
             String line = in.readLine();

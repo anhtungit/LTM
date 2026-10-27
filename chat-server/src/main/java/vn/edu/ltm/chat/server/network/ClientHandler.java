@@ -579,14 +579,36 @@ public final class ClientHandler implements Runnable {
     private void handleTyping(Packet req) {
         String convId = req.getString("conversationId", "");
         String channel = req.getString("channel", "");
+        String senderId = currentUser != null ? currentUser.id() : "";
         String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Ai đó");
         boolean typing = req.getBoolean("typing", true);
 
-        server.broadcastExcept(this, Packet.broadcast("TYPING_BROADCAST")
-                .put("conversationId", convId)
-                .put("channel", channel)
-                .put("senderName", senderName)
-                .put("typing", typing));
+        if (convId == null || convId.isBlank()) return;
+
+        if (db.isGroupConversation(convId)) {
+            broadcastToGroupMembers(convId, Packet.broadcast("TYPING_BROADCAST")
+                    .put("conversationId", convId)
+                    .put("channel", channel != null ? channel : "")
+                    .put("senderId", senderId)
+                    .put("senderName", senderName)
+                    .put("typing", typing));
+            return;
+        }
+
+        // 1-1 Direct Message: Only route to the peer recipient
+        String peerId = convId;
+        for (ClientHandler h : server.getActiveHandlers()) {
+            if (h == this) continue;
+            UserDto targetUser = h.getCurrentUser();
+            if (targetUser != null && targetUser.id().equals(peerId)) {
+                h.sendPacket(Packet.broadcast("TYPING_BROADCAST")
+                        .put("conversationId", senderId)
+                        .put("channel", "")
+                        .put("senderId", senderId)
+                        .put("senderName", senderName)
+                        .put("typing", typing));
+            }
+        }
     }
 }
 

@@ -33,6 +33,14 @@ public final class ChatService {
         gateway.setOnPresenceUpdate(callback);
     }
 
+    public void setOnTypingUpdate(java.util.function.Consumer<ChatGateway.TypingEvent> callback) {
+        gateway.setOnTypingUpdate(callback);
+    }
+
+    public void sendTyping(String conversationId, String channel, boolean typing) {
+        gateway.sendTyping(conversationId, channel, typing);
+    }
+
     public UserProfile updateProfile(UserProfile user) {
         return gateway.updateProfile(user);
     }

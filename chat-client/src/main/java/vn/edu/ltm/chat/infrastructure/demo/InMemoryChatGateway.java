@@ -169,6 +169,14 @@ public final class InMemoryChatGateway implements ChatGateway {
     }
 
     @Override
+    public void setOnTypingUpdate(java.util.function.Consumer<TypingEvent> callback) {
+    }
+
+    @Override
+    public void sendTyping(String conversationId, String channel, boolean typing) {
+    }
+
+    @Override
     public synchronized List<ChatMessage> loadMessages(String conversationId, String channel) {
         String key = makeKey(conversationId, channel);
         List<ChatMessage> history = messages.get(key);

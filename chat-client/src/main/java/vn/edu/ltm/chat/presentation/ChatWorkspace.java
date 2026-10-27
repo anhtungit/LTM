@@ -1,5 +1,6 @@
 package vn.edu.ltm.chat.presentation;
 
+import vn.edu.ltm.chat.application.ChatGateway;
 import vn.edu.ltm.chat.application.ChatService;
 import vn.edu.ltm.chat.domain.ChatMessage;
 import vn.edu.ltm.chat.domain.Conversation;
@@ -100,6 +101,8 @@ public final class ChatWorkspace extends JPanel {
     private final JPanel chatArea = new JPanel(new BorderLayout());
     private final JPanel transcript = new JPanel();
     private final JScrollPane transcriptScroll = new JScrollPane(transcript);
+    private final TypingIndicatorBubble typingBubble = new TypingIndicatorBubble();
+    private final javax.swing.Timer typingTimeoutTimer = new javax.swing.Timer(4000, e -> typingBubble.hideTyping());
     private final ChatInputBar inputBar = new ChatInputBar();
     private final ChatHeaderPanel headerPanel;
     private final ChatInfoPanel infoPane = new ChatInfoPanel(
@@ -172,7 +175,19 @@ public final class ChatWorkspace extends JPanel {
             public void onSendSticker(String stickerName) {
                 sendTextAsync("[Sticker: " + stickerName + "]");
             }
+
+            @Override
+            public void onTyping() {
+                if (selectedConversationId != null) {
+                    Conversation c = currentConversation();
+                    String chan = (c != null && c.isGroup()) ? selectedChannel : "";
+                    chatService.sendTyping(selectedConversationId, chan, true);
+                }
+            }
         });
+
+        this.typingTimeoutTimer.setRepeats(false);
+        this.chatService.setOnTypingUpdate(this::handleTypingEvent);
 
         setLayout(new BorderLayout());
         setBackground(DiscordTheme.TRANSCRIPT);
@@ -211,6 +226,39 @@ public final class ChatWorkspace extends JPanel {
         if (conv != null) {
             updateHeaderAvatar(conv);
             rebuildInfoPane(conv);
+        }
+    }
+
+    private void handleTypingEvent(ChatGateway.TypingEvent event) {
+        if (event == null || selectedConversationId == null) return;
+        Conversation current = currentConversation();
+        if (current == null) return;
+
+        boolean matches;
+        if (current.isGroup()) {
+            matches = current.id().equals(event.conversationId())
+                    && (event.channel() == null || event.channel().isBlank() || event.channel().equals(selectedChannel));
+        } else {
+            matches = current.id().equals(event.conversationId());
+        }
+
+        if (!matches) return;
+
+        if (user != null && user.id().equals(event.senderId())) {
+            return;
+        }
+
+        if (event.typing()) {
+            String initials = event.senderName() != null && event.senderName().length() >= 2
+                    ? event.senderName().substring(0, 2).toUpperCase() : "?";
+            typingBubble.showTyping(event.senderName(), event.senderId(), initials);
+            typingTimeoutTimer.restart();
+            if (isScrollAtBottom()) {
+                scrollTranscriptToEnd();
+            }
+        } else {
+            typingBubble.hideTyping();
+            typingTimeoutTimer.stop();
         }
     }
 
@@ -928,6 +976,7 @@ public final class ChatWorkspace extends JPanel {
         transcriptScroll.getVerticalScrollBar().setUnitIncrement(18);
         transcriptScroll.getVerticalScrollBar().addAdjustmentListener(e -> MessageRow.clearActiveHover());
         area.add(transcriptScroll, BorderLayout.CENTER);
+        area.add(typingBubble, BorderLayout.SOUTH);
         return area;
     }
 
@@ -1214,6 +1263,8 @@ public final class ChatWorkspace extends JPanel {
         inputBar.setTarget(conversation.isGroup() ? selectedChannel : conversation.displayName(), !conversation.isGroup());
         inputBar.setMessageText(drafts.getOrDefault(selectedConversationId, ""));
         inputBar.resetHint();
+        typingBubble.hideTyping();
+        typingTimeoutTimer.stop();
         visibleLimits.remove(transcriptCacheKey(conversation.id(), conversation.isGroup() ? selectedChannel : ""));
         rebuildConversationButtons();
         rebuildInfoPane(conversation);
@@ -1666,6 +1717,8 @@ public final class ChatWorkspace extends JPanel {
         transcript.add(new MessageRow(msg, defaultWrapWidth(), beginsGroup, user != null ? user.id() : null, createActionListener(chan)));
         String key = transcriptCacheKey(selectedConversationId, chan);
         visibleLimits.compute(key, (k, v) -> (v == null ? DEFAULT_PAGE_SIZE : v) + 1);
+        typingBubble.hideTyping();
+        typingTimeoutTimer.stop();
         scrollTranscriptToEnd();
     }
 

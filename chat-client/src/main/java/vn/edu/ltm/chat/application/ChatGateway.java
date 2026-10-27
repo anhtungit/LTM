@@ -34,6 +34,14 @@ public interface ChatGateway {
     default void setOnPresenceUpdate(Runnable callback) {
     }
 
+    default void setOnTypingUpdate(java.util.function.Consumer<TypingEvent> callback) {
+    }
+
+    default void sendTyping(String conversationId, String channel, boolean typing) {
+    }
+
+    record TypingEvent(String conversationId, String channel, String senderId, String senderName, boolean typing) {}
+
     default byte[] downloadAttachment(String messageId, String fileName) {
         return null;
     }

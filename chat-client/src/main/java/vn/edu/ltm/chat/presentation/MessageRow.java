@@ -71,9 +71,10 @@ final class MessageRow extends JPanel {
 
     private ChatMessage message;
     private final MessageActionListener listener;
+    private final JPanel mainRowPanel = new JPanel(new BorderLayout(AVATAR_GAP, 0));
     private final JPanel body = new JPanel(new BorderLayout());
     private final JPanel contentHolder = new JPanel(new BorderLayout(0, 6));
-    private final RoundedPanel actionToolbar = new RoundedPanel(6);
+    private FloatingActionToolbar actionToolbar;
     private final Timer hideToolbarTimer;
     private final JLabel compactTimeLabel;
     private final MouseAdapter hoverAdapter;
@@ -120,16 +121,18 @@ final class MessageRow extends JPanel {
         });
         this.hideToolbarTimer.setRepeats(false);
 
-        setLayout(new BorderLayout(AVATAR_GAP, 0));
+        setLayout(null);
         setOpaque(false);
         setAlignmentX(CENTER_ALIGNMENT);
         setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 7 : 2, 4, 4, 4));
+
+        mainRowPanel.setOpaque(false);
 
         boolean isMe = message.fromCurrentUser();
         if (beginsSenderGroup) {
             AvatarBadge avatar = new AvatarBadge(message.senderInitials(), message.senderId(), AVATAR_SIZE);
             avatar.setToolTipText(isMe ? "Tin nhắn của bạn" : "Tin nhắn từ " + message.senderName());
-            add(avatar, BorderLayout.WEST);
+            mainRowPanel.add(avatar, BorderLayout.WEST);
             compactTimeLabel = null;
         } else {
             compactTimeLabel = new JLabel("", SwingConstants.RIGHT);
@@ -145,7 +148,7 @@ final class MessageRow extends JPanel {
             westHolder.setMinimumSize(new Dimension(AVATAR_SIZE, 18));
             westHolder.setMaximumSize(new Dimension(AVATAR_SIZE, 18));
             westHolder.add(compactTimeLabel, BorderLayout.CENTER);
-            add(westHolder, BorderLayout.WEST);
+            mainRowPanel.add(westHolder, BorderLayout.WEST);
         }
 
         body.setOpaque(false);
@@ -164,17 +167,16 @@ final class MessageRow extends JPanel {
 
         contentHolder.setOpaque(false);
 
-        actionToolbar.setLayout(new FlowLayout(FlowLayout.RIGHT, 1, 0));
-        actionToolbar.setBackground(new Color(0x31, 0x33, 0x38));
-        actionToolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(0x3F, 0x42, 0x48), 1),
-                BorderFactory.createEmptyBorder(2, 4, 2, 4)
-        ));
-        actionToolbar.setVisible(false);
+        recreateActionToolbar();
 
         buildNormalContent();
         body.add(contentHolder, BorderLayout.CENTER);
-        add(body, BorderLayout.CENTER);
+        mainRowPanel.add(body, BorderLayout.CENTER);
+
+        add(actionToolbar);
+        add(mainRowPanel);
+        setComponentZOrder(actionToolbar, 0);
+        setComponentZOrder(mainRowPanel, 1);
 
         this.hoverAdapter = new MouseAdapter() {
             @Override
@@ -199,6 +201,81 @@ final class MessageRow extends JPanel {
         attachHoverRecursively(this);
     }
 
+    private void recreateActionToolbar() {
+        if (actionToolbar != null) {
+            remove(actionToolbar);
+        }
+        boolean canEdit = message.fromCurrentUser() && !message.hasAttachment() && !message.recalled();
+        this.actionToolbar = new FloatingActionToolbar(canEdit, new FloatingActionToolbar.Listener() {
+            @Override
+            public void onReact(String emoji) {
+                if (listener != null) listener.onReact(message, emoji);
+            }
+
+            @Override
+            public void onAddReaction(Component invoker) {
+                showQuickReactionPopup(invoker);
+            }
+
+            @Override
+            public void onEdit() {
+                startEdit();
+            }
+
+            @Override
+            public void onReply() {
+                if (listener != null) listener.onReply(message);
+            }
+
+            @Override
+            public void onMore(Component invoker) {
+                showMoreMenu((JButton) invoker, message.fromCurrentUser());
+            }
+        });
+        actionToolbar.setVisible(false);
+        add(actionToolbar);
+        setComponentZOrder(actionToolbar, 0);
+        attachHoverRecursively(actionToolbar);
+    }
+
+    @Override
+    public void doLayout() {
+        int w = getWidth();
+        int h = getHeight();
+        java.awt.Insets insets = getInsets();
+        int contentX = insets.left;
+        int contentY = insets.top;
+        int contentW = Math.max(0, w - insets.left - insets.right);
+        int contentH = Math.max(0, h - insets.top - insets.bottom);
+
+        mainRowPanel.setBounds(contentX, contentY, contentW, contentH);
+        mainRowPanel.doLayout();
+
+        if (actionToolbar != null && actionToolbar.isVisible()) {
+            Dimension tbSize = actionToolbar.getPreferredSize();
+            int tbW = tbSize.width;
+            int tbH = tbSize.height;
+            int tbX = Math.max(0, w - insets.right - tbW - 14);
+            int tbY = Math.max(1, insets.top);
+            actionToolbar.setBounds(tbX, tbY, tbW, tbH);
+            actionToolbar.doLayout();
+        }
+    }
+
+    @Override
+    public Dimension getPreferredSize() {
+        java.awt.Insets insets = getInsets();
+        Dimension d = mainRowPanel.getPreferredSize();
+        int minH = (compactTimeLabel == null) ? 36 : 28;
+        return new Dimension(d.width + insets.left + insets.right,
+                Math.max(minH, d.height) + insets.top + insets.bottom);
+    }
+
+    @Override
+    public Dimension getMinimumSize() {
+        return getPreferredSize();
+    }
+
     public void showToolbar() {
         if (isEditing || message.recalled()) return;
         if (activeHoveredRow != null && activeHoveredRow != this) {
@@ -206,8 +283,9 @@ final class MessageRow extends JPanel {
         }
         activeHoveredRow = this;
         isHovered = true;
-        if (!actionToolbar.isVisible()) {
+        if (actionToolbar != null && !actionToolbar.isVisible()) {
             actionToolbar.setVisible(true);
+            revalidate();
         }
         if (compactTimeLabel != null) {
             compactTimeLabel.setText(COMPACT_TIME_FORMAT.format(message.sentAt()));
@@ -221,8 +299,9 @@ final class MessageRow extends JPanel {
         }
         hideToolbarTimer.stop();
         isHovered = false;
-        if (actionToolbar.isVisible()) {
+        if (actionToolbar != null && actionToolbar.isVisible()) {
             actionToolbar.setVisible(false);
+            revalidate();
         }
         if (compactTimeLabel != null) {
             compactTimeLabel.setText("");
@@ -308,75 +387,22 @@ final class MessageRow extends JPanel {
     }
 
     private JPanel buildAuthorRow(ChatMessage message) {
-        JPanel authorRow = new JPanel(new BorderLayout(8, 0));
+        JPanel authorRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         authorRow.setOpaque(false);
         boolean isMe = message.fromCurrentUser();
-
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        left.setOpaque(false);
 
         JLabel author = new JLabel(message.senderName() != null ? message.senderName() : (isMe ? "Bạn" : "Người dùng"));
         author.setFont(DiscordTheme.bold(13.5f));
         author.setForeground(isMe ? new Color(0x58, 0x65, 0xF2) : Color.WHITE);
-        left.add(author);
+        authorRow.add(author);
 
         String timeStr = TIME_FORMAT.format(message.sentAt());
         JLabel time = new JLabel(timeStr);
         time.setFont(DiscordTheme.font(10.5f));
         time.setForeground(DiscordTheme.TEXT_MUTED);
-        left.add(time);
+        authorRow.add(time);
 
-        authorRow.add(left, BorderLayout.WEST);
-        authorRow.add(createToolbarWrapper(actionToolbar), BorderLayout.EAST);
         return authorRow;
-    }
-
-    private static JPanel createToolbarWrapper(JComponent toolbar) {
-        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0)) {
-            @Override
-            public Dimension getPreferredSize() {
-                Dimension d = super.getPreferredSize();
-                return new Dimension(d.width, Math.max(d.height, 30));
-            }
-
-            @Override
-            public Dimension getMinimumSize() {
-                return getPreferredSize();
-            }
-        };
-        wrapper.setOpaque(false);
-        wrapper.add(toolbar);
-        return wrapper;
-    }
-
-    private JButton createEmojiToolbarButton(String hex, String emojiChar, String tooltip) {
-        ImageIcon icon = EmojiAssets.getIconByHex(hex, 16);
-        JButton btn = icon != null ? new JButton(icon) : new JButton(IconFactory.phosphor("smiley.svg", 14, DiscordTheme.TEXT_SECONDARY));
-        btn.setToolTipText(tooltip);
-        setupHoverButton(btn);
-        btn.addActionListener(e -> {
-            if (listener != null) listener.onReact(message, emojiChar);
-        });
-        return btn;
-    }
-
-    private JButton createToolbarButton(String iconName, String tooltip, Runnable action) {
-        JButton btn = new JButton(IconFactory.phosphor(iconName, 14, DiscordTheme.TEXT_SECONDARY));
-        btn.setToolTipText(tooltip);
-        setupHoverButton(btn);
-        if (action != null) btn.addActionListener(e -> action.run());
-        return btn;
-    }
-
-    private JComponent createToolbarSeparator() {
-        JPanel sep = new JPanel();
-        sep.setPreferredSize(new Dimension(1, 14));
-        sep.setBackground(new Color(0x4E, 0x50, 0x58));
-        sep.setOpaque(true);
-        JPanel wrap = new JPanel(new FlowLayout(FlowLayout.CENTER, 3, 5));
-        wrap.setOpaque(false);
-        wrap.add(sep);
-        return wrap;
     }
 
     private void showMoreMenu(JButton anchor, boolean isMe) {
@@ -464,7 +490,9 @@ final class MessageRow extends JPanel {
 
         try {
             if (anchor.isShowing()) {
-                menu.show(anchor, 0, anchor.getHeight() + 2);
+                int menuW = menu.getPreferredSize().width;
+                int menuX = anchor.getWidth() - menuW;
+                menu.show(anchor, menuX, anchor.getHeight() + 2);
             }
         } catch (Exception ignored) {}
     }
@@ -485,32 +513,6 @@ final class MessageRow extends JPanel {
     private void buildNormalContent() {
         contentHolder.removeAll();
         boolean isMe = message.fromCurrentUser();
-
-        // Re-setup actionToolbar buttons according to current message state
-        actionToolbar.removeAll();
-        if (!message.recalled()) {
-            // Quick 1-click reaction buttons (matching Discord)
-            actionToolbar.add(createEmojiToolbarButton("1f4a9", "💩", ":poop: Click to react"));
-            actionToolbar.add(createEmojiToolbarButton("2764", "❤️", ":heart: Click to react"));
-            actionToolbar.add(createEmojiToolbarButton("1f44d", "👍", ":thumbsup: Click to react"));
-
-            actionToolbar.add(createToolbarSeparator());
-
-            JButton reactBtn = createToolbarButton("smiley.svg", "Thêm biểu cảm khác...", null);
-            reactBtn.addActionListener(e -> showQuickReactionPopup(reactBtn));
-            actionToolbar.add(reactBtn);
-
-            JButton replyBtn = createToolbarButton("arrow-u-up-left.svg", "Trả lời", () -> {
-                if (listener != null) listener.onReply(message);
-            });
-            actionToolbar.add(replyBtn);
-
-            JButton moreBtn = createToolbarButton("dots-three.svg", "Tùy chọn khác", null);
-            moreBtn.addActionListener(e -> showMoreMenu(moreBtn, isMe));
-            actionToolbar.add(moreBtn);
-        } else {
-            actionToolbar.setVisible(false);
-        }
 
         if (message.recalled()) {
             JLabel recalledLabel = new JLabel("Tin nhắn đã được thu hồi");
@@ -571,15 +573,8 @@ final class MessageRow extends JPanel {
             stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
             stack.setOpaque(false);
 
-            JPanel rowWrapper = new JPanel(new BorderLayout(8, 0));
-            rowWrapper.setOpaque(false);
-            rowWrapper.add(mainContentComp, BorderLayout.WEST);
-
-            if (!body.isAncestorOf(actionToolbar)) {
-                rowWrapper.add(createToolbarWrapper(actionToolbar), BorderLayout.EAST);
-            }
-            rowWrapper.setAlignmentX(0.0f);
-            stack.add(rowWrapper);
+            mainContentComp.setAlignmentX(0.0f);
+            stack.add(mainContentComp);
 
             if (hasAttachment && !isDefaultAttachmentText) {
                 JPanel attachHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
@@ -1065,6 +1060,7 @@ final class MessageRow extends JPanel {
     public void updateMessage(ChatMessage updated) {
         this.message = updated;
         parseReplyHeader();
+        recreateActionToolbar();
         buildNormalContent();
         revalidate();
         repaint();
