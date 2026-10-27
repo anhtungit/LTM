@@ -101,7 +101,11 @@ public final class ChatWorkspace extends JPanel {
     private final JScrollPane transcriptScroll = new JScrollPane(transcript);
     private final ChatInputBar inputBar = new ChatInputBar();
     private final ChatHeaderPanel headerPanel;
-    private final ChatInfoPanel infoPane = new ChatInfoPanel(this::resolveMemberDisplayName, this::resolveMemberOnline);
+    private final ChatInfoPanel infoPane = new ChatInfoPanel(
+            this::resolveMemberDisplayName,
+            this::resolveMemberOnline,
+            this::handleViewUserProfile
+    );
 
     private final JPanel accountFooterDm = new JPanel(new BorderLayout());
     private final JPanel accountFooterGroup = new JPanel(new BorderLayout());
@@ -951,6 +955,27 @@ public final class ChatWorkspace extends JPanel {
 
     private void rebuildInfoPane(Conversation conversation) {
         infoPane.update(conversation, selectedChannel);
+    }
+
+    private void handleViewUserProfile(String targetUserId) {
+        if (targetUserId == null || targetUserId.isBlank()) return;
+        if (user != null && targetUserId.equalsIgnoreCase(user.id())) {
+            openProfileDialog();
+            return;
+        }
+        UserProfile targetProfile = userProfileCache.get(targetUserId);
+        if (targetProfile == null) {
+            targetProfile = new UserProfile(
+                    targetUserId,
+                    resolveMemberDisplayName(targetUserId),
+                    targetUserId + "@example.com",
+                    "@" + targetUserId.toLowerCase().replace(" ", ""),
+                    "Thích trò chuyện, nghe nhạc và chơi game cùng bạn bè. ☁️",
+                    resolveMemberOnline(targetUserId) ? "online" : "offline",
+                    null
+            );
+        }
+        WorkspaceDialogs.openViewOnlyProfileDialog(this, targetProfile);
     }
 
     private String resolveMemberDisplayName(String memberId) {

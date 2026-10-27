@@ -4,12 +4,29 @@ import vn.edu.ltm.chat.application.ChatService;
 import vn.edu.ltm.chat.domain.ChatMessage;
 import vn.edu.ltm.chat.domain.Conversation;
 import vn.edu.ltm.chat.domain.UserProfile;
+import vn.edu.ltm.chat.theme.DiscordTheme;
+import vn.edu.ltm.chat.theme.IconFactory;
 
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.GradientPaint;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -54,6 +71,140 @@ final class WorkspaceDialogs {
                 onUpdated.accept(saved);
             }
         });
+        dialog.setVisible(true);
+    }
+
+    static void openViewOnlyProfileDialog(Component parent, UserProfile targetUser) {
+        if (targetUser == null) return;
+        JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(parent);
+        JDialog dialog = new JDialog(frame, "Hồ sơ người dùng", true);
+        dialog.setUndecorated(true);
+        dialog.setBackground(new Color(0, 0, 0, 0));
+
+        int width = 340;
+        RoundedPanel root = new RoundedPanel(12);
+        root.setBackground(new Color(0x1E, 0x1F, 0x22));
+        root.setLayout(new BorderLayout());
+        root.setBorder(BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1));
+
+        JPanel banner = new JPanel(null) {
+            @Override
+            protected void paintComponent(Graphics graphics) {
+                super.paintComponent(graphics);
+                Graphics2D g = (Graphics2D) graphics.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                Color c = ChatInfoPanel.getBannerColor(targetUser.id());
+                GradientPaint gp = new GradientPaint(0, 0, c, 0, 80, c.darker());
+                g.setPaint(gp);
+                g.fillRect(0, 0, getWidth(), 80);
+                g.setColor(new Color(0x1E, 0x1F, 0x22));
+                g.fillOval(16, 36, 80, 80);
+                g.dispose();
+            }
+        };
+        banner.setOpaque(false);
+        banner.setPreferredSize(new Dimension(width, 125));
+
+        JButton closeBtn = new JButton(IconFactory.phosphor("x.svg", 14, Color.WHITE));
+        closeBtn.setBounds(width - 36, 10, 24, 24);
+        closeBtn.setContentAreaFilled(false);
+        closeBtn.setBorderPainted(false);
+        closeBtn.setFocusPainted(false);
+        closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        closeBtn.addActionListener(e -> dialog.dispose());
+        banner.add(closeBtn);
+
+        AvatarBadge avatar = new AvatarBadge(
+                targetUser.initials(),
+                targetUser.id(),
+                72,
+                targetUser.online() ? DiscordTheme.SUCCESS : null,
+                new Color(0x1E, 0x1F, 0x22),
+                true
+        );
+        avatar.setBounds(20, 40, 72, 72);
+        banner.add(avatar);
+        root.add(banner, BorderLayout.NORTH);
+
+        JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setOpaque(false);
+        body.setBorder(BorderFactory.createEmptyBorder(6, 18, 18, 18));
+
+        JLabel nameLabel = new JLabel(targetUser.displayName());
+        nameLabel.setFont(DiscordTheme.extrabold(16f));
+        nameLabel.setForeground(Color.WHITE);
+        nameLabel.setAlignmentX(0.0f);
+        body.add(nameLabel);
+
+        JLabel handleLabel = new JLabel(targetUser.username());
+        handleLabel.setFont(DiscordTheme.font(12f));
+        handleLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        handleLabel.setAlignmentX(0.0f);
+        body.add(handleLabel);
+
+        body.add(Box.createVerticalStrut(10));
+
+        JPanel divider1 = new JPanel();
+        divider1.setBackground(new Color(0x35, 0x36, 0x3C));
+        divider1.setMaximumSize(new Dimension(width, 1));
+        divider1.setAlignmentX(0.0f);
+        body.add(divider1);
+
+        body.add(Box.createVerticalStrut(10));
+
+        JLabel aboutTitle = new JLabel("VỀ TÔI");
+        aboutTitle.setFont(DiscordTheme.extrabold(10f));
+        aboutTitle.setForeground(new Color(0xB5, 0xBA, 0xC1));
+        aboutTitle.setAlignmentX(0.0f);
+        body.add(aboutTitle);
+
+        body.add(Box.createVerticalStrut(4));
+
+        String bioText = (targetUser.bio() != null && !targetUser.bio().isBlank())
+                ? targetUser.bio()
+                : "Thích trò chuyện, nghe nhạc và lập trình cùng bạn bè. ☁️";
+        WrappedTextArea bioArea = new WrappedTextArea(bioText, width - 36);
+        bioArea.setFont(DiscordTheme.font(12f));
+        bioArea.setForeground(new Color(0xDB, 0xDE, 0xE1));
+        bioArea.setAlignmentX(0.0f);
+        body.add(bioArea);
+
+        body.add(Box.createVerticalStrut(12));
+
+        JLabel memberSinceTitle = new JLabel("THÀNH VIÊN DISCORD TỪ");
+        memberSinceTitle.setFont(DiscordTheme.extrabold(10f));
+        memberSinceTitle.setForeground(new Color(0xB5, 0xBA, 0xC1));
+        memberSinceTitle.setAlignmentX(0.0f);
+        body.add(memberSinceTitle);
+
+        body.add(Box.createVerticalStrut(4));
+
+        JLabel memberDate = new JLabel("15 thg 4, 2024");
+        memberDate.setFont(DiscordTheme.font(12f));
+        memberDate.setForeground(new Color(0xDB, 0xDE, 0xE1));
+        memberDate.setAlignmentX(0.0f);
+        body.add(memberDate);
+
+        body.add(Box.createVerticalStrut(16));
+
+        JButton dismissBtn = new JButton("Đóng");
+        dismissBtn.setFont(DiscordTheme.semibold(12f));
+        dismissBtn.setForeground(Color.WHITE);
+        dismissBtn.setBackground(new Color(0x35, 0x37, 0x3C));
+        dismissBtn.setFocusPainted(false);
+        dismissBtn.setBorder(BorderFactory.createEmptyBorder(7, 14, 7, 14));
+        dismissBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        dismissBtn.setAlignmentX(0.0f);
+        dismissBtn.setMaximumSize(new Dimension(width - 36, 32));
+        dismissBtn.addActionListener(e -> dialog.dispose());
+        body.add(dismissBtn);
+
+        root.add(body, BorderLayout.CENTER);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
         dialog.setVisible(true);
     }
 
