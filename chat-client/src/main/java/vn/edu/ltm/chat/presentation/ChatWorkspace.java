@@ -882,6 +882,7 @@ public final class ChatWorkspace extends JPanel {
         messageColumn.add(inputBar, BorderLayout.SOUTH);
 
         chatArea.add(messageColumn, BorderLayout.CENTER);
+        infoPane.setVisible(true);
         chatArea.add(infoPane, BorderLayout.EAST);
 
         chatArea.addComponentListener(new java.awt.event.ComponentAdapter() {
@@ -889,12 +890,12 @@ public final class ChatWorkspace extends JPanel {
             public void componentResized(java.awt.event.ComponentEvent e) {
                 int w = chatArea.getWidth();
                 if (!userManuallyToggledPane) {
-                    boolean shouldShow = w >= 600;
+                    boolean shouldShow = w >= 360;
                     if (infoPane.isVisible() != shouldShow) {
                         infoPane.setVisible(shouldShow);
                         chatArea.revalidate();
                     }
-                } else if (w < 400 && infoPane.isVisible()) {
+                } else if (w < 260 && infoPane.isVisible()) {
                     infoPane.setVisible(false);
                     chatArea.revalidate();
                 }
@@ -906,8 +907,8 @@ public final class ChatWorkspace extends JPanel {
     private void toggleInfoPane() {
         userManuallyToggledPane = true;
         infoPane.setVisible(!infoPane.isVisible());
-        revalidate();
-        repaint();
+        chatArea.revalidate();
+        chatArea.repaint();
     }
 
     private JComponent buildTranscriptArea() {
@@ -1129,11 +1130,6 @@ public final class ChatWorkspace extends JPanel {
         name.setFont(DiscordTheme.semibold(13f));
         name.setForeground(selected ? Color.WHITE : new Color(0xB9, 0xBA, 0xC2));
         centerPanel.add(name);
-
-        String role = MessageRow.resolveRoleBadge(conversation.id());
-        if (role != null) {
-            centerPanel.add(MessageRow.buildRoleBadge(role));
-        }
         row.add(centerPanel, BorderLayout.CENTER);
 
         if (!conversation.isGroup()) {

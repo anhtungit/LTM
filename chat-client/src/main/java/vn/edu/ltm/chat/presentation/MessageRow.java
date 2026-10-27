@@ -164,11 +164,11 @@ final class MessageRow extends JPanel {
 
         contentHolder.setOpaque(false);
 
-        actionToolbar.setLayout(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        actionToolbar.setLayout(new FlowLayout(FlowLayout.RIGHT, 1, 0));
         actionToolbar.setBackground(new Color(0x31, 0x33, 0x38));
         actionToolbar.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0x3F, 0x42, 0x48), 1),
-                BorderFactory.createEmptyBorder(1, 3, 1, 3)
+                BorderFactory.createEmptyBorder(2, 4, 2, 4)
         ));
         actionToolbar.setVisible(false);
 
@@ -307,27 +307,6 @@ final class MessageRow extends JPanel {
         return spinePanel;
     }
 
-    static String resolveRoleBadge(String userId) {
-        if (userId == null) return null;
-        String lower = userId.toLowerCase();
-        if (lower.contains("tai")) return "DEVG";
-        if (lower.contains("lkd")) return "MASS";
-        if (lower.contains("khoa")) return "BIBO";
-        if (lower.contains("dunggawr") || lower.contains("mai-phuong")) return "Gura";
-        if (lower.contains("bot")) return "BOT";
-        return null;
-    }
-
-    static JLabel buildRoleBadge(String text) {
-        JLabel badge = new JLabel(text);
-        badge.setFont(DiscordTheme.extrabold(9f));
-        badge.setForeground(Color.WHITE);
-        badge.setBackground(new Color(0x3B, 0x3D, 0x44));
-        badge.setOpaque(true);
-        badge.setBorder(BorderFactory.createEmptyBorder(1, 4, 1, 4));
-        return badge;
-    }
-
     private JPanel buildAuthorRow(ChatMessage message) {
         JPanel authorRow = new JPanel(new BorderLayout(8, 0));
         authorRow.setOpaque(false);
@@ -340,11 +319,6 @@ final class MessageRow extends JPanel {
         author.setFont(DiscordTheme.bold(13.5f));
         author.setForeground(isMe ? new Color(0x58, 0x65, 0xF2) : Color.WHITE);
         left.add(author);
-
-        String role = resolveRoleBadge(message.senderId());
-        if (role != null) {
-            left.add(buildRoleBadge(role));
-        }
 
         String timeStr = TIME_FORMAT.format(message.sentAt());
         JLabel time = new JLabel(timeStr);
@@ -362,7 +336,12 @@ final class MessageRow extends JPanel {
             @Override
             public Dimension getPreferredSize() {
                 Dimension d = super.getPreferredSize();
-                return new Dimension(d.width, 0); // 0 height prevents vertical layout shift when hovered
+                return new Dimension(d.width, Math.max(d.height, 30));
+            }
+
+            @Override
+            public Dimension getMinimumSize() {
+                return getPreferredSize();
             }
         };
         wrapper.setOpaque(false);
@@ -730,7 +709,8 @@ final class MessageRow extends JPanel {
 
     private static void setupHoverButton(JButton btn) {
         btn.setContentAreaFilled(false);
-        btn.setBorder(BorderFactory.createEmptyBorder(4, 5, 4, 5));
+        btn.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+        btn.setPreferredSize(new Dimension(24, 24));
         btn.setFocusable(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new MouseAdapter() {

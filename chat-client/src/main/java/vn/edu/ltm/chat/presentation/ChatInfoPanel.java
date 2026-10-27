@@ -114,8 +114,42 @@ final class ChatInfoPanel extends JPanel {
     }
 
     private void buildDmView(Conversation conversation) {
+        JButton addFriendBtn = new JButton(IconFactory.phosphor("user-plus.svg", 13, Color.WHITE));
+        addFriendBtn.setContentAreaFilled(false);
+        addFriendBtn.setBorderPainted(false);
+        addFriendBtn.setFocusPainted(false);
+        addFriendBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        addFriendBtn.setToolTipText("Thêm bạn bè");
+
+        JButton bannerMoreBtn = new JButton(IconFactory.phosphor("dots-three.svg", 14, Color.WHITE));
+        bannerMoreBtn.setContentAreaFilled(false);
+        bannerMoreBtn.setBorderPainted(false);
+        bannerMoreBtn.setFocusPainted(false);
+        bannerMoreBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        bannerMoreBtn.setToolTipText("Tùy chọn khác");
+
+        boolean isPeerOnline = onlineResolver.test(conversation.id());
+        AvatarBadge avatar = new AvatarBadge(
+                conversation.initials(),
+                conversation.id(),
+                68,
+                isPeerOnline ? DiscordTheme.SUCCESS : null,
+                DiscordTheme.SIDEBAR,
+                true
+        );
+
         // 1. Banner + Overlapping Avatar Header
         JPanel bannerHeader = new JPanel(null) {
+            @Override
+            public void doLayout() {
+                super.doLayout();
+                int w = getWidth();
+                if (w <= 0) w = PANEL_WIDTH;
+                bannerMoreBtn.setBounds(w - 32, 10, 24, 24);
+                addFriendBtn.setBounds(w - 60, 10, 24, 24);
+                avatar.setBounds(16, 32, 68, 68);
+            }
+
             @Override
             protected void paintComponent(Graphics graphics) {
                 super.paintComponent(graphics);
@@ -138,36 +172,9 @@ final class ChatInfoPanel extends JPanel {
         bannerHeader.setMinimumSize(new Dimension(PANEL_WIDTH, 110));
         bannerHeader.setAlignmentX(0.0f);
 
-        boolean isPeerOnline = onlineResolver.test(conversation.id());
-        AvatarBadge avatar = new AvatarBadge(
-                conversation.initials(),
-                conversation.id(),
-                68,
-                isPeerOnline ? DiscordTheme.SUCCESS : null,
-                DiscordTheme.SIDEBAR,
-                true
-        );
-        avatar.setBounds(16, 32, 68, 68);
         bannerHeader.add(avatar);
-
-        JButton addFriendBtn = new JButton(IconFactory.phosphor("user-plus.svg", 13, Color.WHITE));
-        addFriendBtn.setBounds(PANEL_WIDTH - 60, 10, 24, 24);
-        addFriendBtn.setContentAreaFilled(false);
-        addFriendBtn.setBorderPainted(false);
-        addFriendBtn.setFocusPainted(false);
-        addFriendBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        addFriendBtn.setToolTipText("Thêm bạn bè");
         bannerHeader.add(addFriendBtn);
-
-        JButton bannerMoreBtn = new JButton(IconFactory.phosphor("dots-three.svg", 14, Color.WHITE));
-        bannerMoreBtn.setBounds(PANEL_WIDTH - 32, 10, 24, 24);
-        bannerMoreBtn.setContentAreaFilled(false);
-        bannerMoreBtn.setBorderPainted(false);
-        bannerMoreBtn.setFocusPainted(false);
-        bannerMoreBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        bannerMoreBtn.setToolTipText("Tùy chọn khác");
         bannerHeader.add(bannerMoreBtn);
-
         contentPanel.add(bannerHeader);
 
         // 2. Profile Card Body Container
@@ -286,7 +293,11 @@ final class ChatInfoPanel extends JPanel {
         });
         card.add(fullProfileBtn);
 
-        contentPanel.add(card);
+        JPanel cardHolder = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+        cardHolder.setOpaque(false);
+        cardHolder.setAlignmentX(0.0f);
+        cardHolder.add(card);
+        contentPanel.add(cardHolder);
         contentPanel.add(Box.createVerticalStrut(16));
     }
 
