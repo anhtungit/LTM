@@ -225,6 +225,8 @@ public final class ChatWorkspace extends JPanel {
         this.chatService.setOnTypingUpdate(this::handleTypingEvent);
         this.chatService.setOnCallSignal(this::handleCallSignal);
         this.meetRoomPanel.setOnMuteToggle(voiceEngine::setMuted);
+        this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
+        this.meetLobbyPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         if (isConnected) {
             handleServerBroadcast();
         }
@@ -2186,6 +2188,12 @@ public final class ChatWorkspace extends JPanel {
             selectConversation(dm);
             showChatView();
         });
+    }
+
+    private void openVoiceSettingsDialog() {
+        javax.swing.JFrame parent = (javax.swing.JFrame) SwingUtilities.getWindowAncestor(this);
+        VoiceSettingsDialog dialog = new VoiceSettingsDialog(parent, voiceEngine);
+        dialog.setVisible(true);
     }
 
     private void openProfileDialog() {

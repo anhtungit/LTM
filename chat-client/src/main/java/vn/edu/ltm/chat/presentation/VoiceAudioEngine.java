@@ -14,10 +14,20 @@ import java.util.function.Consumer;
 /**
  * Real-time PCM 16kHz 16-bit mono voice capture & playback using JDK javax.sound.sampled.
  */
-final class VoiceAudioEngine {
+public final class VoiceAudioEngine {
     // shortcut: 16kHz 16-bit mono PCM over Base64 TCP (~32KB/s), upgrade to UDP Opus when scaling > 5 peers
-    private static final AudioFormat FORMAT = new AudioFormat(16000.0f, 16, 1, true, false);
-    private static final int CHUNK_BYTES = 3200; // 100ms frame at 16kHz 16-bit mono
+    public static final AudioFormat FORMAT = new AudioFormat(16000.0f, 16, 1, true, false);
+    public static final int CHUNK_BYTES = 3200; // 100ms frame at 16kHz 16-bit mono
+
+    public record AudioDevice(String id, String displayName) {
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+
+    private static volatile String selectedMicId = "default";
+    private static volatile String selectedSpeakerId = "default";
 
     private volatile boolean running = false;
     private volatile boolean muted = false;
@@ -27,6 +37,127 @@ final class VoiceAudioEngine {
     private TargetDataLine micLine;
     private SourceDataLine speakerLine;
     private Thread captureThread;
+    private Consumer<String> activeEncodedChunkConsumer;
+    private Consumer<Boolean> activeSpeakingStateConsumer;
+
+    public static List<AudioDevice> getAvailableInputDevices() {
+        List<AudioDevice> list = new ArrayList<>();
+        list.add(new AudioDevice("default", "Mặc định hệ thống"));
+        DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
+
+        for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+            String name = mInfo.getName();
+            if (name == null || name.startsWith("Port") || name.contains("[default]")) continue;
+            try {
+                Mixer mixer = AudioSystem.getMixer(mInfo);
+                if (mixer.isLineSupported(info)) {
+                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription())));
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return list;
+    }
+
+    public static List<AudioDevice> getAvailableOutputDevices() {
+        List<AudioDevice> list = new ArrayList<>();
+        list.add(new AudioDevice("default", "Mặc định hệ thống"));
+        DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
+
+        for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+            String name = mInfo.getName();
+            if (name == null || name.startsWith("Port") || name.contains("[default]")) continue;
+            try {
+                Mixer mixer = AudioSystem.getMixer(mInfo);
+                if (mixer.isLineSupported(info)) {
+                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription())));
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return list;
+    }
+
+    private static String formatDeviceName(String name, String desc) {
+        if (name == null) return "Thiết bị âm thanh";
+        if (name.contains("USB") || (desc != null && desc.contains("USB"))) {
+            return name + " (Thiết bị USB)";
+        }
+        if (name.contains("plughw:0,0") || name.contains("ALC")) {
+            return name + " (Tích hợp bo mạch / Analog)";
+        }
+        if (name.contains("HDMI") || (desc != null && desc.contains("HDMI"))) {
+            return name + " (Ngõ xuất HDMI)";
+        }
+        return name;
+    }
+
+    public static String getSelectedMicId() {
+        return selectedMicId;
+    }
+
+    public static String getSelectedSpeakerId() {
+        return selectedSpeakerId;
+    }
+
+    public static void testSpeaker(String deviceId) {
+        new Thread(() -> {
+            try {
+                DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
+                SourceDataLine line = openSpeakerLine(deviceId);
+                if (line == null) return;
+                // Play a brief 2-tone melodic chime (587Hz -> 880Hz, 150ms each)
+                byte[] buf = new byte[CHUNK_BYTES * 3];
+                for (int i = 0; i < buf.length / 2; i++) {
+                    double freq = (i < buf.length / 4) ? 587.33 : 880.00;
+                    short s = (short) (Math.sin(2 * Math.PI * freq * i / 16000.0) * 10000);
+                    buf[i * 2] = (byte) (s & 0xFF);
+                    buf[i * 2 + 1] = (byte) ((s >> 8) & 0xFF);
+                }
+                line.write(buf, 0, buf.length);
+                line.drain();
+                line.close();
+            } catch (Exception ignored) {
+            }
+        }, "audio-test-speaker").start();
+    }
+
+    public synchronized void switchMicDevice(String deviceId) {
+        selectedMicId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
+        if (running) {
+            if (micLine != null) {
+                try {
+                    micLine.stop();
+                    micLine.close();
+                } catch (Exception ignored) {
+                }
+                micLine = null;
+            }
+            micLine = openMicLine(selectedMicId);
+            micAvailable = (micLine != null);
+            if (micLine != null) {
+                captureThread = new Thread(() -> captureLoop(activeEncodedChunkConsumer, activeSpeakingStateConsumer), "voice-mic-capture");
+                captureThread.setDaemon(true);
+                captureThread.start();
+            }
+        }
+    }
+
+    public synchronized void switchSpeakerDevice(String deviceId) {
+        selectedSpeakerId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
+        if (running) {
+            if (speakerLine != null) {
+                try {
+                    speakerLine.stop();
+                    speakerLine.close();
+                } catch (Exception ignored) {
+                }
+                speakerLine = null;
+            }
+            speakerLine = openSpeakerLine(selectedSpeakerId);
+            speakerAvailable = (speakerLine != null);
+        }
+    }
 
     synchronized void start(Consumer<String> onEncodedChunk) {
         start(onEncodedChunk, null);
@@ -35,11 +166,13 @@ final class VoiceAudioEngine {
     synchronized void start(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         stop();
         running = true;
+        this.activeEncodedChunkConsumer = onEncodedChunk;
+        this.activeSpeakingStateConsumer = onSpeakingState;
 
-        speakerLine = openBestSpeakerLine();
+        speakerLine = openSpeakerLine(selectedSpeakerId);
         speakerAvailable = (speakerLine != null);
 
-        micLine = openBestMicLine();
+        micLine = openMicLine(selectedMicId);
         micAvailable = (micLine != null);
 
         if (micLine != null) {
@@ -49,10 +182,29 @@ final class VoiceAudioEngine {
         }
     }
 
-    private static SourceDataLine openBestSpeakerLine() {
+    private static SourceDataLine openSpeakerLine(String deviceId) {
         DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
 
-        // 1. Try system default mixer first (routes through PipeWire/PulseAudio/OS default device)
+        if (deviceId != null && !"default".equalsIgnoreCase(deviceId)) {
+            for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+                if (deviceId.equals(mInfo.getName())) {
+                    try {
+                        Mixer mixer = AudioSystem.getMixer(mInfo);
+                        if (mixer.isLineSupported(info)) {
+                            SourceDataLine line = (SourceDataLine) mixer.getLine(info);
+                            line.open(FORMAT, CHUNK_BYTES * 4);
+                            line.start();
+                            System.out.println("[VoiceAudioEngine] Speaker opened on selected mixer: " + mInfo.getName());
+                            return line;
+                        }
+                    } catch (Exception ex) {
+                        System.err.println("[VoiceAudioEngine] Failed opening selected speaker [" + deviceId + "]: " + ex.getMessage());
+                    }
+                }
+            }
+        }
+
+        // Try system default mixer
         try {
             if (AudioSystem.isLineSupported(info)) {
                 SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
@@ -65,9 +217,10 @@ final class VoiceAudioEngine {
             System.err.println("[VoiceAudioEngine] Default speaker line unavailable: " + ex.getMessage());
         }
 
-        // 2. Fallback to candidate hardware mixers if default is unavailable
-        List<Mixer.Info> candidates = getHardwareMixersFirst();
-        for (Mixer.Info mInfo : candidates) {
+        // Fallback to any supported hardware mixer
+        for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+            String name = mInfo.getName();
+            if (name == null || name.startsWith("Port")) continue;
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
@@ -83,10 +236,29 @@ final class VoiceAudioEngine {
         return null;
     }
 
-    private static TargetDataLine openBestMicLine() {
+    private static TargetDataLine openMicLine(String deviceId) {
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
 
-        // 1. Try system default mixer first (routes through PipeWire/PulseAudio/OS default mic)
+        if (deviceId != null && !"default".equalsIgnoreCase(deviceId)) {
+            for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+                if (deviceId.equals(mInfo.getName())) {
+                    try {
+                        Mixer mixer = AudioSystem.getMixer(mInfo);
+                        if (mixer.isLineSupported(info)) {
+                            TargetDataLine line = (TargetDataLine) mixer.getLine(info);
+                            line.open(FORMAT, CHUNK_BYTES * 4);
+                            line.start();
+                            System.out.println("[VoiceAudioEngine] Mic opened on selected mixer: " + mInfo.getName());
+                            return line;
+                        }
+                    } catch (Exception ex) {
+                        System.err.println("[VoiceAudioEngine] Failed opening selected mic [" + deviceId + "]: " + ex.getMessage());
+                    }
+                }
+            }
+        }
+
+        // Try system default mixer
         try {
             if (AudioSystem.isLineSupported(info)) {
                 TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info);
@@ -99,9 +271,10 @@ final class VoiceAudioEngine {
             System.err.println("[VoiceAudioEngine] Default mic line unavailable: " + ex.getMessage());
         }
 
-        // 2. Fallback to candidate hardware mixers if default is unavailable
-        List<Mixer.Info> candidates = getHardwareMixersFirst();
-        for (Mixer.Info mInfo : candidates) {
+        // Fallback to any supported hardware mixer
+        for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+            String name = mInfo.getName();
+            if (name == null || name.startsWith("Port")) continue;
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
@@ -115,22 +288,6 @@ final class VoiceAudioEngine {
             }
         }
         return null;
-    }
-
-    private static List<Mixer.Info> getHardwareMixersFirst() {
-        List<Mixer.Info> hw = new ArrayList<>();
-        List<Mixer.Info> others = new ArrayList<>();
-        for (Mixer.Info info : AudioSystem.getMixerInfo()) {
-            String name = info.getName();
-            if (name == null || name.startsWith("Port")) continue;
-            if (name.contains("plughw") || name.contains("USB") || name.contains("PCH") || name.contains("Device")) {
-                hw.add(info);
-            } else {
-                others.add(info);
-            }
-        }
-        hw.addAll(others);
-        return hw;
     }
 
     private void captureLoop(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {

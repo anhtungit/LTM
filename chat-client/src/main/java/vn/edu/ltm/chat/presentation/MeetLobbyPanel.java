@@ -22,6 +22,7 @@ import java.awt.GridBagLayout;
 public final class MeetLobbyPanel extends JPanel {
     private final Runnable onJoinRoom;
     private final Runnable onBackToChat;
+    private Runnable onOpenVoiceSettings;
     private boolean micEnabled = true;
     private boolean camEnabled = false;
     private final JLabel headerTitle = new JLabel("phòng-họp");
@@ -42,6 +43,10 @@ public final class MeetLobbyPanel extends JPanel {
         String name = (roomName != null && !roomName.isBlank()) ? roomName : "phòng-họp";
         headerTitle.setText(name);
         centerSubtitle.setText("Kiểm tra thiết bị trước khi bắt đầu cuộc gọi với " + name + ".");
+    }
+
+    public void setOnOpenVoiceSettings(Runnable onOpenVoiceSettings) {
+        this.onOpenVoiceSettings = onOpenVoiceSettings;
     }
 
     private JPanel buildHeader() {
@@ -161,6 +166,15 @@ public final class MeetLobbyPanel extends JPanel {
             camBtn.setForeground(camEnabled ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_PRIMARY);
         });
         toggleRow.add(camBtn);
+
+        JButton settingsBtn = new JButton("Cài đặt thiết bị", IconFactory.phosphor("gear.svg", 16, DiscordTheme.TEXT_PRIMARY));
+        styleDeviceBtn(settingsBtn);
+        settingsBtn.addActionListener(e -> {
+            if (onOpenVoiceSettings != null) {
+                onOpenVoiceSettings.run();
+            }
+        });
+        toggleRow.add(settingsBtn);
 
         card.add(toggleRow);
         card.add(Box.createVerticalStrut(18));

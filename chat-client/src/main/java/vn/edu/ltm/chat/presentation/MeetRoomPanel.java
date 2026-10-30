@@ -26,6 +26,7 @@ import java.util.function.Consumer;
 /** Video/voice room interface with live audio status, duration timer, and dynamic participants. */
 public final class MeetRoomPanel extends JPanel {
     private final Runnable onLeave;
+    private Runnable onOpenVoiceSettings;
     private Consumer<Boolean> onMuteToggle;
     private boolean micMuted = false;
     private boolean camMuted = true;
@@ -59,6 +60,10 @@ public final class MeetRoomPanel extends JPanel {
 
     public void setOnMuteToggle(Consumer<Boolean> onMuteToggle) {
         this.onMuteToggle = onMuteToggle;
+    }
+
+    public void setOnOpenVoiceSettings(Runnable onOpenVoiceSettings) {
+        this.onOpenVoiceSettings = onOpenVoiceSettings;
     }
 
     public void startSession(String roomTitle, String selfId, String selfInitials, String selfName, boolean micReady) {
@@ -250,6 +255,16 @@ public final class MeetRoomPanel extends JPanel {
         shareBtn.setFont(DiscordTheme.semibold(12f));
         shareBtn.addActionListener(e -> showShareScreenDialog());
         bar.add(shareBtn);
+
+        JButton settingsBtn = new JButton(IconFactory.phosphor("gear.svg", 18, Color.WHITE));
+        styleControlBtn(settingsBtn, new Color(0x3B, 0x3D, 0x44));
+        settingsBtn.setToolTipText("Cài đặt thiết bị âm thanh (Microphone & Loa)");
+        settingsBtn.addActionListener(e -> {
+            if (onOpenVoiceSettings != null) {
+                onOpenVoiceSettings.run();
+            }
+        });
+        bar.add(settingsBtn);
 
         JButton leaveBtn = new JButton("Kết thúc cuộc gọi", IconFactory.phosphor("phone.svg", 18, Color.WHITE));
         styleControlBtn(leaveBtn, DiscordTheme.DANGER);
