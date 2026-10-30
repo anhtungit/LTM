@@ -115,6 +115,7 @@ public final class ClientHandler implements Runnable {
                 case "ADD_VOICE_CHANNEL_REQ" -> handleModifyChannel(req, reqId, true, true);
                 case "REMOVE_VOICE_CHANNEL_REQ" -> handleModifyChannel(req, reqId, false, true);
                 case "TYPING_REQ" -> handleTyping(req);
+                case "CALL_SIGNAL_REQ" -> handleCallSignal(req);
                 default -> sendPacket(Packet.error(type + "_RES", reqId, "Loại gói tin không hỗ trợ: " + type));
             }
         } catch (IllegalArgumentException ex) {
@@ -607,6 +608,44 @@ public final class ClientHandler implements Runnable {
                         .put("senderId", senderId)
                         .put("senderName", senderName)
                         .put("typing", typing));
+            }
+        }
+    }
+
+    private void handleCallSignal(Packet req) {
+        String convId = req.getString("conversationId", "");
+        String channel = req.getString("channel", "");
+        String senderId = currentUser != null ? currentUser.id() : "";
+        String senderName = req.getString("senderName", currentUser != null ? currentUser.displayName() : "Ai đó");
+        String action = req.getString("action", "");
+        String data = req.getString("data", "");
+
+        if (convId == null || convId.isBlank() || senderId.isBlank()) return;
+
+        if (db.isGroupConversation(convId)) {
+            if (!db.isUserMemberOfGroup(senderId, convId)) return;
+            broadcastToGroupMembers(convId, Packet.broadcast("CALL_SIGNAL_BROADCAST")
+                    .put("conversationId", convId)
+                    .put("channel", channel != null ? channel : "")
+                    .put("senderId", senderId)
+                    .put("senderName", senderName)
+                    .put("action", action)
+                    .put("data", data));
+            return;
+        }
+
+        String peerId = convId;
+        for (ClientHandler h : server.getActiveHandlers()) {
+            if (h == this) continue;
+            UserDto targetUser = h.getCurrentUser();
+            if (targetUser != null && targetUser.id().equals(peerId)) {
+                h.sendPacket(Packet.broadcast("CALL_SIGNAL_BROADCAST")
+                        .put("conversationId", senderId)
+                        .put("channel", "")
+                        .put("senderId", senderId)
+                        .put("senderName", senderName)
+                        .put("action", action)
+                        .put("data", data));
             }
         }
     }

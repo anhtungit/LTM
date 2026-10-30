@@ -12,18 +12,34 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.FlowLayout;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Consumer;
 
-/** Video/voice room interface with screen sharing source selector (Canvas 06). */
+/** Video/voice room interface with live audio status, duration timer, and dynamic participants. */
 public final class MeetRoomPanel extends JPanel {
     private final Runnable onLeave;
+    private Consumer<Boolean> onMuteToggle;
     private boolean micMuted = false;
     private boolean camMuted = true;
+
+    private final JLabel titleLabel = new JLabel("Cuộc gọi thoại");
+    private final JLabel statusLabel = new JLabel("· 00:00 · Đang kết nối âm thanh...");
+    private final JPanel grid = new JPanel(new GridLayout(1, 2, 12, 12));
+    private JButton micBtn;
+
+    private final Map<String, ParticipantEntry> participants = new LinkedHashMap<>();
+    private final Timer callTimer;
+    private int elapsedSeconds = 0;
+
+    private record ParticipantEntry(String id, String initials, String name, String sub, boolean speaking) {}
 
     public MeetRoomPanel(Runnable onLeave) {
         this.onLeave = onLeave;
@@ -31,9 +47,74 @@ public final class MeetRoomPanel extends JPanel {
         setLayout(new BorderLayout());
         setBackground(DiscordTheme.TRANSCRIPT);
 
+        this.callTimer = new Timer(1000, e -> {
+            elapsedSeconds++;
+            updateHeaderStatus();
+        });
+
         add(buildHeader(), BorderLayout.NORTH);
         add(buildVideoGrid(), BorderLayout.CENTER);
         add(buildBottomControls(), BorderLayout.SOUTH);
+    }
+
+    public void setOnMuteToggle(Consumer<Boolean> onMuteToggle) {
+        this.onMuteToggle = onMuteToggle;
+    }
+
+    public void startSession(String roomTitle, String selfId, String selfInitials, String selfName, boolean micReady) {
+        this.elapsedSeconds = 0;
+        this.micMuted = false;
+        if (micBtn != null) {
+            micBtn.setBackground(new Color(0x3B, 0x3D, 0x44));
+        }
+        titleLabel.setText(roomTitle != null && !roomTitle.isBlank() ? roomTitle : "Cuộc gọi thoại");
+        participants.clear();
+        String micSub = micReady ? "Bạn · Mic đang bật" : "Bạn · Chế độ nghe (không tìm thấy mic)";
+        participants.put(selfId, new ParticipantEntry(selfId, selfInitials, selfName + " (Bạn)", micSub, false));
+        rebuildGrid();
+        updateHeaderStatus();
+        callTimer.restart();
+    }
+
+    public void addOrUpdateParticipant(String id, String initials, String name, String sub, boolean speaking) {
+        if (id == null || id.isBlank()) return;
+        String safeInitials = (initials != null && !initials.isBlank()) ? initials : computeInitials(name);
+        participants.put(id, new ParticipantEntry(id, safeInitials, name, sub, speaking));
+        rebuildGrid();
+        updateHeaderStatus();
+    }
+
+    public void removeParticipant(String id) {
+        if (id != null && participants.remove(id) != null) {
+            rebuildGrid();
+            updateHeaderStatus();
+        }
+    }
+
+    public int getParticipantCount() {
+        return participants.size();
+    }
+
+    public String stopSessionAndFormatDuration() {
+        callTimer.stop();
+        int mins = elapsedSeconds / 60;
+        int secs = elapsedSeconds % 60;
+        return String.format("%02d:%02d", mins, secs);
+    }
+
+    private void updateHeaderStatus() {
+        int mins = elapsedSeconds / 60;
+        int secs = elapsedSeconds % 60;
+        statusLabel.setText(String.format("· %02d:%02d · %d người trong cuộc gọi", mins, secs, Math.max(1, participants.size())));
+    }
+
+    private static String computeInitials(String name) {
+        if (name == null || name.isBlank()) return "U";
+        String[] parts = name.trim().split("\\s+");
+        if (parts.length == 1) {
+            return parts[0].substring(0, Math.min(2, parts[0].length())).toUpperCase();
+        }
+        return ("" + parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
     }
 
     private JPanel buildHeader() {
@@ -50,43 +131,48 @@ public final class MeetRoomPanel extends JPanel {
         JLabel icon = new JLabel(IconFactory.phosphor("headset.svg", 20, DiscordTheme.SUCCESS));
         left.add(icon);
 
-        JLabel title = new JLabel("Phòng học nhóm");
-        title.setFont(DiscordTheme.bold(15f));
-        title.setForeground(Color.WHITE);
-        left.add(title);
+        titleLabel.setFont(DiscordTheme.bold(15f));
+        titleLabel.setForeground(Color.WHITE);
+        left.add(titleLabel);
 
-        JLabel status = new JLabel("· Bản xem trước · 4 người · Media adapter chưa kết nối");
-        status.setFont(DiscordTheme.font(12f));
-        status.setForeground(DiscordTheme.TEXT_MUTED);
-        left.add(status);
+        statusLabel.setFont(DiscordTheme.font(12f));
+        statusLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        left.add(statusLabel);
 
         header.add(left, BorderLayout.CENTER);
         return header;
     }
 
     private JPanel buildVideoGrid() {
-        JPanel grid = new JPanel(new GridLayout(2, 2, 12, 12));
         grid.setOpaque(false);
         grid.setBorder(BorderFactory.createEmptyBorder(16, 20, 16, 20));
-
-        grid.add(buildParticipantTile("HN", "Hà Nguyễn (Bạn)", "Bạn · Mic đang bật"));
-        grid.add(buildParticipantTile("MA", "Minh An", "Thành viên"));
-        grid.add(buildParticipantTile("LT", "Linh Trần", "Thành viên"));
-        grid.add(buildParticipantTile("QH", "Quốc Huy", "Thành viên"));
-
         return grid;
     }
 
-    private JPanel buildParticipantTile(String initials, String name, String sub) {
+    private void rebuildGrid() {
+        grid.removeAll();
+        int count = Math.max(1, participants.size());
+        int rows = count <= 2 ? 1 : 2;
+        int cols = count == 1 ? 1 : 2;
+        grid.setLayout(new GridLayout(rows, cols, 12, 12));
+
+        for (ParticipantEntry p : participants.values()) {
+            grid.add(buildParticipantTile(p.initials(), p.name(), p.sub(), p.speaking()));
+        }
+        grid.revalidate();
+        grid.repaint();
+    }
+
+    private JPanel buildParticipantTile(String initials, String name, String sub, boolean speaking) {
         RoundedPanel tile = new RoundedPanel(10);
         tile.setBackground(new Color(0x1E, 0x1F, 0x23));
+        Color borderColor = speaking ? DiscordTheme.SUCCESS : new Color(0x2B, 0x2D, 0x31);
         tile.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(0x2B, 0x2D, 0x31), 1),
+                BorderFactory.createLineBorder(borderColor, speaking ? 2 : 1),
                 BorderFactory.createEmptyBorder(12, 12, 12, 12)
         ));
         tile.setLayout(new BorderLayout());
 
-        // Center avatar & video unavailable
         JPanel center = new JPanel(new GridBagLayout());
         center.setOpaque(false);
 
@@ -99,16 +185,15 @@ public final class MeetRoomPanel extends JPanel {
         inner.add(avatar);
         inner.add(Box.createVerticalStrut(10));
 
-        JLabel status = new JLabel("Video chưa khả dụng trong preview");
+        JLabel status = new JLabel(speaking ? "Đang nói..." : "Đang kết nối âm thanh trực tiếp");
         status.setFont(DiscordTheme.font(11f));
-        status.setForeground(DiscordTheme.TEXT_MUTED);
+        status.setForeground(speaking ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_MUTED);
         status.setAlignmentX(CENTER_ALIGNMENT);
         inner.add(status);
 
         center.add(inner);
         tile.add(center, BorderLayout.CENTER);
 
-        // Bottom name tag
         JPanel tag = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         tag.setOpaque(false);
         JLabel nameLbl = new JLabel(name);
@@ -130,12 +215,15 @@ public final class MeetRoomPanel extends JPanel {
         bar.setBackground(new Color(0x1E, 0x1F, 0x23));
         bar.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, DiscordTheme.HAIRLINE));
 
-        JButton micBtn = new JButton(IconFactory.phosphor("microphone.svg", 18, Color.WHITE));
+        micBtn = new JButton(IconFactory.phosphor("microphone.svg", 18, Color.WHITE));
         styleControlBtn(micBtn, new Color(0x3B, 0x3D, 0x44));
         micBtn.setToolTipText("Bật/Tắt micrô");
         micBtn.addActionListener(e -> {
             micMuted = !micMuted;
             micBtn.setBackground(micMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
+            if (onMuteToggle != null) {
+                onMuteToggle.accept(micMuted);
+            }
         });
         bar.add(micBtn);
 
@@ -154,7 +242,7 @@ public final class MeetRoomPanel extends JPanel {
         shareBtn.addActionListener(e -> showShareScreenDialog());
         bar.add(shareBtn);
 
-        JButton leaveBtn = new JButton("Rời phòng", IconFactory.phosphor("phone.svg", 18, Color.WHITE));
+        JButton leaveBtn = new JButton("Kết thúc cuộc gọi", IconFactory.phosphor("phone.svg", 18, Color.WHITE));
         styleControlBtn(leaveBtn, DiscordTheme.DANGER);
         leaveBtn.setFont(DiscordTheme.bold(12f));
         leaveBtn.addActionListener(e -> onLeave.run());
@@ -247,4 +335,3 @@ public final class MeetRoomPanel extends JPanel {
         return opt;
     }
 }
-

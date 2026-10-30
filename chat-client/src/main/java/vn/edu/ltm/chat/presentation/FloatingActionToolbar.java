@@ -245,3 +245,4 @@ final class FloatingActionToolbar extends JPanel {
         }
     }
 }
+

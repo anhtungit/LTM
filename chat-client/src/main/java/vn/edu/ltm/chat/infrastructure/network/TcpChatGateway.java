@@ -50,6 +50,7 @@ public final class TcpChatGateway implements ChatGateway {
     private volatile Runnable onRealtimeUpdate;
     private volatile Runnable onPresenceUpdate;
     private volatile java.util.function.Consumer<TypingEvent> onTypingUpdate;
+    private volatile java.util.function.Consumer<CallSignalEvent> onCallSignal;
 
     private final Map<String, CompletableFuture<TcpPacket>> pendingRequests = new ConcurrentHashMap<>();
 
@@ -162,6 +163,24 @@ public final class TcpChatGateway implements ChatGateway {
             var cb = this.onTypingUpdate;
             if (cb != null) {
                 SwingUtilities.invokeLater(() -> cb.accept(new TypingEvent(convId, chan, sId, sName, typing)));
+            }
+            return;
+        }
+        if ("CALL_SIGNAL_BROADCAST".equals(type)) {
+            String convId = packet.getString("conversationId", "");
+            String chan = packet.getString("channel", "");
+            String sId = packet.getString("senderId", "");
+            String sName = packet.getString("senderName", "Ai đó");
+            String action = packet.getString("action", "");
+            String data = packet.getString("data", "");
+            var cb = this.onCallSignal;
+            if (cb != null) {
+                CallSignalEvent ev = new CallSignalEvent(convId, chan, sId, sName, action, data);
+                if ("AUDIO".equals(action)) {
+                    cb.accept(ev);
+                } else {
+                    SwingUtilities.invokeLater(() -> cb.accept(ev));
+                }
             }
             return;
         }
@@ -332,6 +351,32 @@ public final class TcpChatGateway implements ChatGateway {
                     .put("channel", channel != null ? channel : "")
                     .put("senderName", currentUserName != null ? currentUserName : "Người dùng")
                     .put("typing", typing);
+            synchronized (this) {
+                if (out != null) {
+                    out.println(req.toJsonLine());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public void setOnCallSignal(java.util.function.Consumer<CallSignalEvent> callback) {
+        this.onCallSignal = callback;
+    }
+
+    @Override
+    public void sendCallSignal(String conversationId, String channel, String action, String data) {
+        if (!connected || out == null || conversationId == null || conversationId.isBlank()) {
+            return;
+        }
+        try {
+            TcpPacket req = new TcpPacket("CALL_SIGNAL_REQ", UUID.randomUUID().toString())
+                    .put("conversationId", conversationId)
+                    .put("channel", channel != null ? channel : "")
+                    .put("senderName", currentUserName != null ? currentUserName : "Người dùng")
+                    .put("action", action != null ? action : "")
+                    .put("data", data != null ? data : "");
             synchronized (this) {
                 if (out != null) {
                     out.println(req.toJsonLine());

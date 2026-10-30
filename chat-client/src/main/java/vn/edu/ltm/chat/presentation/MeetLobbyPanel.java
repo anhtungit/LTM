@@ -22,8 +22,10 @@ import java.awt.GridBagLayout;
 public final class MeetLobbyPanel extends JPanel {
     private final Runnable onJoinRoom;
     private final Runnable onBackToChat;
-    private boolean micEnabled = false;
+    private boolean micEnabled = true;
     private boolean camEnabled = false;
+    private final JLabel headerTitle = new JLabel("phòng-họp");
+    private final JLabel centerSubtitle = new JLabel("Kiểm tra thiết bị trước khi bắt đầu cuộc gọi.");
 
     public MeetLobbyPanel(Runnable onJoinRoom, Runnable onBackToChat) {
         this.onJoinRoom = onJoinRoom;
@@ -34,7 +36,12 @@ public final class MeetLobbyPanel extends JPanel {
 
         add(buildHeader(), BorderLayout.NORTH);
         add(buildCenter(), BorderLayout.CENTER);
-        add(buildRightSidebar(), BorderLayout.EAST);
+    }
+
+    public void updateRoomInfo(String roomName) {
+        String name = (roomName != null && !roomName.isBlank()) ? roomName : "phòng-họp";
+        headerTitle.setText(name);
+        centerSubtitle.setText("Kiểm tra thiết bị trước khi bắt đầu cuộc gọi với " + name + ".");
     }
 
     private JPanel buildHeader() {
@@ -51,12 +58,11 @@ public final class MeetLobbyPanel extends JPanel {
         JLabel hash = new JLabel(IconFactory.phosphor("headset.svg", 22, DiscordTheme.ACCENT_SOFT));
         left.add(hash);
 
-        JLabel title = new JLabel("phòng-họp");
-        title.setFont(DiscordTheme.bold(16f));
-        title.setForeground(Color.WHITE);
-        left.add(title);
+        headerTitle.setFont(DiscordTheme.bold(16f));
+        headerTitle.setForeground(Color.WHITE);
+        left.add(headerTitle);
 
-        JLabel desc = new JLabel("· Kênh gặp của LTM Studio · Chế độ xem trước");
+        JLabel desc = new JLabel("· Sảnh chờ cuộc gọi thoại trực tiếp");
         desc.setFont(DiscordTheme.font(13f));
         desc.setForeground(DiscordTheme.TEXT_MUTED);
         left.add(desc);
@@ -88,17 +94,16 @@ public final class MeetLobbyPanel extends JPanel {
         ));
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
 
-        JLabel title = new JLabel("Sẵn sàng vào phòng?");
+        JLabel title = new JLabel("Sẵn sàng vào cuộc gọi?");
         title.setFont(DiscordTheme.bold(20f));
         title.setForeground(Color.WHITE);
         title.setAlignmentX(CENTER_ALIGNMENT);
         card.add(title);
 
-        JLabel subtitle = new JLabel("Chọn thiết bị trước khi tham gia #phòng-họp.");
-        subtitle.setFont(DiscordTheme.font(12f));
-        subtitle.setForeground(DiscordTheme.TEXT_SECONDARY);
-        subtitle.setAlignmentX(CENTER_ALIGNMENT);
-        card.add(subtitle);
+        centerSubtitle.setFont(DiscordTheme.font(12f));
+        centerSubtitle.setForeground(DiscordTheme.TEXT_SECONDARY);
+        centerSubtitle.setAlignmentX(CENTER_ALIGNMENT);
+        card.add(centerSubtitle);
         card.add(Box.createVerticalStrut(18));
 
         // Camera preview box
@@ -112,18 +117,18 @@ public final class MeetLobbyPanel extends JPanel {
         previewContent.setOpaque(false);
         previewContent.setLayout(new BoxLayout(previewContent, BoxLayout.Y_AXIS));
 
-        JLabel camIcon = new JLabel(IconFactory.phosphor("video-camera.svg", 36, DiscordTheme.TEXT_MUTED));
+        JLabel camIcon = new JLabel(IconFactory.phosphor("headset.svg", 36, DiscordTheme.SUCCESS));
         camIcon.setAlignmentX(CENTER_ALIGNMENT);
         previewContent.add(camIcon);
         previewContent.add(Box.createVerticalStrut(8));
 
-        JLabel camNotice = new JLabel("Camera chưa được bật");
+        JLabel camNotice = new JLabel("Âm thanh trực tiếp đã sẵn sàng");
         camNotice.setFont(DiscordTheme.bold(14f));
         camNotice.setForeground(DiscordTheme.TEXT_PRIMARY);
         camNotice.setAlignmentX(CENTER_ALIGNMENT);
         previewContent.add(camNotice);
 
-        JLabel camSub = new JLabel("Không có hình ảnh nào được khởi chạy ở màn hình chờ này.");
+        JLabel camSub = new JLabel("Truyền giọng nói PCM thời gian thực qua kết nối TCP.");
         camSub.setFont(DiscordTheme.font(11f));
         camSub.setForeground(DiscordTheme.TEXT_MUTED);
         camSub.setAlignmentX(CENTER_ALIGNMENT);
@@ -132,27 +137,15 @@ public final class MeetLobbyPanel extends JPanel {
         previewBox.add(previewContent);
         previewBox.setAlignmentX(CENTER_ALIGNMENT);
         card.add(previewBox);
-        card.add(Box.createVerticalStrut(14));
-
-        // Notice banner
-        RoundedPanel banner = new RoundedPanel(6);
-        banner.setBackground(DiscordTheme.SUNKEN);
-        banner.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-        banner.setLayout(new BorderLayout());
-        JLabel bannerLabel = new JLabel("Đây là giao diện chờ. Hệ thống TCP/JSON demo chưa truyền media âm thanh.", SwingConstants.CENTER);
-        bannerLabel.setFont(DiscordTheme.font(11f));
-        bannerLabel.setForeground(DiscordTheme.WARNING);
-        banner.add(bannerLabel, BorderLayout.CENTER);
-        banner.setAlignmentX(CENTER_ALIGNMENT);
-        card.add(banner);
         card.add(Box.createVerticalStrut(16));
 
         // Toggle buttons row
         JPanel toggleRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 0));
         toggleRow.setOpaque(false);
 
-        JButton micBtn = new JButton("Micrô: Tắt", IconFactory.phosphor("microphone.svg", 16, DiscordTheme.TEXT_PRIMARY));
+        JButton micBtn = new JButton("Micrô: Bật", IconFactory.phosphor("microphone.svg", 16, DiscordTheme.TEXT_PRIMARY));
         styleDeviceBtn(micBtn);
+        micBtn.setForeground(DiscordTheme.SUCCESS);
         micBtn.addActionListener(e -> {
             micEnabled = !micEnabled;
             micBtn.setText(micEnabled ? "Micrô: Bật" : "Micrô: Tắt");

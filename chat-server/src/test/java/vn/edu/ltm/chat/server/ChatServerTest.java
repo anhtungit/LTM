@@ -534,6 +534,26 @@ class ChatServerTest {
             assertEquals(u1.id(), typingBroadcast.getString("conversationId"));
             assertEquals("Typer One", typingBroadcast.getString("senderName"));
             assertTrue(typingBroadcast.getBoolean("typing", false));
+
+            // User 1 sends CALL_SIGNAL_REQ (INVITE + AUDIO) to User 2
+            out1.println(new Packet("CALL_SIGNAL_REQ", "call-req-1")
+                    .put("conversationId", u2.id())
+                    .put("senderName", u1.displayName())
+                    .put("action", "AUDIO")
+                    .put("data", "AAECAw==").toJsonLine());
+
+            Packet callBroadcast = null;
+            for (int i = 0; i < 5; i++) {
+                Packet p = readNextNonStatus(in2);
+                if ("CALL_SIGNAL_BROADCAST".equals(p.getType())) {
+                    callBroadcast = p;
+                    break;
+                }
+            }
+            assertNotNull(callBroadcast);
+            assertEquals(u1.id(), callBroadcast.getString("conversationId"));
+            assertEquals("AUDIO", callBroadcast.getString("action"));
+            assertEquals("AAECAw==", callBroadcast.getString("data"));
         }
     }
 

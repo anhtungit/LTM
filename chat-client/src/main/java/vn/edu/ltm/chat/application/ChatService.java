@@ -41,6 +41,14 @@ public final class ChatService {
         gateway.sendTyping(conversationId, channel, typing);
     }
 
+    public void setOnCallSignal(java.util.function.Consumer<ChatGateway.CallSignalEvent> callback) {
+        gateway.setOnCallSignal(callback);
+    }
+
+    public void sendCallSignal(String conversationId, String channel, String action, String data) {
+        gateway.sendCallSignal(conversationId, channel, action, data);
+    }
+
     public UserProfile updateProfile(UserProfile user) {
         return gateway.updateProfile(user);
     }

@@ -122,6 +122,13 @@ public final class ChatWorkspace extends JPanel {
     private boolean loadingConversations = false;
     private boolean userManuallyToggledPane = false;
 
+    private final VoiceAudioEngine voiceEngine = new VoiceAudioEngine();
+    private final MeetLobbyPanel meetLobbyPanel = new MeetLobbyPanel(this::startActiveCall, this::showChatView);
+    private final MeetRoomPanel meetRoomPanel = new MeetRoomPanel(this::endActiveCall);
+    private volatile String activeCallConversationId;
+    private volatile String activeCallChannel = "";
+    private javax.swing.JDialog incomingCallDialog;
+
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
         this.chatService = chatService;
@@ -214,6 +221,9 @@ public final class ChatWorkspace extends JPanel {
 
         this.chatService.setOnRealtimeUpdate(this::handleServerBroadcast);
         this.chatService.setOnPresenceUpdate(this::handlePresenceUpdate);
+        this.chatService.setOnTypingUpdate(this::handleTypingEvent);
+        this.chatService.setOnCallSignal(this::handleCallSignal);
+        this.meetRoomPanel.setOnMuteToggle(voiceEngine::setMuted);
         if (isConnected) {
             handleServerBroadcast();
         }
@@ -312,8 +322,8 @@ public final class ChatWorkspace extends JPanel {
     private void initCenterViews() {
         centerHost.setOpaque(false);
         centerHost.add(buildChatArea(), "chat");
-        centerHost.add(new MeetLobbyPanel(this::showMeetRoom, this::showChatView), "meet-lobby");
-        centerHost.add(new MeetRoomPanel(this::showChatView), "meet-room");
+        centerHost.add(meetLobbyPanel, "meet-lobby");
+        centerHost.add(meetRoomPanel, "meet-room");
         centerHost.add(new GamePlaceholderPanel(this::showChatView), "game");
     }
 
@@ -322,11 +332,176 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void showMeetLobby() {
+        Conversation conv = currentConversation();
+        if (conv != null) {
+            meetLobbyPanel.updateRoomInfo(conv.displayName());
+        }
         centerLayout.show(centerHost, "meet-lobby");
     }
 
     private void showMeetRoom() {
+        startActiveCall();
+    }
+
+    private void startActiveCall() {
+        Conversation conv = currentConversation();
+        if (conv == null) {
+            centerLayout.show(centerHost, "meet-room");
+            return;
+        }
+        activeCallConversationId = conv.id();
+        activeCallChannel = conv.isGroup() ? selectedChannel : "";
+
+        voiceEngine.start(base64 -> {
+            String cid = activeCallConversationId;
+            if (cid != null) {
+                chatService.sendCallSignal(cid, activeCallChannel, "AUDIO", base64);
+            }
+        });
+
+        String roomTitle = conv.isGroup() ? ("Kênh thoại · " + conv.displayName()) : ("Cuộc gọi với " + conv.displayName());
+        meetRoomPanel.startSession(roomTitle, user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable());
+        if (!conv.isGroup()) {
+            meetRoomPanel.addOrUpdateParticipant(conv.id(), conv.initials(), conv.displayName(), "Đang đổ chuông...", false);
+        }
+        chatService.sendCallSignal(conv.id(), activeCallChannel, "INVITE", "");
         centerLayout.show(centerHost, "meet-room");
+    }
+
+    private void endActiveCall() {
+        voiceEngine.stop();
+        String duration = meetRoomPanel.stopSessionAndFormatDuration();
+        String cid = activeCallConversationId;
+        String chan = activeCallChannel;
+        activeCallConversationId = null;
+        showChatView();
+
+        if (cid != null) {
+            chatService.sendCallSignal(cid, chan, "LEAVE", duration);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    chatService.send(cid, chan, user, "[call: " + duration + "]");
+                } catch (Exception ignored) {
+                }
+            }).thenRun(() -> SwingUtilities.invokeLater(this::handleServerBroadcast));
+        }
+    }
+
+    private void handleCallSignal(ChatGateway.CallSignalEvent ev) {
+        if (ev == null || (user != null && user.id().equals(ev.senderId()))) {
+            return;
+        }
+        String action = ev.action();
+        if ("AUDIO".equals(action)) {
+            if (ev.conversationId().equals(activeCallConversationId)) {
+                voiceEngine.playChunk(ev.data());
+            }
+            return;
+        }
+
+        if ("INVITE".equals(action)) {
+            if (ev.conversationId().equals(activeCallConversationId)) {
+                meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", true);
+                chatService.sendCallSignal(ev.conversationId(), ev.channel(), "ACCEPT", "");
+                return;
+            }
+            showIncomingCallPrompt(ev);
+        } else if ("ACCEPT".equals(action)) {
+            if (ev.conversationId().equals(activeCallConversationId)) {
+                meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", true);
+            }
+        } else if ("REJECT".equals(action) || "LEAVE".equals(action)) {
+            if (incomingCallDialog != null && incomingCallDialog.isVisible()) {
+                incomingCallDialog.dispose();
+                incomingCallDialog = null;
+            }
+            if (ev.conversationId().equals(activeCallConversationId)) {
+                meetRoomPanel.removeParticipant(ev.senderId());
+                if (meetRoomPanel.getParticipantCount() <= 1) {
+                    voiceEngine.stop();
+                    meetRoomPanel.stopSessionAndFormatDuration();
+                    activeCallConversationId = null;
+                    showChatView();
+                }
+            }
+        }
+    }
+
+    private void showIncomingCallPrompt(ChatGateway.CallSignalEvent ev) {
+        if (incomingCallDialog != null && incomingCallDialog.isVisible()) {
+            incomingCallDialog.dispose();
+        }
+        java.awt.Toolkit.getDefaultToolkit().beep();
+
+        javax.swing.JFrame parent = (javax.swing.JFrame) SwingUtilities.getWindowAncestor(this);
+        javax.swing.JDialog dialog = new javax.swing.JDialog(parent, "Cuộc gọi đến", false);
+        this.incomingCallDialog = dialog;
+        dialog.setUndecorated(true);
+        dialog.setBackground(new Color(0, 0, 0, 0));
+
+        RoundedPanel card = new RoundedPanel(12);
+        card.setBackground(DiscordTheme.SIDEBAR);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(DiscordTheme.SUCCESS, 1),
+                BorderFactory.createEmptyBorder(18, 22, 18, 22)
+        ));
+        card.setLayout(new BorderLayout(0, 12));
+
+        JLabel title = new JLabel(ev.senderName() + " đang gọi thoại cho bạn...");
+        title.setFont(DiscordTheme.bold(15f));
+        title.setForeground(Color.WHITE);
+        title.setIcon(IconFactory.phosphor("phone.svg", 20, DiscordTheme.SUCCESS));
+        title.setIconTextGap(10);
+        card.add(title, BorderLayout.NORTH);
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        actions.setOpaque(false);
+
+        JButton rejectBtn = new JButton("Từ chối");
+        rejectBtn.setFont(DiscordTheme.bold(12f));
+        rejectBtn.setForeground(Color.WHITE);
+        rejectBtn.setBackground(DiscordTheme.DANGER);
+        rejectBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        rejectBtn.addActionListener(e -> {
+            dialog.dispose();
+            incomingCallDialog = null;
+            chatService.sendCallSignal(ev.conversationId(), ev.channel(), "REJECT", "");
+        });
+
+        JButton acceptBtn = new JButton("Nghe máy");
+        acceptBtn.setFont(DiscordTheme.bold(12f));
+        acceptBtn.setForeground(Color.WHITE);
+        acceptBtn.setBackground(DiscordTheme.SUCCESS);
+        acceptBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        acceptBtn.addActionListener(e -> {
+            dialog.dispose();
+            incomingCallDialog = null;
+            conversations.stream()
+                    .filter(c -> c.id().equals(ev.conversationId()))
+                    .findFirst()
+                    .ifPresent(this::selectConversation);
+            activeCallConversationId = ev.conversationId();
+            activeCallChannel = ev.channel() != null ? ev.channel() : "";
+            voiceEngine.start(base64 -> {
+                String cid = activeCallConversationId;
+                if (cid != null) {
+                    chatService.sendCallSignal(cid, activeCallChannel, "AUDIO", base64);
+                }
+            });
+            meetRoomPanel.startSession("Cuộc gọi với " + ev.senderName(), user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable());
+            meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", true);
+            chatService.sendCallSignal(ev.conversationId(), activeCallChannel, "ACCEPT", "");
+            centerLayout.show(centerHost, "meet-room");
+        });
+
+        actions.add(rejectBtn);
+        actions.add(acceptBtn);
+        card.add(actions, BorderLayout.SOUTH);
+
+        dialog.setContentPane(card);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
     }
 
     private void showGames() {

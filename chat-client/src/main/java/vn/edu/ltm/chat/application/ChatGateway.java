@@ -42,6 +42,14 @@ public interface ChatGateway {
 
     record TypingEvent(String conversationId, String channel, String senderId, String senderName, boolean typing) {}
 
+    default void setOnCallSignal(java.util.function.Consumer<CallSignalEvent> callback) {
+    }
+
+    default void sendCallSignal(String conversationId, String channel, String action, String data) {
+    }
+
+    record CallSignalEvent(String conversationId, String channel, String senderId, String senderName, String action, String data) {}
+
     default byte[] downloadAttachment(String messageId, String fileName) {
         return null;
     }
