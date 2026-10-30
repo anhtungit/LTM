@@ -444,7 +444,7 @@ public final class ChatWorkspace extends JPanel {
         try {
             byte[] pcm = java.util.Base64.getDecoder().decode(base64Pcm);
             double rms = VoiceAudioEngine.computeRms(pcm, pcm.length);
-            if (rms > 300.0) {
+            if (rms > 350.0) {
                 SwingUtilities.invokeLater(() -> {
                     meetRoomPanel.setParticipantSpeaking(peerId, true);
                     javax.swing.Timer timer = peerSpeakingTimers.computeIfAbsent(peerId, id -> {
@@ -529,7 +529,7 @@ public final class ChatWorkspace extends JPanel {
                 });
             });
             meetRoomPanel.startSession("Cuộc gọi với " + ev.senderName(), user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable());
-            meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", true);
+            meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", false);
             chatService.sendCallSignal(ev.conversationId(), activeCallChannel, "ACCEPT", "");
             centerLayout.show(centerHost, "meet-room");
         });

@@ -3,18 +3,21 @@ package vn.edu.ltm.chat.presentation;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.DataLine;
+import javax.sound.sampled.Mixer;
 import javax.sound.sampled.SourceDataLine;
 import javax.sound.sampled.TargetDataLine;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Real-time PCM 8kHz 16-bit mono voice capture & playback using JDK javax.sound.sampled.
+ * Real-time PCM 16kHz 16-bit mono voice capture & playback using JDK javax.sound.sampled.
  */
 final class VoiceAudioEngine {
-    // shortcut: 8kHz 16-bit mono PCM over Base64 TCP (~16KB/s), upgrade to UDP Opus when scaling > 5 peers
-    private static final AudioFormat FORMAT = new AudioFormat(8000.0f, 16, 1, true, false);
-    private static final int CHUNK_BYTES = 1600; // 100ms frame
+    // shortcut: 16kHz 16-bit mono PCM over Base64 TCP (~32KB/s), upgrade to UDP Opus when scaling > 5 peers
+    private static final AudioFormat FORMAT = new AudioFormat(16000.0f, 16, 1, true, false);
+    private static final int CHUNK_BYTES = 3200; // 100ms frame at 16kHz 16-bit mono
 
     private volatile boolean running = false;
     private volatile boolean muted = false;
@@ -33,33 +36,91 @@ final class VoiceAudioEngine {
         stop();
         running = true;
 
-        try {
-            DataLine.Info speakerInfo = new DataLine.Info(SourceDataLine.class, FORMAT);
-            if (AudioSystem.isLineSupported(speakerInfo)) {
-                speakerLine = (SourceDataLine) AudioSystem.getLine(speakerInfo);
-                speakerLine.open(FORMAT, CHUNK_BYTES * 4);
-                speakerLine.start();
-                speakerAvailable = true;
+        speakerLine = openBestSpeakerLine();
+        speakerAvailable = (speakerLine != null);
+
+        micLine = openBestMicLine();
+        micAvailable = (micLine != null);
+
+        if (micLine != null) {
+            captureThread = new Thread(() -> captureLoop(onEncodedChunk, onSpeakingState), "voice-mic-capture");
+            captureThread.setDaemon(true);
+            captureThread.start();
+        }
+    }
+
+    private static SourceDataLine openBestSpeakerLine() {
+        DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
+        List<Mixer.Info> candidates = getHardwareMixersFirst();
+
+        for (Mixer.Info mInfo : candidates) {
+            try {
+                Mixer mixer = AudioSystem.getMixer(mInfo);
+                if (mixer.isLineSupported(info)) {
+                    SourceDataLine line = (SourceDataLine) mixer.getLine(info);
+                    line.open(FORMAT, CHUNK_BYTES * 4);
+                    line.start();
+                    return line;
+                }
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
-            speakerAvailable = false;
         }
 
         try {
-            DataLine.Info micInfo = new DataLine.Info(TargetDataLine.class, FORMAT);
-            if (AudioSystem.isLineSupported(micInfo)) {
-                micLine = (TargetDataLine) AudioSystem.getLine(micInfo);
-                micLine.open(FORMAT, CHUNK_BYTES * 4);
-                micLine.start();
-                micAvailable = true;
-
-                captureThread = new Thread(() -> captureLoop(onEncodedChunk, onSpeakingState), "voice-mic-capture");
-                captureThread.setDaemon(true);
-                captureThread.start();
+            if (AudioSystem.isLineSupported(info)) {
+                SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
+                line.open(FORMAT, CHUNK_BYTES * 4);
+                line.start();
+                return line;
             }
         } catch (Exception ignored) {
-            micAvailable = false;
         }
+        return null;
+    }
+
+    private static TargetDataLine openBestMicLine() {
+        DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
+        List<Mixer.Info> candidates = getHardwareMixersFirst();
+
+        for (Mixer.Info mInfo : candidates) {
+            try {
+                Mixer mixer = AudioSystem.getMixer(mInfo);
+                if (mixer.isLineSupported(info)) {
+                    TargetDataLine line = (TargetDataLine) mixer.getLine(info);
+                    line.open(FORMAT, CHUNK_BYTES * 4);
+                    line.start();
+                    return line;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        try {
+            if (AudioSystem.isLineSupported(info)) {
+                TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info);
+                line.open(FORMAT, CHUNK_BYTES * 4);
+                line.start();
+                return line;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static List<Mixer.Info> getHardwareMixersFirst() {
+        List<Mixer.Info> hw = new ArrayList<>();
+        List<Mixer.Info> others = new ArrayList<>();
+        for (Mixer.Info info : AudioSystem.getMixerInfo()) {
+            String name = info.getName();
+            if (name == null || name.startsWith("Port")) continue;
+            if (name.contains("plughw") || name.contains("USB") || name.contains("PCH") || name.contains("Device")) {
+                hw.add(info);
+            } else {
+                others.add(info);
+            }
+        }
+        hw.addAll(others);
+        return hw;
     }
 
     private void captureLoop(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
@@ -72,7 +133,7 @@ final class VoiceAudioEngine {
                 int read = micLine.read(buffer, 0, buffer.length);
                 if (read > 0 && !muted) {
                     double rms = computeRms(buffer, read);
-                    boolean isSound = rms > 300.0; // Voice activity threshold for 16-bit PCM
+                    boolean isSound = rms > 350.0; // Voice activity threshold with AC-RMS
                     long now = System.currentTimeMillis();
 
                     if (isSound) {
@@ -109,16 +170,25 @@ final class VoiceAudioEngine {
 
     public static double computeRms(byte[] pcmData, int length) {
         if (pcmData == null || length < 2) return 0;
-        long sum = 0;
         int samples = length / 2;
+        long sum = 0;
         for (int i = 0; i < samples; i++) {
-            // Little-endian 16-bit PCM
             int low = pcmData[i * 2] & 0xFF;
             int high = pcmData[i * 2 + 1];
             short sample = (short) ((high << 8) | low);
-            sum += (long) sample * sample;
+            sum += sample;
         }
-        return Math.sqrt((double) sum / samples);
+        double mean = (double) sum / samples;
+
+        double varSum = 0;
+        for (int i = 0; i < samples; i++) {
+            int low = pcmData[i * 2] & 0xFF;
+            int high = pcmData[i * 2 + 1];
+            short sample = (short) ((high << 8) | low);
+            double diff = sample - mean;
+            varSum += diff * diff;
+        }
+        return Math.sqrt(varSum / samples);
     }
 
     void playChunk(String base64Pcm) {
