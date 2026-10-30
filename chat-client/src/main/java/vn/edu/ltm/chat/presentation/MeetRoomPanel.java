@@ -84,6 +84,15 @@ public final class MeetRoomPanel extends JPanel {
         updateHeaderStatus();
     }
 
+    public void setParticipantSpeaking(String id, boolean speaking) {
+        if (id == null || id.isBlank()) return;
+        ParticipantEntry existing = participants.get(id);
+        if (existing != null && existing.speaking() != speaking) {
+            participants.put(id, new ParticipantEntry(existing.id(), existing.initials(), existing.name(), existing.sub(), speaking));
+            rebuildGrid();
+        }
+    }
+
     public void removeParticipant(String id) {
         if (id != null && participants.remove(id) != null) {
             rebuildGrid();

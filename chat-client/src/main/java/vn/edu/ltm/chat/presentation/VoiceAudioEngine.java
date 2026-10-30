@@ -26,6 +26,10 @@ final class VoiceAudioEngine {
     private Thread captureThread;
 
     synchronized void start(Consumer<String> onEncodedChunk) {
+        start(onEncodedChunk, null);
+    }
+
+    synchronized void start(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         stop();
         running = true;
 
@@ -49,7 +53,7 @@ final class VoiceAudioEngine {
                 micLine.start();
                 micAvailable = true;
 
-                captureThread = new Thread(() -> captureLoop(onEncodedChunk), "voice-mic-capture");
+                captureThread = new Thread(() -> captureLoop(onEncodedChunk, onSpeakingState), "voice-mic-capture");
                 captureThread.setDaemon(true);
                 captureThread.start();
             }
@@ -58,19 +62,63 @@ final class VoiceAudioEngine {
         }
     }
 
-    private void captureLoop(Consumer<String> onEncodedChunk) {
+    private void captureLoop(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         byte[] buffer = new byte[CHUNK_BYTES];
+        boolean wasSpeaking = false;
+        long lastSoundTime = 0;
+
         while (running && micLine != null && micLine.isOpen()) {
             try {
                 int read = micLine.read(buffer, 0, buffer.length);
-                if (read > 0 && !muted && onEncodedChunk != null) {
-                    byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
-                    onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
+                if (read > 0 && !muted) {
+                    double rms = computeRms(buffer, read);
+                    boolean isSound = rms > 300.0; // Voice activity threshold for 16-bit PCM
+                    long now = System.currentTimeMillis();
+
+                    if (isSound) {
+                        lastSoundTime = now;
+                    }
+
+                    boolean speaking = (now - lastSoundTime) < 400; // Hold speaking state for 400ms to avoid flicker
+                    if (speaking != wasSpeaking) {
+                        wasSpeaking = speaking;
+                        if (onSpeakingState != null) {
+                            onSpeakingState.accept(speaking);
+                        }
+                    }
+
+                    if (onEncodedChunk != null) {
+                        byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
+                        onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
+                    }
+                } else if (muted && wasSpeaking) {
+                    wasSpeaking = false;
+                    if (onSpeakingState != null) {
+                        onSpeakingState.accept(false);
+                    }
                 }
             } catch (Exception e) {
                 break;
             }
         }
+
+        if (wasSpeaking && onSpeakingState != null) {
+            onSpeakingState.accept(false);
+        }
+    }
+
+    public static double computeRms(byte[] pcmData, int length) {
+        if (pcmData == null || length < 2) return 0;
+        long sum = 0;
+        int samples = length / 2;
+        for (int i = 0; i < samples; i++) {
+            // Little-endian 16-bit PCM
+            int low = pcmData[i * 2] & 0xFF;
+            int high = pcmData[i * 2 + 1];
+            short sample = (short) ((high << 8) | low);
+            sum += (long) sample * sample;
+        }
+        return Math.sqrt((double) sum / samples);
     }
 
     void playChunk(String base64Pcm) {
@@ -126,3 +174,4 @@ final class VoiceAudioEngine {
         speakerAvailable = false;
     }
 }
+
