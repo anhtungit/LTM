@@ -36,3 +36,4 @@ class VoiceAudioEngineTest {
         assertTrue(rms > 2000.0, "AC-RMS for voice signal should be high, got: " + rms);
     }
 }
+

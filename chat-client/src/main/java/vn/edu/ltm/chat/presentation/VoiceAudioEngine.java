@@ -51,8 +51,22 @@ final class VoiceAudioEngine {
 
     private static SourceDataLine openBestSpeakerLine() {
         DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
-        List<Mixer.Info> candidates = getHardwareMixersFirst();
 
+        // 1. Try system default mixer first (routes through PipeWire/PulseAudio/OS default device)
+        try {
+            if (AudioSystem.isLineSupported(info)) {
+                SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
+                line.open(FORMAT, CHUNK_BYTES * 4);
+                line.start();
+                System.out.println("[VoiceAudioEngine] Speaker opened via default system mixer: " + line.getLineInfo());
+                return line;
+            }
+        } catch (Exception ex) {
+            System.err.println("[VoiceAudioEngine] Default speaker line unavailable: " + ex.getMessage());
+        }
+
+        // 2. Fallback to candidate hardware mixers if default is unavailable
+        List<Mixer.Info> candidates = getHardwareMixersFirst();
         for (Mixer.Info mInfo : candidates) {
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
@@ -60,28 +74,33 @@ final class VoiceAudioEngine {
                     SourceDataLine line = (SourceDataLine) mixer.getLine(info);
                     line.open(FORMAT, CHUNK_BYTES * 4);
                     line.start();
+                    System.out.println("[VoiceAudioEngine] Speaker fallback opened on: " + mInfo.getName());
                     return line;
                 }
             } catch (Exception ignored) {
             }
-        }
-
-        try {
-            if (AudioSystem.isLineSupported(info)) {
-                SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
-                line.open(FORMAT, CHUNK_BYTES * 4);
-                line.start();
-                return line;
-            }
-        } catch (Exception ignored) {
         }
         return null;
     }
 
     private static TargetDataLine openBestMicLine() {
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
-        List<Mixer.Info> candidates = getHardwareMixersFirst();
 
+        // 1. Try system default mixer first (routes through PipeWire/PulseAudio/OS default mic)
+        try {
+            if (AudioSystem.isLineSupported(info)) {
+                TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info);
+                line.open(FORMAT, CHUNK_BYTES * 4);
+                line.start();
+                System.out.println("[VoiceAudioEngine] Mic opened via default system mixer: " + line.getLineInfo());
+                return line;
+            }
+        } catch (Exception ex) {
+            System.err.println("[VoiceAudioEngine] Default mic line unavailable: " + ex.getMessage());
+        }
+
+        // 2. Fallback to candidate hardware mixers if default is unavailable
+        List<Mixer.Info> candidates = getHardwareMixersFirst();
         for (Mixer.Info mInfo : candidates) {
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
@@ -89,20 +108,11 @@ final class VoiceAudioEngine {
                     TargetDataLine line = (TargetDataLine) mixer.getLine(info);
                     line.open(FORMAT, CHUNK_BYTES * 4);
                     line.start();
+                    System.out.println("[VoiceAudioEngine] Mic fallback opened on: " + mInfo.getName());
                     return line;
                 }
             } catch (Exception ignored) {
             }
-        }
-
-        try {
-            if (AudioSystem.isLineSupported(info)) {
-                TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info);
-                line.open(FORMAT, CHUNK_BYTES * 4);
-                line.start();
-                return line;
-            }
-        } catch (Exception ignored) {
         }
         return null;
     }
@@ -198,7 +208,8 @@ final class VoiceAudioEngine {
         try {
             byte[] pcm = Base64.getDecoder().decode(base64Pcm);
             out.write(pcm, 0, pcm.length);
-        } catch (Exception ignored) {
+        } catch (Exception ex) {
+            System.err.println("[VoiceAudioEngine] Error playing audio chunk: " + ex.getMessage());
         }
     }
 
