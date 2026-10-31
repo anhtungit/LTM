@@ -66,13 +66,13 @@ public final class VoiceAudioEngine {
 
         for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
             String name = mInfo.getName();
+            String desc = mInfo.getDescription();
             if (name == null || name.startsWith("Port") || name.contains("[default]")) continue;
-            // Filter out unused secondary dummy HDMI lines (:0,7 and :0,8) on Linux
-            if (name.contains(":0,7") || name.contains(":0,8")) continue;
+            if (isUnpluggedLinuxHdmi(name, desc)) continue;
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
-                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription(), false)));
+                    list.add(new AudioDevice(name, formatDeviceName(name, desc, false)));
                 }
             } catch (Exception ignored) {
             }
@@ -80,31 +80,94 @@ public final class VoiceAudioEngine {
         return list;
     }
 
-    private static String formatDeviceName(String name, String desc, boolean isInput) {
+    static boolean isUnpluggedLinuxHdmi(String name, String desc) {
+        if (name == null || desc == null || (!name.contains("[plughw:") && !name.contains("[hw:"))) {
+            return false;
+        }
+        String[] parts = parseAlsaDescription(desc);
+        if (parts == null) return false;
+        String pcmName = parts[1];
+        String subName = parts[2];
+        // On Linux ALSA, an HDMI PCM whose subdevice name merely repeats "HDMI x" has no EDID monitor connected
+        return pcmName.toUpperCase().startsWith("HDMI") && pcmName.equalsIgnoreCase(subName);
+    }
+
+    static String formatDeviceName(String name, String desc, boolean isInput) {
         if (name == null || name.isBlank()) {
-            return isInput ? "Microphone" : "Loa / Tai nghe";
+            return isInput ? "Microphone" : "Speakers";
         }
 
-        String upper = name.toUpperCase();
-        String descUpper = (desc != null) ? desc.toUpperCase() : "";
+        // Only transform raw Linux ALSA identifiers of the form "<id> [plughw:<card>,<dev>]".
+        // On Windows, macOS, or native sound servers, return the OS-provided name directly.
+        if (!name.contains("[plughw:") && !name.contains("[hw:")) {
+            return name;
+        }
 
-        // Format Linux ALSA hardware mixer names to match GNOME / OS friendly names exactly
-        if (upper.contains("PLUGHW") || upper.contains("HW:") || upper.contains("ALSA")) {
-            boolean isUsb = upper.contains("DEVICE") || upper.contains("USB") || descUpper.contains("USB");
-            boolean isHdmi = upper.contains("HDMI") || descUpper.contains("HDMI");
+        String[] parts = parseAlsaDescription(desc);
+        if (parts == null) {
+            return name;
+        }
 
-            if (isInput) {
-                if (isUsb) return "Microphone – USB Audio Device";
-                return "Microphone – Built-in Audio";
-            } else {
-                if (isHdmi) return "HDMI / DisplayPort – Built-in Audio";
-                if (isUsb) return "Speakers – USB Audio Device";
-                return "Speakers – Built-in Audio";
+        String cardName = parts[0];
+        String pcmName = parts[1];
+        String subName = parts[2];
+
+        int cardIdx = parseCardIndex(name);
+        if (cardIdx >= 0 && isLinuxInternalCard(cardIdx)) {
+            cardName = "Built-in Audio";
+        }
+
+        if (isInput) {
+            return "Microphone – " + cardName;
+        }
+
+        String pcmUpper = pcmName.toUpperCase();
+        if (pcmUpper.contains("HDMI") || pcmUpper.contains("DISPLAYPORT")) {
+            if (!subName.isEmpty() && !subName.equalsIgnoreCase(pcmName)) {
+                return "HDMI / DisplayPort (" + subName + ") – " + cardName;
+            }
+            return "HDMI / DisplayPort – " + cardName;
+        }
+
+        return "Speakers – " + cardName;
+    }
+
+    private static String[] parseAlsaDescription(String desc) {
+        if (desc == null) return null;
+        String clean = desc.startsWith("Direct Audio Device:")
+                ? desc.substring("Direct Audio Device:".length()).trim()
+                : desc.trim();
+        String[] tokens = clean.split(",", 3);
+        if (tokens.length < 3) return null;
+        return new String[]{tokens[0].trim(), tokens[1].trim(), tokens[2].trim()};
+    }
+
+    private static int parseCardIndex(String mixerName) {
+        int idx = mixerName.indexOf("hw:");
+        if (idx < 0) return -1;
+        int start = idx + 3;
+        int comma = mixerName.indexOf(',', start);
+        if (comma < 0) return -1;
+        try {
+            return Integer.parseInt(mixerName.substring(start, comma).trim());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean isLinuxInternalCard(int cardIdx) {
+        java.nio.file.Path udevPath = java.nio.file.Paths.get("/run/udev/data/+sound:card" + cardIdx);
+        if (java.nio.file.Files.isReadable(udevPath)) {
+            try {
+                for (String line : java.nio.file.Files.readAllLines(udevPath)) {
+                    if ("E:SOUND_FORM_FACTOR=internal".equals(line.trim())) {
+                        return true;
+                    }
+                }
+            } catch (Exception ignored) {
             }
         }
-
-        // On Windows / macOS / other systems, keep the clean OS-provided name
-        return name;
+        return false;
     }
 
     public static String getSelectedMicId() {

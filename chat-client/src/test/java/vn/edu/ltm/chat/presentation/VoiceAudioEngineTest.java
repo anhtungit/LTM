@@ -2,6 +2,8 @@ package vn.edu.ltm.chat.presentation;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VoiceAudioEngineTest {
@@ -39,23 +41,66 @@ class VoiceAudioEngineTest {
     @Test
     void testAvailableDevicesHaveFriendlyNames() {
         var inputs = VoiceAudioEngine.getAvailableInputDevices();
-        assertTrue(!inputs.isEmpty());
-        // Verify default device is present
+        assertFalse(inputs.isEmpty());
         assertTrue(inputs.stream().anyMatch(d -> "default".equals(d.id())));
 
         var outputs = VoiceAudioEngine.getAvailableOutputDevices();
-        assertTrue(!outputs.isEmpty());
+        assertFalse(outputs.isEmpty());
         assertTrue(outputs.stream().anyMatch(d -> "default".equals(d.id())));
 
-        // Verify none of the output devices have raw technical ALSA bracket names in their displayName
         for (var out : outputs) {
-            assertTrue(!out.displayName().contains("[plughw:"),
+            assertFalse(out.displayName().contains("[plughw:"),
                     "Output device display name should be user-friendly: " + out.displayName());
         }
         for (var in : inputs) {
-            assertTrue(!in.displayName().contains("[plughw:"),
+            assertFalse(in.displayName().contains("[plughw:"),
                     "Input device display name should be user-friendly: " + in.displayName());
         }
+    }
+
+    @Test
+    void testDynamicDeviceFormattingForNewHardwareAndWindows() {
+        // 1. Windows & macOS native names must be preserved verbatim
+        assertEquals(
+                "Microphone (2- Realtek(R) Audio)",
+                VoiceAudioEngine.formatDeviceName("Microphone (2- Realtek(R) Audio)", "DirectSound Capture", true)
+        );
+        assertEquals(
+                "Headphones (Razer BlackShark V2)",
+                VoiceAudioEngine.formatDeviceName("Headphones (Razer BlackShark V2)", "DirectSound Playback", false)
+        );
+        assertEquals(
+                "MacBook Pro Microphone",
+                VoiceAudioEngine.formatDeviceName("MacBook Pro Microphone", "CoreAudio", true)
+        );
+
+        // 2. Arbitrary new external devices plugged into Linux ALSA must dynamically use their hardware card name
+        assertEquals(
+                "Microphone – HyperX QuadCast",
+                VoiceAudioEngine.formatDeviceName(
+                        "QuadCast [plughw:2,0]",
+                        "Direct Audio Device: HyperX QuadCast, USB Audio, USB Audio",
+                        true
+                )
+        );
+        assertEquals(
+                "Speakers – Sony WH-1000XM5",
+                VoiceAudioEngine.formatDeviceName(
+                        "WH1000XM5 [plughw:3,0]",
+                        "Direct Audio Device: Sony WH-1000XM5, USB Audio, USB Audio",
+                        false
+                )
+        );
+
+        // 3. Connected vs unplugged HDMI detection on Linux ALSA
+        assertFalse(VoiceAudioEngine.isUnpluggedLinuxHdmi(
+                "PCH [plughw:0,3]",
+                "Direct Audio Device: HDA Intel PCH, HDMI 0, LG HD"
+        ));
+        assertTrue(VoiceAudioEngine.isUnpluggedLinuxHdmi(
+                "PCH [plughw:0,7]",
+                "Direct Audio Device: HDA Intel PCH, HDMI 1, HDMI 1"
+        ));
     }
 }
 
