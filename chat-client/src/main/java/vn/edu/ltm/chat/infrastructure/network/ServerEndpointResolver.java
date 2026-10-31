@@ -89,22 +89,15 @@ public final class ServerEndpointResolver {
             return localSocket;
         }
 
-        // 3. Check GitHub Gist / Cloud Registry URL (for cross-Wi-Fi / Internet ngrok tunnels)
-        String regUrl = System.getProperty("chat.server.registry.url",
-                System.getenv().getOrDefault("CHAT_SERVER_REGISTRY_URL",
-                        props.getProperty("server.registry.url", "")));
-        if (regUrl != null && !regUrl.isBlank()) {
-            List<Endpoint> registryEndpoints = fetchEndpointsFromRegistryUrl(regUrl.trim());
-            for (Endpoint ep : registryEndpoints) {
-                if ("127.0.0.1".equals(ep.host()) || "localhost".equalsIgnoreCase(ep.host())) {
-                    continue; // Already checked in step 2
-                }
-                Socket s = tryOpenSocket(ep, 1800);
-                if (s != null) return s;
-            }
+        // 3. LAN / Wi-Fi UDP Broadcast Auto-Discovery
+        int udpPort = parsePort(props.getProperty("server.discovery.udp.port"), DEFAULT_UDP_PORT);
+        Endpoint discovered = discoverViaUdp(udpPort, 600);
+        if (discovered != null) {
+            Socket s = tryOpenSocket(discovered, 1200);
+            if (s != null) return s;
         }
 
-        // 4. Configured static cloud host in server.properties
+        // 4. Configured static host in server.properties
         String propHost = props.getProperty("server.host", "").trim();
         if (!propHost.isEmpty() && !"127.0.0.1".equals(propHost) && !"localhost".equalsIgnoreCase(propHost)) {
             Endpoint ep = parseEndpoint(propHost, propPort, "cloud");
@@ -114,12 +107,19 @@ public final class ServerEndpointResolver {
             }
         }
 
-        // 5. LAN / Wi-Fi UDP Broadcast Auto-Discovery
-        int udpPort = parsePort(props.getProperty("server.discovery.udp.port"), DEFAULT_UDP_PORT);
-        Endpoint discovered = discoverViaUdp(udpPort, 600);
-        if (discovered != null) {
-            Socket s = tryOpenSocket(discovered, 1200);
-            if (s != null) return s;
+        // 5. Optional Registry URL (only if explicitly configured)
+        String regUrl = System.getProperty("chat.server.registry.url",
+                System.getenv().getOrDefault("CHAT_SERVER_REGISTRY_URL",
+                        props.getProperty("server.registry.url", "")));
+        if (regUrl != null && !regUrl.isBlank()) {
+            List<Endpoint> registryEndpoints = fetchEndpointsFromRegistryUrl(regUrl.trim());
+            for (Endpoint ep : registryEndpoints) {
+                if ("127.0.0.1".equals(ep.host()) || "localhost".equalsIgnoreCase(ep.host())) {
+                    continue;
+                }
+                Socket s = tryOpenSocket(ep, 1800);
+                if (s != null) return s;
+            }
         }
 
         throw new IOException("Không tìm thấy máy chủ chat khả dụng.");

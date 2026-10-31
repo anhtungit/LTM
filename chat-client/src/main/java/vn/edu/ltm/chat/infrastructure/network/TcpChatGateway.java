@@ -474,13 +474,10 @@ public final class TcpChatGateway implements ChatGateway {
                     System.arraycopy(hdr, 0, packetBytes, 0, hdr.length);
                     System.arraycopy(pcm, 0, packetBytes, hdr.length, pcm.length);
                     ds.send(new DatagramPacket(packetBytes, packetBytes.length, s.getInetAddress(), s.getPort()));
-                    if (udpVoiceVerified) {
-                        return;
-                    }
-                    sendUdpVoiceReg();
                 } catch (Exception ignored) {
                 }
             }
+            return;
         } else {
             sendUdpVoiceReg();
         }
