@@ -16,8 +16,6 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
-import javax.swing.event.PopupMenuEvent;
-import javax.swing.event.PopupMenuListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -47,19 +45,22 @@ public final class VoiceSettingsDialog extends JDialog {
 
     private void initUI() {
         setUndecorated(true);
-        setBackground(new Color(0, 0, 0, 0));
+        setBackground(DiscordTheme.SIDEBAR);
+        getRootPane().setOpaque(true);
+        getRootPane().setBackground(DiscordTheme.SIDEBAR);
 
-        RoundedPanel container = new RoundedPanel(12);
+        JPanel container = new JPanel(new BorderLayout(0, 16));
+        container.setOpaque(true);
         container.setBackground(DiscordTheme.SIDEBAR);
         container.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1),
                 BorderFactory.createEmptyBorder(20, 24, 20, 24)
         ));
-        container.setLayout(new BorderLayout(0, 16));
 
         // Header
         JPanel header = new JPanel(new BorderLayout());
-        header.setOpaque(false);
+        header.setOpaque(true);
+        header.setBackground(DiscordTheme.SIDEBAR);
         JLabel title = new JLabel("Cài đặt Âm thanh & Giọng nói", IconFactory.phosphor("headset.svg", 20, DiscordTheme.SUCCESS), JLabel.LEFT);
         title.setIconTextGap(10);
         title.setFont(DiscordTheme.bold(16f));
@@ -79,7 +80,8 @@ public final class VoiceSettingsDialog extends JDialog {
 
         // Content
         JPanel body = new JPanel();
-        body.setOpaque(false);
+        body.setOpaque(true);
+        body.setBackground(DiscordTheme.SIDEBAR);
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
         // 1. Microphone section
@@ -88,7 +90,6 @@ public final class VoiceSettingsDialog extends JDialog {
 
         populateMicCombo();
         styleComboBox(micCombo);
-        micCombo.addPopupMenuListener(new SimplePopupRefreshListener(this::populateMicCombo));
         micCombo.addActionListener(e -> {
             if (updatingCombos) return;
             VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) micCombo.getSelectedItem();
@@ -124,7 +125,6 @@ public final class VoiceSettingsDialog extends JDialog {
 
         populateSpkCombo();
         styleComboBox(spkCombo);
-        spkCombo.addPopupMenuListener(new SimplePopupRefreshListener(this::populateSpkCombo));
         spkCombo.addActionListener(e -> {
             if (updatingCombos) return;
             VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) spkCombo.getSelectedItem();
@@ -150,7 +150,8 @@ public final class VoiceSettingsDialog extends JDialog {
             VoiceAudioEngine.testSpeaker(devId);
         });
         JPanel btnHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        btnHolder.setOpaque(false);
+        btnHolder.setOpaque(true);
+        btnHolder.setBackground(DiscordTheme.SIDEBAR);
         btnHolder.add(testSpkBtn);
         body.add(btnHolder);
 
@@ -158,7 +159,8 @@ public final class VoiceSettingsDialog extends JDialog {
 
         // Footer
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
-        footer.setOpaque(false);
+        footer.setOpaque(true);
+        footer.setBackground(DiscordTheme.SIDEBAR);
 
         JButton doneBtn = new JButton("Hoàn tất");
         doneBtn.setFont(DiscordTheme.bold(12f));
@@ -246,8 +248,21 @@ public final class VoiceSettingsDialog extends JDialog {
         box.setFont(DiscordTheme.font(12f));
         box.setForeground(Color.WHITE);
         box.setBackground(new Color(0x2B, 0x2D, 0x31));
+        box.setOpaque(true);
+        box.setLightWeightPopupEnabled(false);
         box.setMaximumSize(new Dimension(Short.MAX_VALUE, 36));
         box.setAlignmentX(LEFT_ALIGNMENT);
+    }
+
+    private void updateLevelBarSafe(int level) {
+        SwingUtilities.invokeLater(() -> {
+            if (micCombo.isPopupVisible() || spkCombo.isPopupVisible()) {
+                return;
+            }
+            if (micLevelBar.getValue() != level) {
+                micLevelBar.setValue(level);
+            }
+        });
     }
 
     private synchronized void startMicLevelMonitor(String micId) {
@@ -260,7 +275,7 @@ public final class VoiceSettingsDialog extends JDialog {
                     while (testingMic && voiceEngine.isRunning()) {
                         double rms = voiceEngine.getCurrentMicRms();
                         int level = Math.min(100, (int) (rms / 40.0));
-                        SwingUtilities.invokeLater(() -> micLevelBar.setValue(level));
+                        updateLevelBarSafe(level);
                         Thread.sleep(80);
                     }
                     return;
@@ -276,7 +291,7 @@ public final class VoiceSettingsDialog extends JDialog {
                     if (read > 0) {
                         double rms = VoiceAudioEngine.computeRms(buf, read);
                         int level = Math.min(100, (int) (rms / 40.0));
-                        SwingUtilities.invokeLater(() -> micLevelBar.setValue(level));
+                        updateLevelBarSafe(level);
                     }
                 }
             } catch (Exception ignored) {
@@ -305,26 +320,5 @@ public final class VoiceSettingsDialog extends JDialog {
         Timer t = new Timer(150, e -> startMicLevelMonitor(micId));
         t.setRepeats(false);
         t.start();
-    }
-
-    private static final class SimplePopupRefreshListener implements PopupMenuListener {
-        private final Runnable onOpen;
-
-        SimplePopupRefreshListener(Runnable onOpen) {
-            this.onOpen = onOpen;
-        }
-
-        @Override
-        public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
-            onOpen.run();
-        }
-
-        @Override
-        public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
-        }
-
-        @Override
-        public void popupMenuCanceled(PopupMenuEvent e) {
-        }
     }
 }
