@@ -1,14 +1,23 @@
 package vn.edu.ltm.chat.presentation;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.Mixer;
 import javax.sound.sampled.SourceDataLine;
 import javax.sound.sampled.TargetDataLine;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -33,9 +42,10 @@ public final class VoiceAudioEngine {
     private volatile boolean muted = false;
     private volatile boolean micAvailable = false;
     private volatile boolean speakerAvailable = false;
+    private volatile double currentMicRms = 0.0;
 
-    private TargetDataLine micLine;
-    private SourceDataLine speakerLine;
+    private volatile TargetDataLine micLine;
+    private volatile SourceDataLine speakerLine;
     private Thread captureThread;
     private Consumer<String> activeEncodedChunkConsumer;
     private Consumer<Boolean> activeSpeakingStateConsumer;
@@ -43,8 +53,14 @@ public final class VoiceAudioEngine {
     public static List<AudioDevice> getAvailableInputDevices() {
         List<AudioDevice> list = new ArrayList<>();
         list.add(new AudioDevice("default", "Mặc định hệ thống"));
-        DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
 
+        List<AudioDevice> pwDevices = queryPipeWireDevices(true);
+        if (!pwDevices.isEmpty()) {
+            list.addAll(pwDevices);
+            return list;
+        }
+
+        DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
         for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
             String name = mInfo.getName();
             if (name == null || name.startsWith("Port") || name.contains("[default]")) continue;
@@ -62,8 +78,14 @@ public final class VoiceAudioEngine {
     public static List<AudioDevice> getAvailableOutputDevices() {
         List<AudioDevice> list = new ArrayList<>();
         list.add(new AudioDevice("default", "Mặc định hệ thống"));
-        DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
 
+        List<AudioDevice> pwDevices = queryPipeWireDevices(false);
+        if (!pwDevices.isEmpty()) {
+            list.addAll(pwDevices);
+            return list;
+        }
+
+        DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
         for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
             String name = mInfo.getName();
             String desc = mInfo.getDescription();
@@ -78,6 +100,348 @@ public final class VoiceAudioEngine {
             }
         }
         return list;
+    }
+
+    private static List<AudioDevice> queryPipeWireDevices(boolean isInput) {
+        String json = runPwDump();
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        return parsePipeWireDevices(json, isInput);
+    }
+
+    static List<AudioDevice> parsePipeWireDevices(String pwDumpJson, boolean isInput) {
+        List<AudioDevice> result = new ArrayList<>();
+        if (pwDumpJson == null || pwDumpJson.isBlank()) return result;
+
+        try {
+            JsonElement rootEl = JsonParser.parseString(pwDumpJson);
+            if (!rootEl.isJsonArray()) return result;
+            JsonArray arr = rootEl.getAsJsonArray();
+
+            Set<Integer> cardsWithRoutes = new HashSet<>();
+            Set<String> seenIds = new HashSet<>();
+            String targetDir = isInput ? "Input" : "Output";
+
+            // 1. Extract available EnumRoutes from Audio/Device cards (matches GNOME Sound panel 1:1)
+            for (JsonElement el : arr) {
+                if (!el.isJsonObject()) continue;
+                JsonObject obj = el.getAsJsonObject();
+                JsonObject info = obj.has("info") && obj.get("info").isJsonObject() ? obj.getAsJsonObject("info") : null;
+                if (info == null) continue;
+                JsonObject props = info.has("props") && info.get("props").isJsonObject() ? info.getAsJsonObject("props") : null;
+                if (props == null) continue;
+
+                if (!"Audio/Device".equals(getJsonString(props, "media.class"))) continue;
+
+                int cardId = getJsonInt(obj, "id", -1);
+                String cardName = getJsonString(props, "device.name");
+                String cardDesc = firstNonBlank(
+                        getJsonString(props, "device.description"),
+                        getJsonString(props, "device.nick"),
+                        getJsonString(props, "device.alias"),
+                        cardName
+                );
+                if (cardName == null || cardDesc == null) continue;
+
+                JsonObject params = info.has("params") && info.get("params").isJsonObject() ? info.getAsJsonObject("params") : null;
+                JsonArray enumRoutes = (params != null && params.has("EnumRoute") && params.get("EnumRoute").isJsonArray())
+                        ? params.getAsJsonArray("EnumRoute") : null;
+                if (enumRoutes == null) continue;
+
+                for (JsonElement rEl : enumRoutes) {
+                    if (!rEl.isJsonObject()) continue;
+                    JsonObject route = rEl.getAsJsonObject();
+                    String dir = getJsonString(route, "direction");
+                    if (!targetDir.equalsIgnoreCase(dir)) continue;
+
+                    String avail = getJsonString(route, "available");
+                    if ("no".equalsIgnoreCase(avail)) continue;
+
+                    String routeName = getJsonString(route, "name");
+                    String routeDesc = getJsonString(route, "description");
+                    if (routeName == null || routeDesc == null) continue;
+
+                    String id = "pw:route:" + cardName + ":" + targetDir + ":" + routeName;
+                    if (seenIds.add(id)) {
+                        result.add(new AudioDevice(id, routeDesc + " – " + cardDesc));
+                        if (cardId >= 0) {
+                            cardsWithRoutes.add(cardId);
+                        }
+                    }
+                }
+            }
+
+            // 2. Include standalone Audio/Sink or Audio/Source nodes whose card had no EnumRoutes
+            String targetClass = isInput ? "Audio/Source" : "Audio/Sink";
+            for (JsonElement el : arr) {
+                if (!el.isJsonObject()) continue;
+                JsonObject obj = el.getAsJsonObject();
+                JsonObject info = obj.has("info") && obj.get("info").isJsonObject() ? obj.getAsJsonObject("info") : null;
+                if (info == null) continue;
+                JsonObject props = info.has("props") && info.get("props").isJsonObject() ? info.getAsJsonObject("props") : null;
+                if (props == null) continue;
+
+                if (!targetClass.equals(getJsonString(props, "media.class"))) continue;
+
+                int devId = getJsonInt(props, "device.id", -1);
+                if (devId >= 0 && cardsWithRoutes.contains(devId)) continue;
+
+                String nodeName = getJsonString(props, "node.name");
+                String nodeDesc = firstNonBlank(
+                        getJsonString(props, "node.description"),
+                        getJsonString(props, "node.nick"),
+                        nodeName
+                );
+                if (nodeName == null || nodeDesc == null) continue;
+
+                String id = "pw:node:" + nodeName;
+                if (seenIds.add(id)) {
+                    result.add(new AudioDevice(id, nodeDesc));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return result;
+    }
+
+    private static void activatePipeWireDevice(String deviceId, boolean isInput) {
+        if (deviceId == null || !deviceId.startsWith("pw:")) return;
+        try {
+            String json = runPwDump();
+            if (json == null || json.isBlank()) return;
+            JsonArray arr = JsonParser.parseString(json).getAsJsonArray();
+            String targetClass = isInput ? "Audio/Source" : "Audio/Sink";
+
+            if (deviceId.startsWith("pw:node:")) {
+                String nodeName = deviceId.substring("pw:node:".length());
+                int nodeId = findPipeWireNodeByName(arr, targetClass, nodeName);
+                if (nodeId >= 0) {
+                    runWpctl("set-default", String.valueOf(nodeId));
+                }
+                return;
+            }
+
+            if (deviceId.startsWith("pw:route:")) {
+                String rest = deviceId.substring("pw:route:".length());
+                String[] parts = rest.split(":", 3);
+                if (parts.length < 3) return;
+                String cardName = parts[0];
+                String dir = parts[1];
+                String routeName = parts[2];
+
+                JsonObject cardObj = findPipeWireCard(arr, cardName);
+                if (cardObj == null) return;
+                int cardId = getJsonInt(cardObj, "id", -1);
+                if (cardId < 0) return;
+
+                JsonObject info = cardObj.getAsJsonObject("info");
+                JsonObject params = info != null && info.has("params") ? info.getAsJsonObject("params") : null;
+                if (params == null) return;
+
+                JsonObject targetRoute = null;
+                JsonArray enumRoutes = params.has("EnumRoute") && params.get("EnumRoute").isJsonArray()
+                        ? params.getAsJsonArray("EnumRoute") : null;
+                if (enumRoutes != null) {
+                    for (JsonElement rEl : enumRoutes) {
+                        if (!rEl.isJsonObject()) continue;
+                        JsonObject r = rEl.getAsJsonObject();
+                        if (dir.equalsIgnoreCase(getJsonString(r, "direction"))
+                                && routeName.equals(getJsonString(r, "name"))) {
+                            targetRoute = r;
+                            break;
+                        }
+                    }
+                }
+                if (targetRoute == null) return;
+
+                int routeIndex = getJsonInt(targetRoute, "index", -1);
+                Set<Integer> routeProfiles = getJsonIntSet(targetRoute, "profiles");
+                Set<Integer> routeDevices = getJsonIntSet(targetRoute, "devices");
+
+                int activeProfile = -1;
+                if (params.has("Profile") && params.get("Profile").isJsonArray()) {
+                    JsonArray profArr = params.getAsJsonArray("Profile");
+                    if (!profArr.isEmpty() && profArr.get(0).isJsonObject()) {
+                        activeProfile = getJsonInt(profArr.get(0).getAsJsonObject(), "index", -1);
+                    }
+                }
+
+                // Switch card profile if the current profile does not support the chosen route
+                if (!routeProfiles.isEmpty() && !routeProfiles.contains(activeProfile)) {
+                    int bestProfile = selectBestProfile(params, routeProfiles);
+                    if (bestProfile >= 0) {
+                        runWpctl("set-profile", String.valueOf(cardId), String.valueOf(bestProfile));
+                        Thread.sleep(120);
+                        String refreshed = runPwDump();
+                        if (refreshed != null && !refreshed.isBlank()) {
+                            arr = JsonParser.parseString(refreshed).getAsJsonArray();
+                        }
+                    }
+                }
+
+                if (routeIndex >= 0) {
+                    runWpctl("set-route", String.valueOf(cardId), String.valueOf(routeIndex));
+                }
+
+                int nodeId = findPipeWireNodeForCard(arr, targetClass, cardId, routeDevices);
+                if (nodeId >= 0) {
+                    runWpctl("set-default", String.valueOf(nodeId));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static int selectBestProfile(JsonObject params, Set<Integer> allowedProfiles) {
+        int bestIdx = -1;
+        int bestPriority = Integer.MIN_VALUE;
+        if (params.has("EnumProfile") && params.get("EnumProfile").isJsonArray()) {
+            for (JsonElement pEl : params.getAsJsonArray("EnumProfile")) {
+                if (!pEl.isJsonObject()) continue;
+                JsonObject p = pEl.getAsJsonObject();
+                int idx = getJsonInt(p, "index", -1);
+                if (!allowedProfiles.contains(idx)) continue;
+                String avail = getJsonString(p, "available");
+                if ("no".equalsIgnoreCase(avail)) continue;
+                int prio = getJsonInt(p, "priority", 0);
+                if (prio >= bestPriority) {
+                    bestPriority = prio;
+                    bestIdx = idx;
+                }
+            }
+        }
+        return bestIdx;
+    }
+
+    private static JsonObject findPipeWireCard(JsonArray arr, String cardName) {
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject obj = el.getAsJsonObject();
+            JsonObject info = obj.has("info") && obj.get("info").isJsonObject() ? obj.getAsJsonObject("info") : null;
+            if (info == null) continue;
+            JsonObject props = info.has("props") && info.get("props").isJsonObject() ? info.getAsJsonObject("props") : null;
+            if (props == null) continue;
+            if ("Audio/Device".equals(getJsonString(props, "media.class"))
+                    && cardName.equals(getJsonString(props, "device.name"))) {
+                return obj;
+            }
+        }
+        return null;
+    }
+
+    private static int findPipeWireNodeByName(JsonArray arr, String targetClass, String nodeName) {
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject obj = el.getAsJsonObject();
+            JsonObject info = obj.has("info") && obj.get("info").isJsonObject() ? obj.getAsJsonObject("info") : null;
+            if (info == null) continue;
+            JsonObject props = info.has("props") && info.get("props").isJsonObject() ? info.getAsJsonObject("props") : null;
+            if (props == null) continue;
+            if (targetClass.equals(getJsonString(props, "media.class"))
+                    && nodeName.equals(getJsonString(props, "node.name"))) {
+                return getJsonInt(obj, "id", -1);
+            }
+        }
+        return -1;
+    }
+
+    private static int findPipeWireNodeForCard(JsonArray arr, String targetClass, int cardId, Set<Integer> preferredProfileDevices) {
+        int fallbackId = -1;
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject obj = el.getAsJsonObject();
+            JsonObject info = obj.has("info") && obj.get("info").isJsonObject() ? obj.getAsJsonObject("info") : null;
+            if (info == null) continue;
+            JsonObject props = info.has("props") && info.get("props").isJsonObject() ? info.getAsJsonObject("props") : null;
+            if (props == null) continue;
+            if (!targetClass.equals(getJsonString(props, "media.class"))) continue;
+            if (getJsonInt(props, "device.id", -1) != cardId) continue;
+
+            int nodeId = getJsonInt(obj, "id", -1);
+            int profDev = getJsonInt(props, "card.profile.device", -1);
+            if (!preferredProfileDevices.isEmpty() && preferredProfileDevices.contains(profDev)) {
+                return nodeId;
+            }
+            if (fallbackId < 0) {
+                fallbackId = nodeId;
+            }
+        }
+        return fallbackId;
+    }
+
+    private static String runPwDump() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("linux")) return null;
+        try {
+            Process proc = new ProcessBuilder("pw-dump")
+                    .redirectErrorStream(false)
+                    .start();
+            byte[] bytes = proc.getInputStream().readAllBytes();
+            boolean finished = proc.waitFor(1500, TimeUnit.MILLISECONDS);
+            if (!finished) {
+                proc.destroyForcibly();
+                return null;
+            }
+            if (proc.exitValue() != 0) return null;
+            return new String(bytes, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void runWpctl(String... args) {
+        try {
+            List<String> cmd = new ArrayList<>();
+            cmd.add("wpctl");
+            for (String a : args) cmd.add(a);
+            Process proc = new ProcessBuilder(cmd).start();
+            if (!proc.waitFor(1000, TimeUnit.MILLISECONDS)) {
+                proc.destroyForcibly();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String getJsonString(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key)) return null;
+        JsonElement el = obj.get(key);
+        return (el != null && el.isJsonPrimitive()) ? el.getAsString() : null;
+    }
+
+    private static int getJsonInt(JsonObject obj, String key, int defaultValue) {
+        if (obj == null || !obj.has(key)) return defaultValue;
+        JsonElement el = obj.get(key);
+        if (el != null && el.isJsonPrimitive()) {
+            try {
+                return el.getAsInt();
+            } catch (Exception ignored) {
+            }
+        }
+        return defaultValue;
+    }
+
+    private static Set<Integer> getJsonIntSet(JsonObject obj, String key) {
+        Set<Integer> set = new HashSet<>();
+        if (obj != null && obj.has(key) && obj.get(key).isJsonArray()) {
+            for (JsonElement el : obj.getAsJsonArray(key)) {
+                if (el.isJsonPrimitive()) {
+                    try {
+                        set.add(el.getAsInt());
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+        return set;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v.trim();
+        }
+        return null;
     }
 
     static boolean isUnpluggedLinuxHdmi(String name, String desc) {
@@ -178,10 +542,13 @@ public final class VoiceAudioEngine {
         return selectedSpeakerId;
     }
 
+    public double getCurrentMicRms() {
+        return currentMicRms;
+    }
+
     public static void testSpeaker(String deviceId) {
         new Thread(() -> {
             try {
-                DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
                 SourceDataLine line = openSpeakerLine(deviceId);
                 if (line == null) return;
                 // Play a brief 2-tone melodic chime (587Hz -> 880Hz, 150ms each)
@@ -202,19 +569,18 @@ public final class VoiceAudioEngine {
 
     public synchronized void switchMicDevice(String deviceId) {
         selectedMicId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
+        if (selectedMicId.startsWith("pw:")) {
+            activatePipeWireDevice(selectedMicId, true);
+        }
         if (running) {
-            if (micLine != null) {
-                try {
-                    micLine.stop();
-                    micLine.close();
-                } catch (Exception ignored) {
-                }
-                micLine = null;
-            }
-            micLine = openMicLine(selectedMicId);
-            micAvailable = (micLine != null);
-            if (micLine != null) {
-                captureThread = new Thread(() -> captureLoop(activeEncodedChunkConsumer, activeSpeakingStateConsumer), "voice-mic-capture");
+            closeCurrentMicLineAndWait();
+            TargetDataLine newLine = openMicLine(selectedMicId);
+            this.micLine = newLine;
+            this.micAvailable = (newLine != null);
+            if (newLine != null) {
+                Consumer<String> chunkCb = this.activeEncodedChunkConsumer;
+                Consumer<Boolean> speakCb = this.activeSpeakingStateConsumer;
+                captureThread = new Thread(() -> captureLoop(newLine, chunkCb, speakCb), "voice-mic-capture");
                 captureThread.setDaemon(true);
                 captureThread.start();
             }
@@ -223,6 +589,9 @@ public final class VoiceAudioEngine {
 
     public synchronized void switchSpeakerDevice(String deviceId) {
         selectedSpeakerId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
+        if (selectedSpeakerId.startsWith("pw:")) {
+            activatePipeWireDevice(selectedSpeakerId, false);
+        }
         if (running) {
             if (speakerLine != null) {
                 try {
@@ -234,6 +603,27 @@ public final class VoiceAudioEngine {
             }
             speakerLine = openSpeakerLine(selectedSpeakerId);
             speakerAvailable = (speakerLine != null);
+        }
+    }
+
+    private void closeCurrentMicLineAndWait() {
+        TargetDataLine oldLine = this.micLine;
+        this.micLine = null;
+        if (oldLine != null) {
+            try {
+                oldLine.stop();
+                oldLine.close();
+            } catch (Exception ignored) {
+            }
+        }
+        Thread oldThread = this.captureThread;
+        this.captureThread = null;
+        if (oldThread != null && oldThread != Thread.currentThread()) {
+            try {
+                oldThread.join(300);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -250,34 +640,57 @@ public final class VoiceAudioEngine {
         speakerLine = openSpeakerLine(selectedSpeakerId);
         speakerAvailable = (speakerLine != null);
 
-        micLine = openMicLine(selectedMicId);
-        micAvailable = (micLine != null);
+        TargetDataLine newMicLine = openMicLine(selectedMicId);
+        this.micLine = newMicLine;
+        this.micAvailable = (newMicLine != null);
 
-        if (micLine != null) {
-            captureThread = new Thread(() -> captureLoop(onEncodedChunk, onSpeakingState), "voice-mic-capture");
+        if (newMicLine != null) {
+            captureThread = new Thread(() -> captureLoop(newMicLine, onEncodedChunk, onSpeakingState), "voice-mic-capture");
             captureThread.setDaemon(true);
             captureThread.start();
         }
     }
 
-    private static SourceDataLine openSpeakerLine(String deviceId) {
+    static SourceDataLine openSpeakerLine(String deviceId) {
         DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
 
         if (deviceId != null && !"default".equalsIgnoreCase(deviceId)) {
-            for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
-                if (deviceId.equals(mInfo.getName())) {
-                    try {
-                        Mixer mixer = AudioSystem.getMixer(mInfo);
-                        if (mixer.isLineSupported(info)) {
-                            SourceDataLine line = (SourceDataLine) mixer.getLine(info);
-                            line.open(FORMAT, CHUNK_BYTES * 4);
-                            line.start();
-                            System.out.println("[VoiceAudioEngine] Speaker opened on selected mixer: " + mInfo.getName());
-                            return line;
+            if (deviceId.startsWith("pw:")) {
+                activatePipeWireDevice(deviceId, false);
+            } else {
+                for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+                    if (deviceId.equals(mInfo.getName())) {
+                        try {
+                            Mixer mixer = AudioSystem.getMixer(mInfo);
+                            if (mixer.isLineSupported(info)) {
+                                SourceDataLine line = (SourceDataLine) mixer.getLine(info);
+                                line.open(FORMAT, CHUNK_BYTES * 4);
+                                line.start();
+                                System.out.println("[VoiceAudioEngine] Speaker opened on selected mixer: " + mInfo.getName());
+                                return line;
+                            }
+                        } catch (Exception ex) {
+                            System.err.println("[VoiceAudioEngine] Failed opening selected speaker [" + deviceId + "]: " + ex.getMessage());
                         }
-                    } catch (Exception ex) {
-                        System.err.println("[VoiceAudioEngine] Failed opening selected speaker [" + deviceId + "]: " + ex.getMessage());
                     }
+                }
+            }
+        }
+
+        // Prefer [default] PipeWire/PulseAudio mixer so OS routing is honored without locking raw ALSA hw
+        for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+            String name = mInfo.getName();
+            if (name != null && name.contains("[default]")) {
+                try {
+                    Mixer mixer = AudioSystem.getMixer(mInfo);
+                    if (mixer.isLineSupported(info)) {
+                        SourceDataLine line = (SourceDataLine) mixer.getLine(info);
+                        line.open(FORMAT, CHUNK_BYTES * 4);
+                        line.start();
+                        System.out.println("[VoiceAudioEngine] Speaker opened via PipeWire/OS [default] mixer: " + name);
+                        return line;
+                    }
+                } catch (Exception ignored) {
                 }
             }
         }
@@ -314,24 +727,46 @@ public final class VoiceAudioEngine {
         return null;
     }
 
-    private static TargetDataLine openMicLine(String deviceId) {
+    static TargetDataLine openMicLine(String deviceId) {
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
 
         if (deviceId != null && !"default".equalsIgnoreCase(deviceId)) {
-            for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
-                if (deviceId.equals(mInfo.getName())) {
-                    try {
-                        Mixer mixer = AudioSystem.getMixer(mInfo);
-                        if (mixer.isLineSupported(info)) {
-                            TargetDataLine line = (TargetDataLine) mixer.getLine(info);
-                            line.open(FORMAT, CHUNK_BYTES * 4);
-                            line.start();
-                            System.out.println("[VoiceAudioEngine] Mic opened on selected mixer: " + mInfo.getName());
-                            return line;
+            if (deviceId.startsWith("pw:")) {
+                activatePipeWireDevice(deviceId, true);
+            } else {
+                for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+                    if (deviceId.equals(mInfo.getName())) {
+                        try {
+                            Mixer mixer = AudioSystem.getMixer(mInfo);
+                            if (mixer.isLineSupported(info)) {
+                                TargetDataLine line = (TargetDataLine) mixer.getLine(info);
+                                line.open(FORMAT, CHUNK_BYTES * 4);
+                                line.start();
+                                System.out.println("[VoiceAudioEngine] Mic opened on selected mixer: " + mInfo.getName());
+                                return line;
+                            }
+                        } catch (Exception ex) {
+                            System.err.println("[VoiceAudioEngine] Failed opening selected mic [" + deviceId + "]: " + ex.getMessage());
                         }
-                    } catch (Exception ex) {
-                        System.err.println("[VoiceAudioEngine] Failed opening selected mic [" + deviceId + "]: " + ex.getMessage());
                     }
+                }
+            }
+        }
+
+        // Prefer [default] PipeWire/PulseAudio mixer so OS routing is honored without locking raw ALSA hw
+        for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
+            String name = mInfo.getName();
+            if (name != null && name.contains("[default]")) {
+                try {
+                    Mixer mixer = AudioSystem.getMixer(mInfo);
+                    if (mixer.isLineSupported(info)) {
+                        TargetDataLine line = (TargetDataLine) mixer.getLine(info);
+                        line.open(FORMAT, CHUNK_BYTES * 4);
+                        line.start();
+                        System.out.println("[VoiceAudioEngine] Mic opened via PipeWire/OS [default] mixer: " + name);
+                        return line;
+                    }
+                } catch (Exception ignored) {
                 }
             }
         }
@@ -368,39 +803,45 @@ public final class VoiceAudioEngine {
         return null;
     }
 
-    private void captureLoop(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
+    private void captureLoop(TargetDataLine line, Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         byte[] buffer = new byte[CHUNK_BYTES];
         boolean wasSpeaking = false;
         long lastSoundTime = 0;
 
-        while (running && micLine != null && micLine.isOpen()) {
+        while (running && this.micLine == line && line.isOpen()) {
             try {
-                int read = micLine.read(buffer, 0, buffer.length);
-                if (read > 0 && !muted) {
+                int read = line.read(buffer, 0, buffer.length);
+                if (read > 0) {
                     double rms = computeRms(buffer, read);
-                    boolean isSound = rms > 350.0; // Voice activity threshold with AC-RMS
-                    long now = System.currentTimeMillis();
+                    this.currentMicRms = rms;
 
-                    if (isSound) {
-                        lastSoundTime = now;
-                    }
+                    if (!muted) {
+                        boolean isSound = rms > 350.0; // Voice activity threshold with AC-RMS
+                        long now = System.currentTimeMillis();
 
-                    boolean speaking = (now - lastSoundTime) < 400; // Hold speaking state for 400ms to avoid flicker
-                    if (speaking != wasSpeaking) {
-                        wasSpeaking = speaking;
-                        if (onSpeakingState != null) {
-                            onSpeakingState.accept(speaking);
+                        if (isSound) {
+                            lastSoundTime = now;
                         }
-                    }
 
-                    if (onEncodedChunk != null) {
-                        byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
-                        onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
-                    }
-                } else if (muted && wasSpeaking) {
-                    wasSpeaking = false;
-                    if (onSpeakingState != null) {
-                        onSpeakingState.accept(false);
+                        boolean speaking = (now - lastSoundTime) < 400; // Hold speaking state for 400ms to avoid flicker
+                        if (speaking != wasSpeaking) {
+                            wasSpeaking = speaking;
+                            if (onSpeakingState != null) {
+                                onSpeakingState.accept(speaking);
+                            }
+                        }
+
+                        // Voice Activity Gate (DTX): only transmit audio packets when voice is detected
+                        if (speaking && onEncodedChunk != null) {
+                            byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
+                            onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
+                        }
+                    } else if (wasSpeaking) {
+                        wasSpeaking = false;
+                        lastSoundTime = 0;
+                        if (onSpeakingState != null) {
+                            onSpeakingState.accept(false);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -408,6 +849,7 @@ public final class VoiceAudioEngine {
             }
         }
 
+        this.currentMicRms = 0.0;
         if (wasSpeaking && onSpeakingState != null) {
             onSpeakingState.accept(false);
         }
@@ -442,14 +884,41 @@ public final class VoiceAudioEngine {
         if (out == null || !out.isOpen()) return;
         try {
             byte[] pcm = Base64.getDecoder().decode(base64Pcm);
+            // Prevent blocking the TCP reader thread and accumulating multi-second audio backlog
+            if (out.available() < pcm.length) {
+                out.flush();
+            }
             out.write(pcm, 0, pcm.length);
         } catch (Exception ex) {
             System.err.println("[VoiceAudioEngine] Error playing audio chunk: " + ex.getMessage());
         }
     }
 
+    void flushSpeaker() {
+        SourceDataLine out = this.speakerLine;
+        if (out != null && out.isOpen()) {
+            try {
+                out.flush();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     void setMuted(boolean muted) {
         this.muted = muted;
+        if (muted) {
+            TargetDataLine in = this.micLine;
+            if (in != null && in.isOpen()) {
+                try {
+                    in.flush();
+                } catch (Exception ignored) {
+                }
+            }
+            Consumer<Boolean> cb = this.activeSpeakingStateConsumer;
+            if (cb != null) {
+                cb.accept(false);
+            }
+        }
     }
 
     boolean isMuted() {
@@ -470,16 +939,10 @@ public final class VoiceAudioEngine {
 
     synchronized void stop() {
         running = false;
-        if (micLine != null) {
-            try {
-                micLine.stop();
-                micLine.close();
-            } catch (Exception ignored) {
-            }
-            micLine = null;
-        }
+        closeCurrentMicLineAndWait();
         if (speakerLine != null) {
             try {
+                speakerLine.flush();
                 speakerLine.stop();
                 speakerLine.close();
             } catch (Exception ignored) {
@@ -488,6 +951,6 @@ public final class VoiceAudioEngine {
         }
         micAvailable = false;
         speakerAvailable = false;
+        currentMicRms = 0.0;
     }
 }
-

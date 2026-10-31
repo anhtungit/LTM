@@ -29,7 +29,9 @@ public final class MeetRoomPanel extends JPanel {
     private Runnable onOpenVoiceSettings;
     private Consumer<Boolean> onMuteToggle;
     private boolean micMuted = false;
+    private boolean micAvailable = true;
     private boolean camMuted = true;
+    private String selfParticipantId;
 
     private final JLabel titleLabel = new JLabel("Cuộc gọi thoại");
     private final JLabel statusLabel = new JLabel("· 00:00 · Đang kết nối âm thanh...");
@@ -67,18 +69,37 @@ public final class MeetRoomPanel extends JPanel {
     }
 
     public void startSession(String roomTitle, String selfId, String selfInitials, String selfName, boolean micReady) {
+        startSession(roomTitle, selfId, selfInitials, selfName, micReady, false);
+    }
+
+    public void startSession(String roomTitle, String selfId, String selfInitials, String selfName, boolean micReady, boolean initialMicMuted) {
         this.elapsedSeconds = 0;
-        this.micMuted = false;
+        this.selfParticipantId = selfId;
+        this.micAvailable = micReady;
+        this.micMuted = initialMicMuted || !micReady;
         if (micBtn != null) {
-            micBtn.setBackground(new Color(0x3B, 0x3D, 0x44));
+            micBtn.setBackground(this.micMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
         }
         titleLabel.setText(roomTitle != null && !roomTitle.isBlank() ? roomTitle : "Cuộc gọi thoại");
         participants.clear();
-        String micSub = micReady ? "Bạn · Mic đang bật" : "Bạn · Chế độ nghe (không tìm thấy mic)";
+        String micSub = !micReady
+                ? "Bạn · Chế độ nghe (không tìm thấy mic)"
+                : (this.micMuted ? "Bạn · Đã tắt mic" : "Bạn · Mic đang bật");
         participants.put(selfId, new ParticipantEntry(selfId, selfInitials, selfName + " (Bạn)", micSub, false));
         rebuildGrid();
         updateHeaderStatus();
         callTimer.restart();
+    }
+
+    public void setParticipantMuted(String id, boolean muted) {
+        if (id == null || id.isBlank()) return;
+        ParticipantEntry existing = participants.get(id);
+        if (existing != null) {
+            String newSub = muted ? "Đã tắt mic" : "Đang kết nối âm thanh trực tiếp";
+            boolean newSpeaking = muted ? false : existing.speaking();
+            participants.put(id, new ParticipantEntry(existing.id(), existing.initials(), existing.name(), newSub, newSpeaking));
+            rebuildGrid();
+        }
     }
 
     public void addOrUpdateParticipant(String id, String initials, String name, String sub, boolean speaking) {
@@ -235,6 +256,18 @@ public final class MeetRoomPanel extends JPanel {
         micBtn.addActionListener(e -> {
             micMuted = !micMuted;
             micBtn.setBackground(micMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
+            if (selfParticipantId != null) {
+                ParticipantEntry selfEntry = participants.get(selfParticipantId);
+                if (selfEntry != null) {
+                    String newSub = !micAvailable
+                            ? "Bạn · Chế độ nghe (không tìm thấy mic)"
+                            : (micMuted ? "Bạn · Đã tắt mic" : "Bạn · Mic đang bật");
+                    participants.put(selfParticipantId, new ParticipantEntry(
+                            selfEntry.id(), selfEntry.initials(), selfEntry.name(), newSub, micMuted ? false : selfEntry.speaking()
+                    ));
+                    rebuildGrid();
+                }
+            }
             if (onMuteToggle != null) {
                 onMuteToggle.accept(micMuted);
             }

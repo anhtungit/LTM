@@ -2,6 +2,9 @@ package vn.edu.ltm.chat.presentation;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,6 +62,87 @@ class VoiceAudioEngineTest {
     }
 
     @Test
+    void testParsePipeWireDevicesIncludesUsbSpdifBluetoothAndFiltersUnplugged() {
+        String samplePwDump = """
+                [
+                  {
+                    "id": 45,
+                    "info": {
+                      "props": {
+                        "media.class": "Audio/Device",
+                        "device.name": "alsa_card.usb-GeneralPlus_USB_Audio_Device-00",
+                        "device.description": "USB Audio Device"
+                      },
+                      "params": {
+                        "EnumRoute": [
+                          { "index": 0, "direction": "Input", "name": "analog-input-mic", "description": "Microphone", "available": "unknown" },
+                          { "index": 1, "direction": "Output", "name": "analog-output-speaker", "description": "Speakers", "available": "unknown" },
+                          { "index": 2, "direction": "Output", "name": "iec958-stereo-output", "description": "Digital Output (S/PDIF)", "available": "unknown" }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "id": 50,
+                    "info": {
+                      "props": {
+                        "media.class": "Audio/Device",
+                        "device.name": "alsa_card.pci-0000_00_1f.3",
+                        "device.description": "Built-in Audio"
+                      },
+                      "params": {
+                        "EnumRoute": [
+                          { "index": 0, "direction": "Input", "name": "analog-input-internal-mic", "description": "Internal Microphone", "available": "unknown" },
+                          { "index": 1, "direction": "Input", "name": "analog-input-headphone-mic", "description": "Microphone", "available": "no" },
+                          { "index": 3, "direction": "Output", "name": "analog-output-speaker", "description": "Speakers", "available": "unknown" },
+                          { "index": 4, "direction": "Output", "name": "analog-output-headphones", "description": "Headphones", "available": "no" },
+                          { "index": 5, "direction": "Output", "name": "hdmi-output-0", "description": "HDMI / DisplayPort", "available": "yes" },
+                          { "index": 6, "direction": "Output", "name": "hdmi-output-1", "description": "HDMI / DisplayPort 2", "available": "no" }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "id": 96,
+                    "info": {
+                      "props": {
+                        "media.class": "Audio/Device",
+                        "device.name": "bluez_card.41_42_F3_04_7D_59",
+                        "device.description": "Realfit F2"
+                      },
+                      "params": {
+                        "EnumRoute": [
+                          { "index": 0, "direction": "Input", "name": "headset-input", "description": "Handsfree", "available": "yes" },
+                          { "index": 1, "direction": "Output", "name": "headset-output", "description": "Headphones", "available": "yes" },
+                          { "index": 2, "direction": "Output", "name": "headset-hf-output", "description": "Handsfree", "available": "yes" }
+                        ]
+                      }
+                    }
+                  }
+                ]
+                """;
+
+        List<VoiceAudioEngine.AudioDevice> outputs = VoiceAudioEngine.parsePipeWireDevices(samplePwDump, false);
+        List<String> outputNames = outputs.stream().map(VoiceAudioEngine.AudioDevice::displayName).toList();
+        assertEquals(List.of(
+                "Speakers – USB Audio Device",
+                "Digital Output (S/PDIF) – USB Audio Device",
+                "Speakers – Built-in Audio",
+                "HDMI / DisplayPort – Built-in Audio",
+                "Headphones – Realfit F2",
+                "Handsfree – Realfit F2"
+        ), outputNames);
+
+        List<VoiceAudioEngine.AudioDevice> inputs = VoiceAudioEngine.parsePipeWireDevices(samplePwDump, true);
+        List<String> inputNames = inputs.stream().map(VoiceAudioEngine.AudioDevice::displayName).toList();
+        assertEquals(List.of(
+                "Microphone – USB Audio Device",
+                "Internal Microphone – Built-in Audio",
+                "Handsfree – Realfit F2"
+        ), inputNames);
+    }
+
+    @Test
     void testDynamicDeviceFormattingForNewHardwareAndWindows() {
         // 1. Windows & macOS native names must be preserved verbatim
         assertEquals(
@@ -102,5 +186,15 @@ class VoiceAudioEngineTest {
                 "Direct Audio Device: HDA Intel PCH, HDMI 1, HDMI 1"
         ));
     }
-}
 
+    @Test
+    void testMuteClearsSpeakingStateImmediately() {
+        VoiceAudioEngine engine = new VoiceAudioEngine();
+        AtomicBoolean speaking = new AtomicBoolean(true);
+        engine.start(chunk -> {}, speaking::set);
+        engine.setMuted(true);
+        assertTrue(engine.isMuted());
+        assertFalse(speaking.get(), "Muting must immediately reset speaking state to false");
+        engine.stop();
+    }
+}

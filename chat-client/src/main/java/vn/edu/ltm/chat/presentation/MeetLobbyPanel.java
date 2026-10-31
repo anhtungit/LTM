@@ -49,6 +49,10 @@ public final class MeetLobbyPanel extends JPanel {
         this.onOpenVoiceSettings = onOpenVoiceSettings;
     }
 
+    public boolean isMicEnabled() {
+        return micEnabled;
+    }
+
     private JPanel buildHeader() {
         JPanel header = new JPanel(new BorderLayout());
         header.setBackground(DiscordTheme.TRANSCRIPT);

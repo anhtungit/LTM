@@ -3,7 +3,6 @@ package vn.edu.ltm.chat.presentation;
 import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
-import javax.sound.sampled.DataLine;
 import javax.sound.sampled.TargetDataLine;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -17,6 +16,8 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -25,6 +26,7 @@ import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public final class VoiceSettingsDialog extends JDialog {
 
@@ -33,6 +35,7 @@ public final class VoiceSettingsDialog extends JDialog {
     private final JComboBox<VoiceAudioEngine.AudioDevice> spkCombo = new JComboBox<>();
     private final JProgressBar micLevelBar = new JProgressBar(0, 100);
     private volatile boolean testingMic = false;
+    private boolean updatingCombos = false;
     private Thread micMonitorThread;
     private TargetDataLine testMicLine;
 
@@ -83,19 +86,18 @@ public final class VoiceSettingsDialog extends JDialog {
         body.add(createSectionLabel("THIẾT BỊ ĐẦU VÀO (MICROPHONE)"));
         body.add(Box.createVerticalStrut(6));
 
-        List<VoiceAudioEngine.AudioDevice> inputDevices = VoiceAudioEngine.getAvailableInputDevices();
-        for (VoiceAudioEngine.AudioDevice dev : inputDevices) {
-            micCombo.addItem(dev);
-            if (dev.id().equals(VoiceAudioEngine.getSelectedMicId())) {
-                micCombo.setSelectedItem(dev);
-            }
-        }
+        populateMicCombo();
         styleComboBox(micCombo);
+        micCombo.addPopupMenuListener(new SimplePopupRefreshListener(this::populateMicCombo));
         micCombo.addActionListener(e -> {
+            if (updatingCombos) return;
             VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) micCombo.getSelectedItem();
             if (sel != null && voiceEngine != null) {
-                voiceEngine.switchMicDevice(sel.id());
-                restartMicLevelMonitor(sel.id());
+                String id = sel.id();
+                CompletableFuture.runAsync(() -> {
+                    voiceEngine.switchMicDevice(id);
+                    SwingUtilities.invokeLater(() -> restartMicLevelMonitor(id));
+                });
             }
         });
         body.add(micCombo);
@@ -120,18 +122,15 @@ public final class VoiceSettingsDialog extends JDialog {
         body.add(createSectionLabel("THIẾT BỊ ĐẦU RA (LOA / TAI NGHE)"));
         body.add(Box.createVerticalStrut(6));
 
-        List<VoiceAudioEngine.AudioDevice> outputDevices = VoiceAudioEngine.getAvailableOutputDevices();
-        for (VoiceAudioEngine.AudioDevice dev : outputDevices) {
-            spkCombo.addItem(dev);
-            if (dev.id().equals(VoiceAudioEngine.getSelectedSpeakerId())) {
-                spkCombo.setSelectedItem(dev);
-            }
-        }
+        populateSpkCombo();
         styleComboBox(spkCombo);
+        spkCombo.addPopupMenuListener(new SimplePopupRefreshListener(this::populateSpkCombo));
         spkCombo.addActionListener(e -> {
+            if (updatingCombos) return;
             VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) spkCombo.getSelectedItem();
             if (sel != null && voiceEngine != null) {
-                voiceEngine.switchSpeakerDevice(sel.id());
+                String id = sel.id();
+                CompletableFuture.runAsync(() -> voiceEngine.switchSpeakerDevice(id));
             }
         });
         body.add(spkCombo);
@@ -184,10 +183,55 @@ public final class VoiceSettingsDialog extends JDialog {
             }
 
             @Override
+            public void windowClosing(WindowEvent e) {
+                stopMicLevelMonitor();
+            }
+
+            @Override
             public void windowClosed(WindowEvent e) {
                 stopMicLevelMonitor();
             }
         });
+    }
+
+    @Override
+    public void dispose() {
+        stopMicLevelMonitor();
+        super.dispose();
+    }
+
+    private void populateMicCombo() {
+        updatingCombos = true;
+        try {
+            String targetId = VoiceAudioEngine.getSelectedMicId();
+            micCombo.removeAllItems();
+            List<VoiceAudioEngine.AudioDevice> inputDevices = VoiceAudioEngine.getAvailableInputDevices();
+            for (VoiceAudioEngine.AudioDevice dev : inputDevices) {
+                micCombo.addItem(dev);
+                if (dev.id().equals(targetId)) {
+                    micCombo.setSelectedItem(dev);
+                }
+            }
+        } finally {
+            updatingCombos = false;
+        }
+    }
+
+    private void populateSpkCombo() {
+        updatingCombos = true;
+        try {
+            String targetId = VoiceAudioEngine.getSelectedSpeakerId();
+            spkCombo.removeAllItems();
+            List<VoiceAudioEngine.AudioDevice> outputDevices = VoiceAudioEngine.getAvailableOutputDevices();
+            for (VoiceAudioEngine.AudioDevice dev : outputDevices) {
+                spkCombo.addItem(dev);
+                if (dev.id().equals(targetId)) {
+                    spkCombo.setSelectedItem(dev);
+                }
+            }
+        } finally {
+            updatingCombos = false;
+        }
     }
 
     private JLabel createSectionLabel(String text) {
@@ -211,29 +255,18 @@ public final class VoiceSettingsDialog extends JDialog {
         testingMic = true;
         micMonitorThread = new Thread(() -> {
             try {
-                DataLine.Info info = new DataLine.Info(TargetDataLine.class, VoiceAudioEngine.FORMAT);
-                TargetDataLine line = null;
-                if (!"default".equalsIgnoreCase(micId)) {
-                    for (javax.sound.sampled.Mixer.Info mInfo : javax.sound.sampled.AudioSystem.getMixerInfo()) {
-                        if (micId.equals(mInfo.getName())) {
-                            try {
-                                javax.sound.sampled.Mixer m = javax.sound.sampled.AudioSystem.getMixer(mInfo);
-                                if (m.isLineSupported(info)) {
-                                    line = (TargetDataLine) m.getLine(info);
-                                    line.open(VoiceAudioEngine.FORMAT, VoiceAudioEngine.CHUNK_BYTES * 2);
-                                    line.start();
-                                    break;
-                                }
-                            } catch (Exception ignored) {}
-                        }
+                // If VoiceAudioEngine is already capturing in an active call, read its live RMS without opening a 2nd line
+                if (voiceEngine != null && voiceEngine.isRunning()) {
+                    while (testingMic && voiceEngine.isRunning()) {
+                        double rms = voiceEngine.getCurrentMicRms();
+                        int level = Math.min(100, (int) (rms / 40.0));
+                        SwingUtilities.invokeLater(() -> micLevelBar.setValue(level));
+                        Thread.sleep(80);
                     }
-                }
-                if (line == null && javax.sound.sampled.AudioSystem.isLineSupported(info)) {
-                    line = (TargetDataLine) javax.sound.sampled.AudioSystem.getLine(info);
-                    line.open(VoiceAudioEngine.FORMAT, VoiceAudioEngine.CHUNK_BYTES * 2);
-                    line.start();
+                    return;
                 }
 
+                TargetDataLine line = VoiceAudioEngine.openMicLine(micId);
                 if (line == null) return;
                 this.testMicLine = line;
                 byte[] buf = new byte[VoiceAudioEngine.CHUNK_BYTES];
@@ -242,7 +275,6 @@ public final class VoiceSettingsDialog extends JDialog {
                     int read = line.read(buf, 0, buf.length);
                     if (read > 0) {
                         double rms = VoiceAudioEngine.computeRms(buf, read);
-                        // Map RMS 0 -> 4000 to progress 0 -> 100
                         int level = Math.min(100, (int) (rms / 40.0));
                         SwingUtilities.invokeLater(() -> micLevelBar.setValue(level));
                     }
@@ -270,9 +302,29 @@ public final class VoiceSettingsDialog extends JDialog {
 
     private synchronized void restartMicLevelMonitor(String micId) {
         stopMicLevelMonitor();
-        // Brief pause to allow line release
         Timer t = new Timer(150, e -> startMicLevelMonitor(micId));
         t.setRepeats(false);
         t.start();
+    }
+
+    private static final class SimplePopupRefreshListener implements PopupMenuListener {
+        private final Runnable onOpen;
+
+        SimplePopupRefreshListener(Runnable onOpen) {
+            this.onOpen = onOpen;
+        }
+
+        @Override
+        public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
+            onOpen.run();
+        }
+
+        @Override
+        public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
+        }
+
+        @Override
+        public void popupMenuCanceled(PopupMenuEvent e) {
+        }
     }
 }
