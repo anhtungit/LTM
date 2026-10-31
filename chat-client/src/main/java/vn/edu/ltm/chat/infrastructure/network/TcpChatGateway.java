@@ -97,6 +97,7 @@ public final class TcpChatGateway implements ChatGateway {
         }
         try {
             Socket s = ServerEndpointResolver.connectAuto(explicitHost, explicitPort);
+            s.setTcpNoDelay(true);
             this.socket = s;
             this.out = new PrintWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8), true);
             this.connected = true;

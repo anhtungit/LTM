@@ -76,6 +76,7 @@ public final class ChatServer {
             while (running.get()) {
                 try {
                     Socket clientSocket = serverSocket.accept();
+                    clientSocket.setTcpNoDelay(true);
                     ClientHandler handler = new ClientHandler(clientSocket, this, db);
                     activeHandlers.add(handler);
                     threadPool.submit(handler);

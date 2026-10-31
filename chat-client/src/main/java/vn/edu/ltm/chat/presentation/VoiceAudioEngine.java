@@ -17,6 +17,7 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -26,7 +27,11 @@ import java.util.function.Consumer;
 public final class VoiceAudioEngine {
     // shortcut: 16kHz 16-bit mono PCM over Base64 TCP (~32KB/s), upgrade to UDP Opus when scaling > 5 peers
     public static final AudioFormat FORMAT = new AudioFormat(16000.0f, 16, 1, true, false);
-    public static final int CHUNK_BYTES = 3200; // 100ms frame at 16kHz 16-bit mono
+    public static final int CHUNK_BYTES = 1280; // 40ms frame at 16kHz 16-bit mono (25 fps for low-jitter streaming)
+    private static final int SPEAKER_BUFFER_BYTES = CHUNK_BYTES * 8; // 320ms hardware buffer
+    private static final int MIC_BUFFER_BYTES = CHUNK_BYTES * 4;     // 160ms hardware buffer
+    private static final int JITTER_QUEUE_CAPACITY = 16;             // Max 640ms jitter buffer
+    private static final int PREBUFFER_FRAMES = 3;                   // 120ms pre-buffer before talkspurt playback
 
     public record AudioDevice(String id, String displayName) {
         @Override
@@ -46,7 +51,9 @@ public final class VoiceAudioEngine {
 
     private volatile TargetDataLine micLine;
     private volatile SourceDataLine speakerLine;
+    private final ArrayBlockingQueue<byte[]> playbackQueue = new ArrayBlockingQueue<>(JITTER_QUEUE_CAPACITY);
     private Thread captureThread;
+    private Thread playbackThread;
     private Consumer<String> activeEncodedChunkConsumer;
     private Consumer<Boolean> activeSpeakingStateConsumer;
 
@@ -552,7 +559,7 @@ public final class VoiceAudioEngine {
                 SourceDataLine line = openSpeakerLine(deviceId);
                 if (line == null) return;
                 // Play a brief 2-tone melodic chime (587Hz -> 880Hz, 150ms each)
-                byte[] buf = new byte[CHUNK_BYTES * 3];
+                byte[] buf = new byte[9600];
                 for (int i = 0; i < buf.length / 2; i++) {
                     double freq = (i < buf.length / 4) ? 587.33 : 880.00;
                     short s = (short) (Math.sin(2 * Math.PI * freq * i / 16000.0) * 10000);
@@ -582,6 +589,7 @@ public final class VoiceAudioEngine {
                 Consumer<Boolean> speakCb = this.activeSpeakingStateConsumer;
                 captureThread = new Thread(() -> captureLoop(newLine, chunkCb, speakCb), "voice-mic-capture");
                 captureThread.setDaemon(true);
+                captureThread.setPriority(Thread.MAX_PRIORITY);
                 captureThread.start();
             }
         }
@@ -634,11 +642,17 @@ public final class VoiceAudioEngine {
     synchronized void start(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         stop();
         running = true;
+        playbackQueue.clear();
         this.activeEncodedChunkConsumer = onEncodedChunk;
         this.activeSpeakingStateConsumer = onSpeakingState;
 
         speakerLine = openSpeakerLine(selectedSpeakerId);
         speakerAvailable = (speakerLine != null);
+
+        playbackThread = new Thread(this::playbackLoop, "voice-speaker-playback");
+        playbackThread.setDaemon(true);
+        playbackThread.setPriority(Thread.MAX_PRIORITY);
+        playbackThread.start();
 
         TargetDataLine newMicLine = openMicLine(selectedMicId);
         this.micLine = newMicLine;
@@ -647,6 +661,7 @@ public final class VoiceAudioEngine {
         if (newMicLine != null) {
             captureThread = new Thread(() -> captureLoop(newMicLine, onEncodedChunk, onSpeakingState), "voice-mic-capture");
             captureThread.setDaemon(true);
+            captureThread.setPriority(Thread.MAX_PRIORITY);
             captureThread.start();
         }
     }
@@ -664,7 +679,7 @@ public final class VoiceAudioEngine {
                             Mixer mixer = AudioSystem.getMixer(mInfo);
                             if (mixer.isLineSupported(info)) {
                                 SourceDataLine line = (SourceDataLine) mixer.getLine(info);
-                                line.open(FORMAT, CHUNK_BYTES * 4);
+                                line.open(FORMAT, SPEAKER_BUFFER_BYTES);
                                 line.start();
                                 System.out.println("[VoiceAudioEngine] Speaker opened on selected mixer: " + mInfo.getName());
                                 return line;
@@ -685,7 +700,7 @@ public final class VoiceAudioEngine {
                     Mixer mixer = AudioSystem.getMixer(mInfo);
                     if (mixer.isLineSupported(info)) {
                         SourceDataLine line = (SourceDataLine) mixer.getLine(info);
-                        line.open(FORMAT, CHUNK_BYTES * 4);
+                        line.open(FORMAT, SPEAKER_BUFFER_BYTES);
                         line.start();
                         System.out.println("[VoiceAudioEngine] Speaker opened via PipeWire/OS [default] mixer: " + name);
                         return line;
@@ -699,7 +714,7 @@ public final class VoiceAudioEngine {
         try {
             if (AudioSystem.isLineSupported(info)) {
                 SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
-                line.open(FORMAT, CHUNK_BYTES * 4);
+                line.open(FORMAT, SPEAKER_BUFFER_BYTES);
                 line.start();
                 System.out.println("[VoiceAudioEngine] Speaker opened via default system mixer: " + line.getLineInfo());
                 return line;
@@ -716,7 +731,7 @@ public final class VoiceAudioEngine {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
                     SourceDataLine line = (SourceDataLine) mixer.getLine(info);
-                    line.open(FORMAT, CHUNK_BYTES * 4);
+                    line.open(FORMAT, SPEAKER_BUFFER_BYTES);
                     line.start();
                     System.out.println("[VoiceAudioEngine] Speaker fallback opened on: " + mInfo.getName());
                     return line;
@@ -740,7 +755,7 @@ public final class VoiceAudioEngine {
                             Mixer mixer = AudioSystem.getMixer(mInfo);
                             if (mixer.isLineSupported(info)) {
                                 TargetDataLine line = (TargetDataLine) mixer.getLine(info);
-                                line.open(FORMAT, CHUNK_BYTES * 4);
+                                line.open(FORMAT, MIC_BUFFER_BYTES);
                                 line.start();
                                 System.out.println("[VoiceAudioEngine] Mic opened on selected mixer: " + mInfo.getName());
                                 return line;
@@ -761,7 +776,7 @@ public final class VoiceAudioEngine {
                     Mixer mixer = AudioSystem.getMixer(mInfo);
                     if (mixer.isLineSupported(info)) {
                         TargetDataLine line = (TargetDataLine) mixer.getLine(info);
-                        line.open(FORMAT, CHUNK_BYTES * 4);
+                        line.open(FORMAT, MIC_BUFFER_BYTES);
                         line.start();
                         System.out.println("[VoiceAudioEngine] Mic opened via PipeWire/OS [default] mixer: " + name);
                         return line;
@@ -775,7 +790,7 @@ public final class VoiceAudioEngine {
         try {
             if (AudioSystem.isLineSupported(info)) {
                 TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info);
-                line.open(FORMAT, CHUNK_BYTES * 4);
+                line.open(FORMAT, MIC_BUFFER_BYTES);
                 line.start();
                 System.out.println("[VoiceAudioEngine] Mic opened via default system mixer: " + line.getLineInfo());
                 return line;
@@ -792,7 +807,7 @@ public final class VoiceAudioEngine {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
                     TargetDataLine line = (TargetDataLine) mixer.getLine(info);
-                    line.open(FORMAT, CHUNK_BYTES * 4);
+                    line.open(FORMAT, MIC_BUFFER_BYTES);
                     line.start();
                     System.out.println("[VoiceAudioEngine] Mic fallback opened on: " + mInfo.getName());
                     return line;
@@ -816,14 +831,14 @@ public final class VoiceAudioEngine {
                     this.currentMicRms = rms;
 
                     if (!muted) {
-                        boolean isSound = rms > 350.0; // Voice activity threshold with AC-RMS
+                        boolean isSound = rms > 150.0; // Sensitive AC-RMS threshold so soft syllables are not clipped
                         long now = System.currentTimeMillis();
 
                         if (isSound) {
                             lastSoundTime = now;
                         }
 
-                        boolean speaking = (now - lastSoundTime) < 400; // Hold speaking state for 400ms to avoid flicker
+                        boolean speaking = (now - lastSoundTime) < 700; // 700ms hangover hold keeps inter-word pauses continuous
                         if (speaking != wasSpeaking) {
                             wasSpeaking = speaking;
                             if (onSpeakingState != null) {
@@ -831,7 +846,7 @@ public final class VoiceAudioEngine {
                             }
                         }
 
-                        // Voice Activity Gate (DTX): only transmit audio packets when voice is detected
+                        // Voice Activity Gate (DTX): transmit continuously throughout the entire talkspurt
                         if (speaking && onEncodedChunk != null) {
                             byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
                             onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
@@ -852,6 +867,35 @@ public final class VoiceAudioEngine {
         this.currentMicRms = 0.0;
         if (wasSpeaking && onSpeakingState != null) {
             onSpeakingState.accept(false);
+        }
+    }
+
+    private void playbackLoop() {
+        boolean prebuffering = true;
+        while (running) {
+            try {
+                if (prebuffering) {
+                    // Pre-buffer 3 frames (120ms) before starting a talkspurt to absorb network jitter
+                    if (playbackQueue.size() < PREBUFFER_FRAMES) {
+                        Thread.sleep(15);
+                        continue;
+                    }
+                    prebuffering = false;
+                }
+                byte[] pcm = playbackQueue.poll(140, TimeUnit.MILLISECONDS);
+                if (pcm == null) {
+                    prebuffering = true;
+                    continue;
+                }
+                SourceDataLine out = this.speakerLine;
+                if (out != null && out.isOpen()) {
+                    out.write(pcm, 0, pcm.length);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -880,21 +924,18 @@ public final class VoiceAudioEngine {
 
     void playChunk(String base64Pcm) {
         if (!running || base64Pcm == null || base64Pcm.isEmpty()) return;
-        SourceDataLine out = this.speakerLine;
-        if (out == null || !out.isOpen()) return;
         try {
             byte[] pcm = Base64.getDecoder().decode(base64Pcm);
-            // Prevent blocking the TCP reader thread and accumulating multi-second audio backlog
-            if (out.available() < pcm.length) {
-                out.flush();
+            while (!playbackQueue.offer(pcm)) {
+                playbackQueue.poll(); // Drop only the single oldest 40ms frame on overflow instead of flushing line
             }
-            out.write(pcm, 0, pcm.length);
         } catch (Exception ex) {
-            System.err.println("[VoiceAudioEngine] Error playing audio chunk: " + ex.getMessage());
+            System.err.println("[VoiceAudioEngine] Error queueing audio chunk: " + ex.getMessage());
         }
     }
 
     void flushSpeaker() {
+        playbackQueue.clear();
         SourceDataLine out = this.speakerLine;
         if (out != null && out.isOpen()) {
             try {
@@ -939,7 +980,13 @@ public final class VoiceAudioEngine {
 
     synchronized void stop() {
         running = false;
+        playbackQueue.clear();
         closeCurrentMicLineAndWait();
+        Thread oldPlay = this.playbackThread;
+        this.playbackThread = null;
+        if (oldPlay != null && oldPlay != Thread.currentThread()) {
+            oldPlay.interrupt();
+        }
         if (speakerLine != null) {
             try {
                 speakerLine.flush();

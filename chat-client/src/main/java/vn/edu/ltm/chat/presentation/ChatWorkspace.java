@@ -485,11 +485,11 @@ public final class ChatWorkspace extends JPanel {
         try {
             byte[] pcm = java.util.Base64.getDecoder().decode(base64Pcm);
             double rms = VoiceAudioEngine.computeRms(pcm, pcm.length);
-            if (rms > 350.0) {
+            if (rms > 150.0) {
                 SwingUtilities.invokeLater(() -> {
                     meetRoomPanel.setParticipantSpeaking(peerId, true);
                     javax.swing.Timer timer = peerSpeakingTimers.computeIfAbsent(peerId, id -> {
-                        javax.swing.Timer t = new javax.swing.Timer(450, e -> {
+                        javax.swing.Timer t = new javax.swing.Timer(650, e -> {
                             meetRoomPanel.setParticipantSpeaking(id, false);
                         });
                         t.setRepeats(false);
