@@ -152,7 +152,7 @@ public final class ChatServer {
             this.voiceUdpSocket = vs;
 
             threadPool.submit(() -> {
-                byte[] buf = new byte[2048];
+                byte[] buf = new byte[65507];
                 while (running.get() && !vs.isClosed()) {
                     try {
                         DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -196,7 +196,12 @@ public final class ChatServer {
             return;
         }
 
-        if (!header.startsWith("LTM_VOICE|")) return;
+        boolean isVoice = header.startsWith("LTM_VOICE|");
+        boolean isVideo = !isVoice && header.startsWith("LTM_VIDEO|");
+        if (!isVoice && !isVideo) return;
+        String prefix = isVoice ? "LTM_VOICE|" : "LTM_VIDEO|";
+        String action = isVoice ? "AUDIO" : "VIDEO";
+
         String[] parts = header.split("\\|", 5);
         if (parts.length < 5) return;
 
@@ -229,7 +234,7 @@ public final class ChatServer {
 
         InetSocketAddress target = udpVoiceEndpoints.get(convId);
         if (target != null) {
-            byte[] outHdr = ("LTM_VOICE|" + senderId + "|" + senderName + "|" + senderId + "|\n")
+            byte[] outHdr = (prefix + senderId + "|" + senderName + "|" + senderId + "|\n")
                     .getBytes(StandardCharsets.UTF_8);
             byte[] outBuf = new byte[outHdr.length + pcmLen];
             System.arraycopy(outHdr, 0, outBuf, 0, outHdr.length);
@@ -248,7 +253,7 @@ public final class ChatServer {
                         .put("channel", "")
                         .put("senderId", senderId)
                         .put("senderName", senderName)
-                        .put("action", "AUDIO")
+                        .put("action", action)
                         .put("data", java.util.Base64.getEncoder().encodeToString(pcm)));
             }
         }

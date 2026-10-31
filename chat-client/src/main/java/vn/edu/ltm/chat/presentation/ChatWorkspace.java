@@ -123,6 +123,7 @@ public final class ChatWorkspace extends JPanel {
     private boolean userManuallyToggledPane = false;
 
     private final VoiceAudioEngine voiceEngine = new VoiceAudioEngine();
+    private final VideoCaptureEngine videoEngine = new VideoCaptureEngine();
     private final MeetLobbyPanel meetLobbyPanel = new MeetLobbyPanel(this::startActiveCall, this::showChatView);
     private final MeetRoomPanel meetRoomPanel = new MeetRoomPanel(this::endActiveCall);
     private volatile String activeCallConversationId;
@@ -230,6 +231,13 @@ public final class ChatWorkspace extends JPanel {
             String cid = activeCallConversationId;
             if (cid != null) {
                 chatService.sendCallSignal(cid, activeCallChannel, "MUTE", Boolean.toString(muted));
+            }
+        });
+        this.meetRoomPanel.setOnCamToggle(camMuted -> {
+            if (camMuted) {
+                stopLocalCamera(true);
+            } else {
+                startLocalCamera();
             }
         });
         this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
@@ -353,7 +361,33 @@ public final class ChatWorkspace extends JPanel {
         startActiveCall();
     }
 
+    private void startLocalCamera() {
+        videoEngine.start(jpegBytes -> {
+            String cid = activeCallConversationId;
+            if (cid != null) {
+                String b64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
+                chatService.sendCallSignal(cid, activeCallChannel, "VIDEO", b64);
+            }
+        }, img -> SwingUtilities.invokeLater(() -> {
+            if (activeCallConversationId != null && user != null) {
+                meetRoomPanel.updateParticipantVideo(user.id(), img);
+            }
+        }));
+    }
+
+    private void stopLocalCamera(boolean notifyPeers) {
+        videoEngine.stop();
+        if (user != null) {
+            meetRoomPanel.updateParticipantVideo(user.id(), null);
+        }
+        String cid = activeCallConversationId;
+        if (notifyPeers && cid != null) {
+            chatService.sendCallSignal(cid, activeCallChannel, "CAM_OFF", "");
+        }
+    }
+
     private void startActiveCall() {
+        meetLobbyPanel.stopLobbyPreview();
         Conversation conv = currentConversation();
         if (conv == null) {
             centerLayout.show(centerHost, "meet-room");
@@ -364,6 +398,7 @@ public final class ChatWorkspace extends JPanel {
         mutedPeers.clear();
 
         boolean initialMuted = !meetLobbyPanel.isMicEnabled();
+        boolean initialCamOn = meetLobbyPanel.isCamEnabled();
         voiceEngine.setMuted(initialMuted);
 
         voiceEngine.start(base64 -> {
@@ -380,9 +415,14 @@ public final class ChatWorkspace extends JPanel {
         });
 
         String roomTitle = conv.isGroup() ? ("Kênh thoại · " + conv.displayName()) : ("Cuộc gọi với " + conv.displayName());
-        meetRoomPanel.startSession(roomTitle, user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable(), initialMuted);
+        meetRoomPanel.startSession(roomTitle, user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable(), initialMuted, initialCamOn);
         if (!conv.isGroup()) {
             meetRoomPanel.addOrUpdateParticipant(conv.id(), conv.initials(), conv.displayName(), "Đang đổ chuông...", false);
+        }
+        if (initialCamOn) {
+            startLocalCamera();
+        } else {
+            videoEngine.stop();
         }
         chatService.sendCallSignal(conv.id(), activeCallChannel, "INVITE", "");
         if (initialMuted) {
@@ -393,6 +433,7 @@ public final class ChatWorkspace extends JPanel {
 
     private void endActiveCall() {
         voiceEngine.stop();
+        stopLocalCamera(false);
         mutedPeers.clear();
         peerSpeakingTimers.values().forEach(javax.swing.Timer::stop);
         peerSpeakingTimers.clear();
@@ -422,6 +463,31 @@ public final class ChatWorkspace extends JPanel {
             if (ev.conversationId().equals(activeCallConversationId) && !mutedPeers.contains(ev.senderId())) {
                 voiceEngine.playChunk(ev.data());
                 handlePeerAudioReceived(ev.senderId(), ev.data());
+            }
+            return;
+        }
+
+        if ("VIDEO".equals(action)) {
+            if (ev.conversationId().equals(activeCallConversationId) && ev.data() != null && !ev.data().isEmpty()) {
+                try {
+                    byte[] jpeg = java.util.Base64.getDecoder().decode(ev.data());
+                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(jpeg));
+                    if (img != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            if (ev.conversationId().equals(activeCallConversationId)) {
+                                meetRoomPanel.updateParticipantVideo(ev.senderId(), img);
+                            }
+                        });
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            return;
+        }
+
+        if ("CAM_OFF".equals(action)) {
+            if (ev.conversationId().equals(activeCallConversationId)) {
+                meetRoomPanel.updateParticipantVideo(ev.senderId(), null);
             }
             return;
         }
@@ -471,6 +537,7 @@ public final class ChatWorkspace extends JPanel {
                 if (t != null) t.stop();
                 if (meetRoomPanel.getParticipantCount() <= 1) {
                     voiceEngine.stop();
+                    stopLocalCamera(false);
                     mutedPeers.clear();
                     meetRoomPanel.stopSessionAndFormatDuration();
                     activeCallConversationId = null;
@@ -558,7 +625,9 @@ public final class ChatWorkspace extends JPanel {
             activeCallConversationId = ev.conversationId();
             activeCallChannel = ev.channel() != null ? ev.channel() : "";
             mutedPeers.clear();
+            meetLobbyPanel.stopLobbyPreview();
             boolean initialMuted = !meetLobbyPanel.isMicEnabled();
+            boolean initialCamOn = meetLobbyPanel.isCamEnabled();
             voiceEngine.setMuted(initialMuted);
             voiceEngine.start(base64 -> {
                 String cid = activeCallConversationId;
@@ -572,8 +641,13 @@ public final class ChatWorkspace extends JPanel {
                     }
                 });
             });
-            meetRoomPanel.startSession("Cuộc gọi với " + ev.senderName(), user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable(), initialMuted);
+            meetRoomPanel.startSession("Cuộc gọi với " + ev.senderName(), user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable(), initialMuted, initialCamOn);
             meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", false);
+            if (initialCamOn) {
+                startLocalCamera();
+            } else {
+                videoEngine.stop();
+            }
             chatService.sendCallSignal(ev.conversationId(), activeCallChannel, "ACCEPT", "");
             if (initialMuted) {
                 chatService.sendCallSignal(ev.conversationId(), activeCallChannel, "MUTE", "true");

@@ -197,4 +197,10 @@ class VoiceAudioEngineTest {
         assertFalse(speaking.get(), "Muting must immediately reset speaking state to false");
         engine.stop();
     }
+
+    @Test
+    void testAvailableCamerasList() {
+        var cameras = VideoCaptureEngine.getAvailableCameras();
+        assertFalse(cameras.isEmpty(), "Camera list must contain at least one default or detected webcam");
+    }
 }

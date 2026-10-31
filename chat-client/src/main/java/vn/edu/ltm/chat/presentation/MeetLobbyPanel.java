@@ -10,13 +10,19 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridBagLayout;
+import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
+import java.awt.image.BufferedImage;
 
 /** Meet channel waiting lobby (Canvas 05). */
 public final class MeetLobbyPanel extends JPanel {
@@ -25,6 +31,10 @@ public final class MeetLobbyPanel extends JPanel {
     private Runnable onOpenVoiceSettings;
     private boolean micEnabled = true;
     private boolean camEnabled = false;
+    private final VideoCaptureEngine lobbyCamEngine = new VideoCaptureEngine();
+    private volatile BufferedImage lobbyPreviewImage;
+    private RoundedPanel previewBox;
+    private JPanel previewContent;
     private final JLabel headerTitle = new JLabel("phòng-họp");
     private final JLabel centerSubtitle = new JLabel("Kiểm tra thiết bị trước khi bắt đầu cuộc gọi.");
 
@@ -51,6 +61,21 @@ public final class MeetLobbyPanel extends JPanel {
 
     public boolean isMicEnabled() {
         return micEnabled;
+    }
+
+    public boolean isCamEnabled() {
+        return camEnabled;
+    }
+
+    public void stopLobbyPreview() {
+        lobbyCamEngine.stop();
+        lobbyPreviewImage = null;
+        if (previewContent != null) {
+            previewContent.setVisible(true);
+        }
+        if (previewBox != null) {
+            previewBox.repaint();
+        }
     }
 
     private JPanel buildHeader() {
@@ -84,7 +109,10 @@ public final class MeetLobbyPanel extends JPanel {
         backBtn.setContentAreaFilled(false);
         backBtn.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
         backBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        backBtn.addActionListener(e -> onBackToChat.run());
+        backBtn.addActionListener(e -> {
+            stopLobbyPreview();
+            onBackToChat.run();
+        });
         header.add(backBtn, BorderLayout.EAST);
 
         return header;
@@ -116,13 +144,33 @@ public final class MeetLobbyPanel extends JPanel {
         card.add(Box.createVerticalStrut(18));
 
         // Camera preview box
-        RoundedPanel previewBox = new RoundedPanel(10);
+        previewBox = new RoundedPanel(10) {
+            @Override
+            protected void paintComponent(Graphics graphics) {
+                super.paintComponent(graphics);
+                BufferedImage frame = lobbyPreviewImage;
+                if (frame != null) {
+                    Graphics2D g2 = (Graphics2D) graphics.create();
+                    g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                    g2.setClip(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 10, 10));
+                    int w = getWidth();
+                    int h = getHeight();
+                    double scale = Math.max((double) w / frame.getWidth(), (double) h / frame.getHeight());
+                    int dw = (int) Math.round(frame.getWidth() * scale);
+                    int dh = (int) Math.round(frame.getHeight() * scale);
+                    int dx = (w - dw) / 2;
+                    int dy = (h - dh) / 2;
+                    g2.drawImage(frame, dx, dy, dw, dh, null);
+                    g2.dispose();
+                }
+            }
+        };
         previewBox.setBackground(new Color(0x15, 0x16, 0x19));
         previewBox.setPreferredSize(new Dimension(490, 200));
         previewBox.setMaximumSize(new Dimension(Short.MAX_VALUE, 200));
         previewBox.setLayout(new GridBagLayout());
 
-        JPanel previewContent = new JPanel();
+        previewContent = new JPanel();
         previewContent.setOpaque(false);
         previewContent.setLayout(new BoxLayout(previewContent, BoxLayout.Y_AXIS));
 
@@ -131,13 +179,13 @@ public final class MeetLobbyPanel extends JPanel {
         previewContent.add(camIcon);
         previewContent.add(Box.createVerticalStrut(8));
 
-        JLabel camNotice = new JLabel("Âm thanh trực tiếp đã sẵn sàng");
+        JLabel camNotice = new JLabel("Âm thanh & Camera trực tiếp sẵn sàng");
         camNotice.setFont(DiscordTheme.bold(14f));
         camNotice.setForeground(DiscordTheme.TEXT_PRIMARY);
         camNotice.setAlignmentX(CENTER_ALIGNMENT);
         previewContent.add(camNotice);
 
-        JLabel camSub = new JLabel("Truyền giọng nói PCM thời gian thực qua kết nối TCP.");
+        JLabel camSub = new JLabel("Truyền giọng nói PCM & hình ảnh thời gian thực qua UDP.");
         camSub.setFont(DiscordTheme.font(11f));
         camSub.setForeground(DiscordTheme.TEXT_MUTED);
         camSub.setAlignmentX(CENTER_ALIGNMENT);
@@ -168,6 +216,17 @@ public final class MeetLobbyPanel extends JPanel {
             camEnabled = !camEnabled;
             camBtn.setText(camEnabled ? "Camera: Bật" : "Camera: Tắt");
             camBtn.setForeground(camEnabled ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_PRIMARY);
+            if (camEnabled) {
+                lobbyCamEngine.start(null, img -> SwingUtilities.invokeLater(() -> {
+                    if (camEnabled) {
+                        lobbyPreviewImage = img;
+                        previewContent.setVisible(false);
+                        previewBox.repaint();
+                    }
+                }));
+            } else {
+                stopLobbyPreview();
+            }
         });
         toggleRow.add(camBtn);
 
@@ -192,7 +251,10 @@ public final class MeetLobbyPanel extends JPanel {
         joinBtn.setPreferredSize(new Dimension(200, 40));
         joinBtn.setMaximumSize(new Dimension(200, 40));
         joinBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        joinBtn.addActionListener(e -> onJoinRoom.run());
+        joinBtn.addActionListener(e -> {
+            stopLobbyPreview();
+            onJoinRoom.run();
+        });
         card.add(joinBtn);
 
         host.add(card);

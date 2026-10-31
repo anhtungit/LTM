@@ -31,6 +31,7 @@ public final class VoiceSettingsDialog extends JDialog {
     private final VoiceAudioEngine voiceEngine;
     private final JComboBox<VoiceAudioEngine.AudioDevice> micCombo = new JComboBox<>();
     private final JComboBox<VoiceAudioEngine.AudioDevice> spkCombo = new JComboBox<>();
+    private final JComboBox<VideoCaptureEngine.CameraDevice> camCombo = new JComboBox<>();
     private final JProgressBar micLevelBar = new JProgressBar(0, 100);
     private volatile boolean testingMic = false;
     private boolean updatingCombos = false;
@@ -154,6 +155,22 @@ public final class VoiceSettingsDialog extends JDialog {
         btnHolder.setBackground(DiscordTheme.SIDEBAR);
         btnHolder.add(testSpkBtn);
         body.add(btnHolder);
+        body.add(Box.createVerticalStrut(16));
+
+        // 3. Camera section
+        body.add(createSectionLabel("THIẾT BỊ HÌNH ẢNH (CAMERA / WEBCAM)"));
+        body.add(Box.createVerticalStrut(6));
+
+        populateCamCombo();
+        styleComboBox(camCombo);
+        camCombo.addActionListener(e -> {
+            if (updatingCombos) return;
+            VideoCaptureEngine.CameraDevice sel = (VideoCaptureEngine.CameraDevice) camCombo.getSelectedItem();
+            if (sel != null) {
+                VideoCaptureEngine.setSelectedCameraId(sel.id());
+            }
+        });
+        body.add(camCombo);
 
         container.add(body, BorderLayout.CENTER);
 
@@ -174,7 +191,7 @@ public final class VoiceSettingsDialog extends JDialog {
 
         setContentPane(container);
         pack();
-        setSize(460, 380);
+        setSize(460, 440);
         setLocationRelativeTo(getOwner());
 
         addWindowListener(new WindowAdapter() {
@@ -236,6 +253,23 @@ public final class VoiceSettingsDialog extends JDialog {
         }
     }
 
+    private void populateCamCombo() {
+        updatingCombos = true;
+        try {
+            String targetId = VideoCaptureEngine.getSelectedCameraId();
+            camCombo.removeAllItems();
+            List<VideoCaptureEngine.CameraDevice> camDevices = VideoCaptureEngine.getAvailableCameras();
+            for (VideoCaptureEngine.CameraDevice dev : camDevices) {
+                camCombo.addItem(dev);
+                if (dev.id().equals(targetId)) {
+                    camCombo.setSelectedItem(dev);
+                }
+            }
+        } finally {
+            updatingCombos = false;
+        }
+    }
+
     private JLabel createSectionLabel(String text) {
         JLabel lbl = new JLabel(text);
         lbl.setFont(DiscordTheme.bold(11f));
@@ -256,7 +290,7 @@ public final class VoiceSettingsDialog extends JDialog {
 
     private void updateLevelBarSafe(int level) {
         SwingUtilities.invokeLater(() -> {
-            if (micCombo.isPopupVisible() || spkCombo.isPopupVisible()) {
+            if (micCombo.isPopupVisible() || spkCombo.isPopupVisible() || camCombo.isPopupVisible()) {
                 return;
             }
             if (micLevelBar.getValue() != level) {

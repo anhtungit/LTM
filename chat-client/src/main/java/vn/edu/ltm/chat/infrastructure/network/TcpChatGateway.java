@@ -136,7 +136,7 @@ public final class TcpChatGateway implements ChatGateway {
     }
 
     private void udpVoiceListenLoop(DatagramSocket ds) {
-        byte[] buf = new byte[2048];
+        byte[] buf = new byte[65507];
         while (!closed && !ds.isClosed()) {
             try {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -157,7 +157,9 @@ public final class TcpChatGateway implements ChatGateway {
                     this.udpVoiceVerified = true;
                     continue;
                 }
-                if (!header.startsWith("LTM_VOICE|")) continue;
+                boolean isVoice = header.startsWith("LTM_VOICE|");
+                boolean isVideo = !isVoice && header.startsWith("LTM_VIDEO|");
+                if (!isVoice && !isVideo) continue;
                 this.udpVoiceVerified = true;
                 String[] parts = header.split("\\|", 5);
                 if (parts.length < 5) continue;
@@ -170,12 +172,12 @@ public final class TcpChatGateway implements ChatGateway {
                 int pcmLen = (offset + len) - pcmOffset;
                 if (pcmLen <= 0) continue;
 
-                byte[] pcm = new byte[pcmLen];
-                System.arraycopy(data, pcmOffset, pcm, 0, pcmLen);
+                byte[] payloadBytes = new byte[pcmLen];
+                System.arraycopy(data, pcmOffset, payloadBytes, 0, pcmLen);
                 var cb = this.onCallSignal;
                 if (cb != null) {
-                    String b64 = Base64.getEncoder().encodeToString(pcm);
-                    cb.accept(new CallSignalEvent(convId, chan, senderId, senderName, "AUDIO", b64));
+                    String b64 = Base64.getEncoder().encodeToString(payloadBytes);
+                    cb.accept(new CallSignalEvent(convId, chan, senderId, senderName, isVoice ? "AUDIO" : "VIDEO", b64));
                 }
             } catch (IOException e) {
                 if (ds.isClosed()) break;
@@ -263,7 +265,7 @@ public final class TcpChatGateway implements ChatGateway {
             var cb = this.onCallSignal;
             if (cb != null) {
                 CallSignalEvent ev = new CallSignalEvent(convId, chan, sId, sName, action, data);
-                if ("AUDIO".equals(action)) {
+                if ("AUDIO".equals(action) || "VIDEO".equals(action)) {
                     cb.accept(ev);
                 } else {
                     SwingUtilities.invokeLater(() -> cb.accept(ev));
@@ -459,20 +461,21 @@ public final class TcpChatGateway implements ChatGateway {
         if (!connected || out == null || conversationId == null || conversationId.isBlank()) {
             return;
         }
-        if ("AUDIO".equals(action)) {
+        if ("AUDIO".equals(action) || "VIDEO".equals(action)) {
             DatagramSocket ds = this.udpVoiceSocket;
             Socket s = this.socket;
             String uid = this.currentUserId;
             if (ds != null && !ds.isClosed() && s != null && !s.isClosed() && uid != null && data != null && !data.isEmpty()) {
                 try {
-                    byte[] pcm = Base64.getDecoder().decode(data);
+                    byte[] rawBytes = Base64.getDecoder().decode(data);
                     String safeName = (currentUserName != null ? currentUserName : "Người dùng").replace('|', ' ');
                     String safeChan = (channel != null ? channel : "").replace('|', ' ');
-                    byte[] hdr = ("LTM_VOICE|" + uid + "|" + safeName + "|" + conversationId + "|" + safeChan + "\n")
+                    String prefix = "AUDIO".equals(action) ? "LTM_VOICE|" : "LTM_VIDEO|";
+                    byte[] hdr = (prefix + uid + "|" + safeName + "|" + conversationId + "|" + safeChan + "\n")
                             .getBytes(StandardCharsets.UTF_8);
-                    byte[] packetBytes = new byte[hdr.length + pcm.length];
+                    byte[] packetBytes = new byte[hdr.length + rawBytes.length];
                     System.arraycopy(hdr, 0, packetBytes, 0, hdr.length);
-                    System.arraycopy(pcm, 0, packetBytes, hdr.length, pcm.length);
+                    System.arraycopy(rawBytes, 0, packetBytes, hdr.length, rawBytes.length);
                     ds.send(new DatagramPacket(packetBytes, packetBytes.length, s.getInetAddress(), s.getPort()));
                 } catch (Exception ignored) {
                 }
