@@ -35,5 +35,27 @@ class VoiceAudioEngineTest {
         // AC-RMS for voice should easily exceed 350.0 threshold (~4200)
         assertTrue(rms > 2000.0, "AC-RMS for voice signal should be high, got: " + rms);
     }
+
+    @Test
+    void testAvailableDevicesHaveFriendlyNames() {
+        var inputs = VoiceAudioEngine.getAvailableInputDevices();
+        assertTrue(!inputs.isEmpty());
+        // Verify default device is present
+        assertTrue(inputs.stream().anyMatch(d -> "default".equals(d.id())));
+
+        var outputs = VoiceAudioEngine.getAvailableOutputDevices();
+        assertTrue(!outputs.isEmpty());
+        assertTrue(outputs.stream().anyMatch(d -> "default".equals(d.id())));
+
+        // Verify none of the output devices have raw technical ALSA bracket names in their displayName
+        for (var out : outputs) {
+            assertTrue(!out.displayName().contains("[plughw:"),
+                    "Output device display name should be user-friendly: " + out.displayName());
+        }
+        for (var in : inputs) {
+            assertTrue(!in.displayName().contains("[plughw:"),
+                    "Input device display name should be user-friendly: " + in.displayName());
+        }
+    }
 }
 

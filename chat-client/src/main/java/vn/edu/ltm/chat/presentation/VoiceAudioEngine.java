@@ -51,7 +51,7 @@ public final class VoiceAudioEngine {
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
-                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription())));
+                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription(), true)));
                 }
             } catch (Exception ignored) {
             }
@@ -67,10 +67,12 @@ public final class VoiceAudioEngine {
         for (Mixer.Info mInfo : AudioSystem.getMixerInfo()) {
             String name = mInfo.getName();
             if (name == null || name.startsWith("Port") || name.contains("[default]")) continue;
+            // Filter out unused secondary dummy HDMI lines (:0,7 and :0,8) on Linux
+            if (name.contains(":0,7") || name.contains(":0,8")) continue;
             try {
                 Mixer mixer = AudioSystem.getMixer(mInfo);
                 if (mixer.isLineSupported(info)) {
-                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription())));
+                    list.add(new AudioDevice(name, formatDeviceName(name, mInfo.getDescription(), false)));
                 }
             } catch (Exception ignored) {
             }
@@ -78,17 +80,30 @@ public final class VoiceAudioEngine {
         return list;
     }
 
-    private static String formatDeviceName(String name, String desc) {
-        if (name == null) return "Thiết bị âm thanh";
-        if (name.contains("USB") || (desc != null && desc.contains("USB"))) {
-            return name + " (Thiết bị USB)";
+    private static String formatDeviceName(String name, String desc, boolean isInput) {
+        if (name == null || name.isBlank()) {
+            return isInput ? "Microphone" : "Loa / Tai nghe";
         }
-        if (name.contains("plughw:0,0") || name.contains("ALC")) {
-            return name + " (Tích hợp bo mạch / Analog)";
+
+        String upper = name.toUpperCase();
+        String descUpper = (desc != null) ? desc.toUpperCase() : "";
+
+        // Format Linux ALSA hardware mixer names to match GNOME / OS friendly names exactly
+        if (upper.contains("PLUGHW") || upper.contains("HW:") || upper.contains("ALSA")) {
+            boolean isUsb = upper.contains("DEVICE") || upper.contains("USB") || descUpper.contains("USB");
+            boolean isHdmi = upper.contains("HDMI") || descUpper.contains("HDMI");
+
+            if (isInput) {
+                if (isUsb) return "Microphone – USB Audio Device";
+                return "Microphone – Built-in Audio";
+            } else {
+                if (isHdmi) return "HDMI / DisplayPort – Built-in Audio";
+                if (isUsb) return "Speakers – USB Audio Device";
+                return "Speakers – Built-in Audio";
+            }
         }
-        if (name.contains("HDMI") || (desc != null && desc.contains("HDMI"))) {
-            return name + " (Ngõ xuất HDMI)";
-        }
+
+        // On Windows / macOS / other systems, keep the clean OS-provided name
         return name;
     }
 
