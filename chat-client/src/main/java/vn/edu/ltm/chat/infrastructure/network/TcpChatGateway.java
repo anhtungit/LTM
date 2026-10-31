@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,6 +44,7 @@ public final class TcpChatGateway implements ChatGateway {
     private final Map<String, Boolean> userPresenceMap = new ConcurrentHashMap<>();
 
     private Socket socket;
+    private DatagramSocket udpVoiceSocket;
     private PrintWriter out;
     private volatile boolean connected = false;
     private volatile boolean closed = false;
@@ -102,6 +105,8 @@ public final class TcpChatGateway implements ChatGateway {
             this.out = new PrintWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8), true);
             this.connected = true;
 
+            initUdpVoiceSocket();
+
             Thread readerThread = new Thread(this::listenLoop, "tcp-client-listener");
             readerThread.setDaemon(true);
             readerThread.start();
@@ -109,6 +114,80 @@ public final class TcpChatGateway implements ChatGateway {
         } catch (IOException e) {
             this.connected = false;
             return false;
+        }
+    }
+
+    private void initUdpVoiceSocket() {
+        try {
+            if (udpVoiceSocket != null && !udpVoiceSocket.isClosed()) {
+                udpVoiceSocket.close();
+            }
+            DatagramSocket ds = new DatagramSocket();
+            this.udpVoiceSocket = ds;
+            Thread udpListener = new Thread(() -> udpVoiceListenLoop(ds), "udp-voice-listener");
+            udpListener.setDaemon(true);
+            udpListener.setPriority(Thread.MAX_PRIORITY);
+            udpListener.start();
+            sendUdpVoiceReg();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void udpVoiceListenLoop(DatagramSocket ds) {
+        byte[] buf = new byte[2048];
+        while (!closed && !ds.isClosed()) {
+            try {
+                DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                ds.receive(packet);
+                byte[] data = packet.getData();
+                int offset = packet.getOffset();
+                int len = packet.getLength();
+                int nl = -1;
+                for (int i = offset; i < offset + len; i++) {
+                    if (data[i] == '\n') {
+                        nl = i;
+                        break;
+                    }
+                }
+                if (nl <= offset) continue;
+                String header = new String(data, offset, nl - offset, StandardCharsets.UTF_8);
+                if (!header.startsWith("LTM_VOICE|")) continue;
+                String[] parts = header.split("\\|", 5);
+                if (parts.length < 5) continue;
+
+                String senderId = parts[1];
+                String senderName = parts[2];
+                String convId = parts[3];
+                String chan = parts[4];
+                int pcmOffset = nl + 1;
+                int pcmLen = (offset + len) - pcmOffset;
+                if (pcmLen <= 0) continue;
+
+                byte[] pcm = new byte[pcmLen];
+                System.arraycopy(data, pcmOffset, pcm, 0, pcmLen);
+                var cb = this.onCallSignal;
+                if (cb != null) {
+                    String b64 = Base64.getEncoder().encodeToString(pcm);
+                    cb.accept(new CallSignalEvent(convId, chan, senderId, senderName, "AUDIO", b64));
+                }
+            } catch (IOException e) {
+                if (ds.isClosed()) break;
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void sendUdpVoiceReg() {
+        DatagramSocket ds = this.udpVoiceSocket;
+        Socket s = this.socket;
+        String uid = this.currentUserId;
+        if (ds == null || ds.isClosed() || s == null || s.isClosed() || uid == null || uid.isBlank()) {
+            return;
+        }
+        try {
+            byte[] payload = ("LTM_VOICE_REG|" + uid + "\n").getBytes(StandardCharsets.UTF_8);
+            ds.send(new DatagramPacket(payload, payload.length, s.getInetAddress(), s.getPort()));
+        } catch (Exception ignored) {
         }
     }
 
@@ -261,6 +340,7 @@ public final class TcpChatGateway implements ChatGateway {
         this.currentUserId = u.id();
         this.currentUserName = u.displayName();
         userPresenceMap.put(u.id(), true);
+        sendUdpVoiceReg();
         return toDomainUser(u);
     }
 
@@ -278,6 +358,7 @@ public final class TcpChatGateway implements ChatGateway {
         this.currentUserId = u.id();
         this.currentUserName = u.displayName();
         userPresenceMap.put(u.id(), true);
+        sendUdpVoiceReg();
         return toDomainUser(u);
     }
 
@@ -370,6 +451,28 @@ public final class TcpChatGateway implements ChatGateway {
     public void sendCallSignal(String conversationId, String channel, String action, String data) {
         if (!connected || out == null || conversationId == null || conversationId.isBlank()) {
             return;
+        }
+        if ("AUDIO".equals(action)) {
+            DatagramSocket ds = this.udpVoiceSocket;
+            Socket s = this.socket;
+            String uid = this.currentUserId;
+            if (ds != null && !ds.isClosed() && s != null && !s.isClosed() && uid != null && data != null && !data.isEmpty()) {
+                try {
+                    byte[] pcm = Base64.getDecoder().decode(data);
+                    String safeName = (currentUserName != null ? currentUserName : "Người dùng").replace('|', ' ');
+                    String safeChan = (channel != null ? channel : "").replace('|', ' ');
+                    byte[] hdr = ("LTM_VOICE|" + uid + "|" + safeName + "|" + conversationId + "|" + safeChan + "\n")
+                            .getBytes(StandardCharsets.UTF_8);
+                    byte[] packetBytes = new byte[hdr.length + pcm.length];
+                    System.arraycopy(hdr, 0, packetBytes, 0, hdr.length);
+                    System.arraycopy(pcm, 0, packetBytes, hdr.length, pcm.length);
+                    ds.send(new DatagramPacket(packetBytes, packetBytes.length, s.getInetAddress(), s.getPort()));
+                    return;
+                } catch (Exception ignored) {
+                }
+            }
+        } else {
+            sendUdpVoiceReg();
         }
         try {
             TcpPacket req = new TcpPacket("CALL_SIGNAL_REQ", UUID.randomUUID().toString())
@@ -635,6 +738,10 @@ public final class TcpChatGateway implements ChatGateway {
     public void close() {
         closed = true;
         connected = false;
+        try {
+            if (udpVoiceSocket != null) udpVoiceSocket.close();
+        } catch (Exception ignored) {
+        }
         try {
             if (socket != null) socket.close();
         } catch (IOException ignored) {

@@ -820,6 +820,8 @@ public final class VoiceAudioEngine {
 
     private void captureLoop(TargetDataLine line, Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         byte[] buffer = new byte[CHUNK_BYTES];
+        byte[] preRollFrame = new byte[CHUNK_BYTES];
+        int preRollLen = 0;
         boolean wasSpeaking = false;
         long lastSoundTime = 0;
 
@@ -839,6 +841,7 @@ public final class VoiceAudioEngine {
                         }
 
                         boolean speaking = (now - lastSoundTime) < 700; // 700ms hangover hold keeps inter-word pauses continuous
+                        boolean justStartedSpeaking = speaking && !wasSpeaking;
                         if (speaking != wasSpeaking) {
                             wasSpeaking = speaking;
                             if (onSpeakingState != null) {
@@ -846,16 +849,28 @@ public final class VoiceAudioEngine {
                             }
                         }
 
-                        // Voice Activity Gate (DTX): transmit continuously throughout the entire talkspurt
+                        // Voice Activity Gate (DTX) with 40ms pre-roll so initial consonant is never clipped
                         if (speaking && onEncodedChunk != null) {
+                            if (justStartedSpeaking && preRollLen > 0) {
+                                byte[] preSlice = (preRollLen == preRollFrame.length)
+                                        ? preRollFrame : java.util.Arrays.copyOf(preRollFrame, preRollLen);
+                                onEncodedChunk.accept(Base64.getEncoder().encodeToString(preSlice));
+                                preRollLen = 0;
+                            }
                             byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
                             onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
+                        } else if (!speaking) {
+                            System.arraycopy(buffer, 0, preRollFrame, 0, read);
+                            preRollLen = read;
                         }
-                    } else if (wasSpeaking) {
-                        wasSpeaking = false;
-                        lastSoundTime = 0;
-                        if (onSpeakingState != null) {
-                            onSpeakingState.accept(false);
+                    } else {
+                        preRollLen = 0;
+                        if (wasSpeaking) {
+                            wasSpeaking = false;
+                            lastSoundTime = 0;
+                            if (onSpeakingState != null) {
+                                onSpeakingState.accept(false);
+                            }
                         }
                     }
                 }

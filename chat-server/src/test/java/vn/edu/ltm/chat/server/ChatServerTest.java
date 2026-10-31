@@ -554,6 +554,28 @@ class ChatServerTest {
             assertEquals(u1.id(), callBroadcast.getString("conversationId"));
             assertEquals("AUDIO", callBroadcast.getString("action"));
             assertEquals("AAECAw==", callBroadcast.getString("data"));
+
+            // UDP Voice Relay: User 2 registers UDP endpoint, User 1 sends binary PCM over UDP
+            try (java.net.DatagramSocket udp1 = new java.net.DatagramSocket();
+                 java.net.DatagramSocket udp2 = new java.net.DatagramSocket()) {
+                udp2.setSoTimeout(1500);
+                java.net.InetAddress loopback = java.net.InetAddress.getByName("127.0.0.1");
+
+                byte[] reg2 = ("LTM_VOICE_REG|" + u2.id() + "\n").getBytes(StandardCharsets.UTF_8);
+                udp2.send(new java.net.DatagramPacket(reg2, reg2.length, loopback, port));
+                Thread.sleep(50);
+
+                byte[] voicePayload = ("LTM_VOICE|" + u1.id() + "|" + u1.displayName() + "|" + u2.id() + "|\nPCM_DATA")
+                        .getBytes(StandardCharsets.UTF_8);
+                udp1.send(new java.net.DatagramPacket(voicePayload, voicePayload.length, loopback, port));
+
+                byte[] recvBuf = new byte[256];
+                java.net.DatagramPacket received = new java.net.DatagramPacket(recvBuf, recvBuf.length);
+                udp2.receive(received);
+                String receivedStr = new String(received.getData(), received.getOffset(), received.getLength(), StandardCharsets.UTF_8);
+                assertTrue(receivedStr.startsWith("LTM_VOICE|" + u1.id() + "|Typer One|" + u1.id() + "|\n"));
+                assertTrue(receivedStr.endsWith("PCM_DATA"));
+            }
         }
     }
 

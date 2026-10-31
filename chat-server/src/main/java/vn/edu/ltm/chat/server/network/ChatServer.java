@@ -36,10 +36,12 @@ public final class ChatServer {
     private final DatabaseManager db;
     private final ExecutorService threadPool = Executors.newCachedThreadPool();
     private final ConcurrentHashMap<String, ClientHandler> onlineRegistry = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, InetSocketAddress> udpVoiceEndpoints = new ConcurrentHashMap<>();
     private final Set<ClientHandler> activeHandlers = new CopyOnWriteArraySet<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ServerSocket serverSocket;
     private DatagramSocket discoverySocket;
+    private DatagramSocket voiceUdpSocket;
 
     public ChatServer(int port, DatabaseManager db) {
         this(port, port == DEFAULT_PORT ? DISCOVERY_UDP_PORT : 0, db);
@@ -57,6 +59,7 @@ public final class ChatServer {
         }
         serverSocket = new ServerSocket(port);
         startUdpDiscoveryResponder();
+        startUdpVoiceRelay(serverSocket.getLocalPort());
 
         String lanIp = detectLanIp();
         int actualPort = serverSocket.getLocalPort();
@@ -141,6 +144,98 @@ public final class ChatServer {
         }
     }
 
+    private void startUdpVoiceRelay(int udpPort) {
+        try {
+            DatagramSocket vs = new DatagramSocket(null);
+            vs.setReuseAddress(true);
+            vs.bind(new InetSocketAddress("0.0.0.0", udpPort));
+            this.voiceUdpSocket = vs;
+
+            threadPool.submit(() -> {
+                byte[] buf = new byte[2048];
+                while (running.get() && !vs.isClosed()) {
+                    try {
+                        DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                        vs.receive(packet);
+                        handleUdpVoicePacket(vs, packet);
+                    } catch (IOException ignored) {
+                    }
+                }
+            });
+        } catch (IOException e) {
+            System.err.println("[Voice-UDP] Không thể mở cổng UDP thoại " + udpPort + ": " + e.getMessage());
+        }
+    }
+
+    private void handleUdpVoicePacket(DatagramSocket vs, DatagramPacket packet) {
+        byte[] data = packet.getData();
+        int offset = packet.getOffset();
+        int len = packet.getLength();
+        int nl = -1;
+        for (int i = offset; i < offset + len; i++) {
+            if (data[i] == '\n') {
+                nl = i;
+                break;
+            }
+        }
+        if (nl <= offset) return;
+
+        String header = new String(data, offset, nl - offset, StandardCharsets.UTF_8);
+        InetSocketAddress senderAddr = (InetSocketAddress) packet.getSocketAddress();
+
+        if (header.startsWith("LTM_VOICE_REG|")) {
+            String uid = header.substring("LTM_VOICE_REG|".length()).trim();
+            if (!uid.isEmpty() && isUserOnline(uid)) {
+                udpVoiceEndpoints.put(uid, senderAddr);
+            }
+            return;
+        }
+
+        if (!header.startsWith("LTM_VOICE|")) return;
+        String[] parts = header.split("\\|", 5);
+        if (parts.length < 5) return;
+
+        String senderId = parts[1];
+        String senderName = parts[2];
+        String convId = parts[3];
+        if (senderId.isEmpty() || convId.isEmpty() || !isUserOnline(senderId)) return;
+
+        udpVoiceEndpoints.put(senderId, senderAddr);
+        int pcmOffset = nl + 1;
+        int pcmLen = (offset + len) - pcmOffset;
+        if (pcmLen <= 0) return;
+
+        if (db.isGroupConversation(convId)) {
+            if (!db.isUserMemberOfGroup(senderId, convId)) return;
+            byte[] forwardBytes = new byte[len];
+            System.arraycopy(data, offset, forwardBytes, 0, len);
+            for (String memberId : onlineRegistry.keySet()) {
+                if (senderId.equals(memberId) || !db.isUserMemberOfGroup(memberId, convId)) continue;
+                InetSocketAddress target = udpVoiceEndpoints.get(memberId);
+                if (target != null) {
+                    try {
+                        vs.send(new DatagramPacket(forwardBytes, forwardBytes.length, target));
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+            return;
+        }
+
+        InetSocketAddress target = udpVoiceEndpoints.get(convId);
+        if (target != null) {
+            byte[] outHdr = ("LTM_VOICE|" + senderId + "|" + senderName + "|" + senderId + "|\n")
+                    .getBytes(StandardCharsets.UTF_8);
+            byte[] outBuf = new byte[outHdr.length + pcmLen];
+            System.arraycopy(outHdr, 0, outBuf, 0, outHdr.length);
+            System.arraycopy(data, pcmOffset, outBuf, outHdr.length, pcmLen);
+            try {
+                vs.send(new DatagramPacket(outBuf, outBuf.length, target));
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
     private static String detectLanIp() {
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
@@ -185,7 +280,9 @@ public final class ChatServer {
     public void unregisterHandler(ClientHandler handler) {
         activeHandlers.remove(handler);
         if (handler.getCurrentUser() != null) {
-            onlineRegistry.remove(handler.getCurrentUser().id(), handler);
+            String uid = handler.getCurrentUser().id();
+            onlineRegistry.remove(uid, handler);
+            udpVoiceEndpoints.remove(uid);
         }
     }
 
@@ -214,6 +311,12 @@ public final class ChatServer {
         try {
             if (discoverySocket != null && !discoverySocket.isClosed()) {
                 discoverySocket.close();
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            if (voiceUdpSocket != null && !voiceUdpSocket.isClosed()) {
+                voiceUdpSocket.close();
             }
         } catch (Exception ignored) {
         }
