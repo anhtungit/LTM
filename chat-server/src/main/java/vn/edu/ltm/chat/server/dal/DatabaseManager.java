@@ -65,7 +65,9 @@ public final class DatabaseManager implements AutoCloseable {
     private final String dbPassword;
     private final boolean isPostgres;
     private final FileStorageRepository fileStorage;
+    private final Map<String, ConversationDto> conversationCache = new java.util.concurrent.ConcurrentHashMap<>();
     private Connection sharedPostgresConn;
+    private long lastValidCheckMs = 0L;
 
     public DatabaseManager(String rawPgUrl, String storagePath, boolean isPostgres) {
         this.isPostgres = isPostgres;
@@ -191,10 +193,15 @@ public final class DatabaseManager implements AutoCloseable {
     }
 
     private synchronized Connection connect() throws SQLException {
+        long now = System.currentTimeMillis();
         boolean needReconnect = (sharedPostgresConn == null);
         if (!needReconnect) {
             try {
-                needReconnect = sharedPostgresConn.isClosed() || (isPostgres && !sharedPostgresConn.isValid(2));
+                boolean checkValid = isPostgres && (now - lastValidCheckMs > 10_000L);
+                needReconnect = sharedPostgresConn.isClosed() || (checkValid && !sharedPostgresConn.isValid(2));
+                if (checkValid && !needReconnect) {
+                    lastValidCheckMs = now;
+                }
             } catch (SQLException e) {
                 needReconnect = true;
             }
@@ -209,6 +216,7 @@ public final class DatabaseManager implements AutoCloseable {
             sharedPostgresConn = (dbUser != null && dbPassword != null)
                     ? DriverManager.getConnection(jdbcUrl, dbUser, dbPassword)
                     : DriverManager.getConnection(jdbcUrl);
+            lastValidCheckMs = now;
         }
         final Connection delegate = sharedPostgresConn;
         return (Connection) java.lang.reflect.Proxy.newProxyInstance(
@@ -259,6 +267,10 @@ public final class DatabaseManager implements AutoCloseable {
     private void initSchemaAndSeed() throws SQLException {
         try (Connection conn = connect()) {
             DatabaseSchemaMigrator.initialize(this, conn);
+        }
+        try {
+            listConversations();
+        } catch (Exception ignored) {
         }
     }
 
@@ -524,6 +536,9 @@ public final class DatabaseManager implements AutoCloseable {
             ps.setString(9, GSON.toJson(c.voiceChannels()));
             ps.executeUpdate();
         }
+        if (c.id() != null) {
+            conversationCache.put(c.id(), c);
+        }
     }
 
     private void insertConversationIfAbsent(ConversationDto c) throws SQLException {
@@ -540,13 +555,16 @@ public final class DatabaseManager implements AutoCloseable {
             ps.setString(9, GSON.toJson(c.voiceChannels()));
             ps.executeUpdate();
         }
+        if (c.id() != null) {
+            conversationCache.putIfAbsent(c.id(), c);
+        }
     }
 
     private ConversationDto mapConversation(ResultSet rs) throws SQLException {
         String[] members = GSON.fromJson(rs.getString("members_json"), String[].class);
         String[] channels = GSON.fromJson(rs.getString("channels_json"), String[].class);
         String[] voiceChannels = GSON.fromJson(rs.getString("voice_channels_json"), String[].class);
-        return new ConversationDto(
+        ConversationDto dto = new ConversationDto(
                 rs.getString("id"),
                 rs.getString("display_name"),
                 rs.getString("initials"),
@@ -557,6 +575,10 @@ public final class DatabaseManager implements AutoCloseable {
                 channels != null ? Arrays.asList(channels) : List.of(),
                 voiceChannels != null ? Arrays.asList(voiceChannels) : List.of()
         );
+        if (dto.id() != null) {
+            conversationCache.put(dto.id(), dto);
+        }
+        return dto;
     }
 
     public synchronized List<ConversationDto> listConversations() {
@@ -640,7 +662,7 @@ public final class DatabaseManager implements AutoCloseable {
         return result;
     }
 
-    public synchronized boolean isUserMemberOfGroup(String userId, String groupConvId) {
+    public boolean isUserMemberOfGroup(String userId, String groupConvId) {
         if (userId == null || userId.isBlank() || groupConvId == null || groupConvId.isBlank()) {
             return false;
         }
@@ -668,14 +690,26 @@ public final class DatabaseManager implements AutoCloseable {
         return false;
     }
 
-    public synchronized boolean isGroupConversation(String conversationId) {
+    public boolean isGroupConversation(String conversationId) {
         if (conversationId == null || conversationId.isBlank()) return false;
         ConversationDto c = getConversation(conversationId);
         return c != null && c.isGroup();
     }
 
-    public synchronized ConversationDto getConversation(String id) {
+    public ConversationDto getConversation(String id) {
         if (id == null || id.isBlank()) return null;
+        ConversationDto cached = conversationCache.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        return queryConversationFromDb(id);
+    }
+
+    private synchronized ConversationDto queryConversationFromDb(String id) {
+        ConversationDto cached = conversationCache.get(id);
+        if (cached != null) {
+            return cached;
+        }
         String sql = "SELECT id, display_name, initials, about, online, is_group, members_json, channels_json, voice_channels_json FROM conversations WHERE id = ?";
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(sql)) {

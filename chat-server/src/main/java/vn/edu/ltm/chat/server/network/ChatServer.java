@@ -187,6 +187,11 @@ public final class ChatServer {
             String uid = header.substring("LTM_VOICE_REG|".length()).trim();
             if (!uid.isEmpty() && isUserOnline(uid)) {
                 udpVoiceEndpoints.put(uid, senderAddr);
+                byte[] ack = "LTM_VOICE_ACK\n".getBytes(StandardCharsets.UTF_8);
+                try {
+                    vs.send(new DatagramPacket(ack, ack.length, senderAddr));
+                } catch (IOException ignored) {
+                }
             }
             return;
         }
@@ -232,6 +237,19 @@ public final class ChatServer {
             try {
                 vs.send(new DatagramPacket(outBuf, outBuf.length, target));
             } catch (IOException ignored) {
+            }
+        } else {
+            ClientHandler peerHandler = onlineRegistry.get(convId);
+            if (peerHandler != null) {
+                byte[] pcm = new byte[pcmLen];
+                System.arraycopy(data, pcmOffset, pcm, 0, pcmLen);
+                peerHandler.sendPacket(Packet.broadcast("CALL_SIGNAL_BROADCAST")
+                        .put("conversationId", senderId)
+                        .put("channel", "")
+                        .put("senderId", senderId)
+                        .put("senderName", senderName)
+                        .put("action", "AUDIO")
+                        .put("data", java.util.Base64.getEncoder().encodeToString(pcm)));
             }
         }
     }

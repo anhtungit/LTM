@@ -563,7 +563,12 @@ class ChatServerTest {
 
                 byte[] reg2 = ("LTM_VOICE_REG|" + u2.id() + "\n").getBytes(StandardCharsets.UTF_8);
                 udp2.send(new java.net.DatagramPacket(reg2, reg2.length, loopback, port));
-                Thread.sleep(50);
+
+                byte[] ackBuf = new byte[64];
+                java.net.DatagramPacket ackPkt = new java.net.DatagramPacket(ackBuf, ackBuf.length);
+                udp2.receive(ackPkt);
+                String ackStr = new String(ackPkt.getData(), ackPkt.getOffset(), ackPkt.getLength(), StandardCharsets.UTF_8);
+                assertTrue(ackStr.startsWith("LTM_VOICE_ACK"));
 
                 byte[] voicePayload = ("LTM_VOICE|" + u1.id() + "|" + u1.displayName() + "|" + u2.id() + "|\nPCM_DATA")
                         .getBytes(StandardCharsets.UTF_8);

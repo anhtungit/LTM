@@ -28,10 +28,11 @@ public final class VoiceAudioEngine {
     // shortcut: 16kHz 16-bit mono PCM over Base64 TCP (~32KB/s), upgrade to UDP Opus when scaling > 5 peers
     public static final AudioFormat FORMAT = new AudioFormat(16000.0f, 16, 1, true, false);
     public static final int CHUNK_BYTES = 1280; // 40ms frame at 16kHz 16-bit mono (25 fps for low-jitter streaming)
-    private static final int SPEAKER_BUFFER_BYTES = CHUNK_BYTES * 8; // 320ms hardware buffer
+    private static final int SPEAKER_BUFFER_BYTES = CHUNK_BYTES * 4; // 160ms hardware buffer for clock-paced DMA
     private static final int MIC_BUFFER_BYTES = CHUNK_BYTES * 4;     // 160ms hardware buffer
-    private static final int JITTER_QUEUE_CAPACITY = 16;             // Max 640ms jitter buffer
+    private static final int JITTER_QUEUE_CAPACITY = 20;             // Max 800ms jitter buffer
     private static final int PREBUFFER_FRAMES = 3;                   // 120ms pre-buffer before talkspurt playback
+    private static final byte[] SILENCE_FRAME = new byte[CHUNK_BYTES];
 
     public record AudioDevice(String id, String displayName) {
         @Override
@@ -820,27 +821,33 @@ public final class VoiceAudioEngine {
 
     private void captureLoop(TargetDataLine line, Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         byte[] buffer = new byte[CHUNK_BYTES];
-        byte[] preRollFrame = new byte[CHUNK_BYTES];
-        int preRollLen = 0;
+        byte[] preRollOlder = new byte[CHUNK_BYTES];
+        byte[] preRollNewer = new byte[CHUNK_BYTES];
+        int preRollCount = 0;
         boolean wasSpeaking = false;
         long lastSoundTime = 0;
 
         while (running && this.micLine == line && line.isOpen()) {
             try {
-                int read = line.read(buffer, 0, buffer.length);
+                int read = 0;
+                while (read < CHUNK_BYTES && running && this.micLine == line && line.isOpen()) {
+                    int r = line.read(buffer, read, CHUNK_BYTES - read);
+                    if (r <= 0) break;
+                    read += r;
+                }
                 if (read > 0) {
                     double rms = computeRms(buffer, read);
                     this.currentMicRms = rms;
 
                     if (!muted) {
-                        boolean isSound = rms > 150.0; // Sensitive AC-RMS threshold so soft syllables are not clipped
+                        boolean isSound = rms > 40.0; // Sensitive AC-RMS threshold so quiet speech is never gated out
                         long now = System.currentTimeMillis();
 
                         if (isSound) {
                             lastSoundTime = now;
                         }
 
-                        boolean speaking = (now - lastSoundTime) < 700; // 700ms hangover hold keeps inter-word pauses continuous
+                        boolean speaking = (now - lastSoundTime) < 1000; // 1000ms hangover keeps full sentences continuous
                         boolean justStartedSpeaking = speaking && !wasSpeaking;
                         if (speaking != wasSpeaking) {
                             wasSpeaking = speaking;
@@ -849,22 +856,28 @@ public final class VoiceAudioEngine {
                             }
                         }
 
-                        // Voice Activity Gate (DTX) with 40ms pre-roll so initial consonant is never clipped
+                        // Voice Activity Gate (DTX) with 2-frame (80ms) pre-roll so receiver pre-buffer fills immediately
                         if (speaking && onEncodedChunk != null) {
-                            if (justStartedSpeaking && preRollLen > 0) {
-                                byte[] preSlice = (preRollLen == preRollFrame.length)
-                                        ? preRollFrame : java.util.Arrays.copyOf(preRollFrame, preRollLen);
-                                onEncodedChunk.accept(Base64.getEncoder().encodeToString(preSlice));
-                                preRollLen = 0;
+                            if (justStartedSpeaking) {
+                                if (preRollCount >= 2) {
+                                    onEncodedChunk.accept(Base64.getEncoder().encodeToString(preRollOlder));
+                                }
+                                if (preRollCount >= 1) {
+                                    onEncodedChunk.accept(Base64.getEncoder().encodeToString(preRollNewer));
+                                }
+                                preRollCount = 0;
                             }
                             byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
                             onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
-                        } else if (!speaking) {
-                            System.arraycopy(buffer, 0, preRollFrame, 0, read);
-                            preRollLen = read;
+                        } else if (!speaking && read == CHUNK_BYTES) {
+                            System.arraycopy(preRollNewer, 0, preRollOlder, 0, CHUNK_BYTES);
+                            System.arraycopy(buffer, 0, preRollNewer, 0, CHUNK_BYTES);
+                            if (preRollCount < 2) {
+                                preRollCount++;
+                            }
                         }
                     } else {
-                        preRollLen = 0;
+                        preRollCount = 0;
                         if (wasSpeaking) {
                             wasSpeaking = false;
                             lastSoundTime = 0;
@@ -887,24 +900,45 @@ public final class VoiceAudioEngine {
 
     private void playbackLoop() {
         boolean prebuffering = true;
+        int emptyTicks = 0;
+        byte[] lastFrame = null;
         while (running) {
             try {
+                SourceDataLine out = this.speakerLine;
+                if (out == null || !out.isOpen()) {
+                    Thread.sleep(20);
+                    continue;
+                }
                 if (prebuffering) {
-                    // Pre-buffer 3 frames (120ms) before starting a talkspurt to absorb network jitter
                     if (playbackQueue.size() < PREBUFFER_FRAMES) {
-                        Thread.sleep(15);
+                        // Keep ALSA/PipeWire DMA buffer continuously fed with silence to prevent XRUN underruns
+                        out.write(SILENCE_FRAME, 0, CHUNK_BYTES);
                         continue;
                     }
                     prebuffering = false;
+                    emptyTicks = 0;
                 }
-                byte[] pcm = playbackQueue.poll(140, TimeUnit.MILLISECONDS);
-                if (pcm == null) {
-                    prebuffering = true;
-                    continue;
+                // Trim excess queue buildup (>320ms) if sender clock is slightly faster
+                while (playbackQueue.size() > 8) {
+                    playbackQueue.poll();
                 }
-                SourceDataLine out = this.speakerLine;
-                if (out != null && out.isOpen()) {
+                byte[] pcm = playbackQueue.poll(15, TimeUnit.MILLISECONDS);
+                if (pcm != null) {
+                    emptyTicks = 0;
+                    lastFrame = pcm;
                     out.write(pcm, 0, pcm.length);
+                } else {
+                    emptyTicks++;
+                    if (emptyTicks == 1 && lastFrame != null && lastFrame.length == CHUNK_BYTES) {
+                        byte[] concealed = attenuateFrame(lastFrame);
+                        out.write(concealed, 0, concealed.length);
+                    } else {
+                        out.write(SILENCE_FRAME, 0, CHUNK_BYTES);
+                    }
+                    if (emptyTicks >= 8) {
+                        prebuffering = true;
+                        lastFrame = null;
+                    }
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -912,6 +946,19 @@ public final class VoiceAudioEngine {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    private static byte[] attenuateFrame(byte[] pcm) {
+        byte[] out = new byte[pcm.length];
+        int samples = pcm.length / 2;
+        for (int i = 0; i < samples; i++) {
+            int low = pcm[i * 2] & 0xFF;
+            int high = pcm[i * 2 + 1];
+            short s = (short) (((high << 8) | low) >> 1);
+            out[i * 2] = (byte) (s & 0xFF);
+            out[i * 2 + 1] = (byte) ((s >> 8) & 0xFF);
+        }
+        return out;
     }
 
     public static double computeRms(byte[] pcmData, int length) {

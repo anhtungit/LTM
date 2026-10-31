@@ -45,6 +45,7 @@ public final class TcpChatGateway implements ChatGateway {
 
     private Socket socket;
     private DatagramSocket udpVoiceSocket;
+    private volatile boolean udpVoiceVerified = false;
     private PrintWriter out;
     private volatile boolean connected = false;
     private volatile boolean closed = false;
@@ -122,6 +123,7 @@ public final class TcpChatGateway implements ChatGateway {
             if (udpVoiceSocket != null && !udpVoiceSocket.isClosed()) {
                 udpVoiceSocket.close();
             }
+            this.udpVoiceVerified = false;
             DatagramSocket ds = new DatagramSocket();
             this.udpVoiceSocket = ds;
             Thread udpListener = new Thread(() -> udpVoiceListenLoop(ds), "udp-voice-listener");
@@ -151,7 +153,12 @@ public final class TcpChatGateway implements ChatGateway {
                 }
                 if (nl <= offset) continue;
                 String header = new String(data, offset, nl - offset, StandardCharsets.UTF_8);
+                if (header.startsWith("LTM_VOICE_ACK")) {
+                    this.udpVoiceVerified = true;
+                    continue;
+                }
                 if (!header.startsWith("LTM_VOICE|")) continue;
+                this.udpVoiceVerified = true;
                 String[] parts = header.split("\\|", 5);
                 if (parts.length < 5) continue;
 
@@ -467,7 +474,10 @@ public final class TcpChatGateway implements ChatGateway {
                     System.arraycopy(hdr, 0, packetBytes, 0, hdr.length);
                     System.arraycopy(pcm, 0, packetBytes, hdr.length, pcm.length);
                     ds.send(new DatagramPacket(packetBytes, packetBytes.length, s.getInetAddress(), s.getPort()));
-                    return;
+                    if (udpVoiceVerified) {
+                        return;
+                    }
+                    sendUdpVoiceReg();
                 } catch (Exception ignored) {
                 }
             }
