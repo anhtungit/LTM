@@ -1,7 +1,11 @@
 package vn.edu.ltm.chat.presentation;
 
+import com.github.sarxos.webcam.Webcam;
+import com.github.sarxos.webcam.WebcamResolution;
+
 import javax.imageio.ImageIO;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
@@ -24,6 +28,7 @@ import java.util.function.Consumer;
 
 /**
  * Real-time MJPEG webcam capture engine (320x240 @ 10fps) with multi-instance shared frame support.
+ * Uses native DirectShow/V4L2 via Sarxos Webcam Capture (zero external install) with FFmpeg fallback.
  */
 public final class VideoCaptureEngine {
     // shortcut: 320x240 MJPEG @ 10fps (~3.5KB/frame over UDP), upgrade to H.264/VP8 RTP when scaling > 4 video peers
@@ -41,26 +46,39 @@ public final class VideoCaptureEngine {
 
     private volatile boolean running = false;
     private volatile Process captureProcess;
+    private volatile Webcam activeWebcam;
     private Thread captureThread;
 
     public static List<CameraDevice> getAvailableCameras() {
         List<CameraDevice> list = new ArrayList<>();
         list.add(new CameraDevice("default", "Mặc định hệ thống"));
 
+        try {
+            List<Webcam> webcams = Webcam.getWebcams();
+            if (webcams != null && !webcams.isEmpty()) {
+                Set<String> seen = new LinkedHashSet<>();
+                for (Webcam w : webcams) {
+                    String name = w.getName();
+                    if (name != null && seen.add(name)) {
+                        list.add(new CameraDevice(name, name));
+                    }
+                }
+                return list;
+            }
+        } catch (Throwable ignored) {
+        }
+
         String os = System.getProperty("os.name", "").toLowerCase();
-        if (os.contains("win")) {
-            list.addAll(detectWindowsCameras());
-        } else if (os.contains("linux")) {
+        if (os.contains("linux")) {
             File sysClass = new File("/sys/class/video4linux");
             File[] nodes = sysClass.listFiles();
             if (nodes != null) {
                 java.util.Arrays.sort(nodes, java.util.Comparator.comparing(File::getName));
                 Set<String> seenNames = new LinkedHashSet<>();
                 for (File node : nodes) {
-                    String devName = node.getName(); // e.g. video0
+                    String devName = node.getName();
                     File devFile = new File("/dev/" + devName);
                     if (!devFile.exists()) continue;
-                    // Skip metadata secondary nodes (index > 0) when index file is present
                     File idxFile = new File(node, "index");
                     if (idxFile.isFile()) {
                         try {
@@ -90,31 +108,6 @@ public final class VideoCaptureEngine {
         return list;
     }
 
-    private static List<CameraDevice> detectWindowsCameras() {
-        List<CameraDevice> list = new ArrayList<>();
-        try {
-            // Run powershell to query PNP camera/video capture devices
-            Process p = new ProcessBuilder(
-                    "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                    "Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in @('Camera','Image') } | Select-Object -ExpandProperty Name"
-            ).redirectErrorStream(true).start();
-
-            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-                String line;
-                Set<String> seen = new LinkedHashSet<>();
-                while ((line = reader.readLine()) != null) {
-                    String name = line.trim();
-                    if (!name.isEmpty() && seen.add(name)) {
-                        list.add(new CameraDevice("video=" + name, name));
-                    }
-                }
-            }
-            p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Exception ignored) {
-        }
-        return list;
-    }
-
     public static String getSelectedCameraId() {
         return selectedCameraId;
     }
@@ -133,6 +126,14 @@ public final class VideoCaptureEngine {
 
     public synchronized void stop() {
         running = false;
+        Webcam wc = this.activeWebcam;
+        this.activeWebcam = null;
+        if (wc != null) {
+            try {
+                wc.close();
+            } catch (Throwable ignored) {
+            }
+        }
         Process proc = this.captureProcess;
         this.captureProcess = null;
         if (proc != null) {
@@ -155,6 +156,84 @@ public final class VideoCaptureEngine {
     }
 
     private void captureLoop(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+        // 1. Try native webcam capture via Sarxos (direct DirectShow/V4L2 native bridge, zero external deps)
+        if (captureViaSarxos(onJpegFrame, onLocalPreview)) {
+            return;
+        }
+
+        // 2. Fallback to FFmpeg if available
+        if (captureViaFfmpeg(onJpegFrame, onLocalPreview)) {
+            return;
+        }
+
+        // 3. Fallback when 2nd client runs on same machine (/dev/video0 busy) or no hardware webcam
+        if (running) {
+            fallbackLoop(onJpegFrame, onLocalPreview);
+        }
+    }
+
+    private boolean captureViaSarxos(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+        Webcam webcam = null;
+        try {
+            String sel = selectedCameraId;
+            if (sel != null && !sel.equalsIgnoreCase("default")) {
+                for (Webcam w : Webcam.getWebcams()) {
+                    if (sel.equalsIgnoreCase(w.getName())) {
+                        webcam = w;
+                        break;
+                    }
+                }
+            }
+            if (webcam == null) {
+                webcam = Webcam.getDefault();
+            }
+            if (webcam == null) {
+                return false;
+            }
+
+            webcam.setCustomViewSizes(new Dimension[] { new Dimension(WIDTH, HEIGHT) });
+            webcam.setViewSize(new Dimension(WIDTH, HEIGHT));
+            if (!webcam.open()) {
+                return false;
+            }
+            this.activeWebcam = webcam;
+
+            boolean capturedAny = false;
+            while (running && webcam.isOpen()) {
+                BufferedImage raw = webcam.getImage();
+                if (raw != null) {
+                    capturedAny = true;
+                    // Scale if driver returned different resolution
+                    BufferedImage frame = (raw.getWidth() == WIDTH && raw.getHeight() == HEIGHT) ? raw : scaleFrame(raw);
+                    byte[] jpeg = encodeToJpeg(frame);
+                    if (jpeg != null) {
+                        publishSharedFrame(jpeg);
+                        if (onLocalPreview != null) onLocalPreview.accept(frame);
+                        if (onJpegFrame != null) onJpegFrame.accept(jpeg);
+                    }
+                }
+                try {
+                    Thread.sleep(100); // 10 fps
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            return capturedAny;
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            if (webcam != null) {
+                try {
+                    webcam.close();
+                } catch (Throwable ignored) {
+                }
+            }
+            this.activeWebcam = null;
+        }
+    }
+
+    private boolean captureViaFfmpeg(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
         Process proc = startFfmpegProcess();
         this.captureProcess = proc;
         boolean capturedAnyHardwareFrame = false;
@@ -199,10 +278,25 @@ public final class VideoCaptureEngine {
                 proc.destroyForcibly();
             }
         }
+        return capturedAnyHardwareFrame;
+    }
 
-        // Fallback when 2nd client runs on same machine (/dev/video0 busy) or no hardware webcam
-        if (running && !capturedAnyHardwareFrame) {
-            fallbackLoop(onJpegFrame, onLocalPreview);
+    private static BufferedImage scaleFrame(BufferedImage src) {
+        BufferedImage dest = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = dest.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, 0, 0, WIDTH, HEIGHT, null);
+        g.dispose();
+        return dest;
+    }
+
+    private static byte[] encodeToJpeg(BufferedImage img) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(8192);
+            ImageIO.write(img, "jpg", baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -289,16 +383,7 @@ public final class VideoCaptureEngine {
     private static Process startFfmpegProcess() {
         String os = System.getProperty("os.name", "").toLowerCase();
         try {
-            if (os.contains("win")) {
-                String dev = resolveWindowsDevice();
-                if (dev == null) return null;
-                return new ProcessBuilder(
-                        "ffmpeg", "-nostdin", "-loglevel", "quiet",
-                        "-f", "dshow", "-i", dev,
-                        "-vf", "fps=10,scale=" + WIDTH + ":" + HEIGHT + ",hflip",
-                        "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "14", "-"
-                ).redirectErrorStream(false).start();
-            } else if (os.contains("linux")) {
+            if (os.contains("linux")) {
                 String dev = resolveLinuxDevice();
                 if (dev == null) return null;
                 return new ProcessBuilder(
@@ -309,19 +394,6 @@ public final class VideoCaptureEngine {
                 ).redirectErrorStream(false).start();
             }
         } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    private static String resolveWindowsDevice() {
-        String sel = selectedCameraId;
-        if (sel != null && !sel.equalsIgnoreCase("default") && sel.startsWith("video=")) {
-            return sel;
-        }
-        // First detected device
-        List<CameraDevice> cams = detectWindowsCameras();
-        if (!cams.isEmpty()) {
-            return cams.get(0).id();
         }
         return null;
     }
