@@ -48,7 +48,9 @@ public final class VideoCaptureEngine {
         list.add(new CameraDevice("default", "Mặc định hệ thống"));
 
         String os = System.getProperty("os.name", "").toLowerCase();
-        if (os.contains("linux")) {
+        if (os.contains("win")) {
+            list.addAll(detectWindowsCameras());
+        } else if (os.contains("linux")) {
             File sysClass = new File("/sys/class/video4linux");
             File[] nodes = sysClass.listFiles();
             if (nodes != null) {
@@ -84,6 +86,31 @@ public final class VideoCaptureEngine {
                     }
                 }
             }
+        }
+        return list;
+    }
+
+    private static List<CameraDevice> detectWindowsCameras() {
+        List<CameraDevice> list = new ArrayList<>();
+        try {
+            // Run powershell to query PNP camera/video capture devices
+            Process p = new ProcessBuilder(
+                    "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                    "Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in @('Camera','Image') } | Select-Object -ExpandProperty Name"
+            ).redirectErrorStream(true).start();
+
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                Set<String> seen = new LinkedHashSet<>();
+                while ((line = reader.readLine()) != null) {
+                    String name = line.trim();
+                    if (!name.isEmpty() && seen.add(name)) {
+                        list.add(new CameraDevice("video=" + name, name));
+                    }
+                }
+            }
+            p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) {
         }
         return list;
     }
@@ -262,7 +289,16 @@ public final class VideoCaptureEngine {
     private static Process startFfmpegProcess() {
         String os = System.getProperty("os.name", "").toLowerCase();
         try {
-            if (os.contains("linux")) {
+            if (os.contains("win")) {
+                String dev = resolveWindowsDevice();
+                if (dev == null) return null;
+                return new ProcessBuilder(
+                        "ffmpeg", "-nostdin", "-loglevel", "quiet",
+                        "-f", "dshow", "-i", dev,
+                        "-vf", "fps=10,scale=" + WIDTH + ":" + HEIGHT + ",hflip",
+                        "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "14", "-"
+                ).redirectErrorStream(false).start();
+            } else if (os.contains("linux")) {
                 String dev = resolveLinuxDevice();
                 if (dev == null) return null;
                 return new ProcessBuilder(
@@ -273,6 +309,19 @@ public final class VideoCaptureEngine {
                 ).redirectErrorStream(false).start();
             }
         } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static String resolveWindowsDevice() {
+        String sel = selectedCameraId;
+        if (sel != null && !sel.equalsIgnoreCase("default") && sel.startsWith("video=")) {
+            return sel;
+        }
+        // First detected device
+        List<CameraDevice> cams = detectWindowsCameras();
+        if (!cams.isEmpty()) {
+            return cams.get(0).id();
         }
         return null;
     }
