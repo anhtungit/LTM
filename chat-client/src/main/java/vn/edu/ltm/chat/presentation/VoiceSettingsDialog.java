@@ -105,6 +105,18 @@ public final class VoiceSettingsDialog extends JDialog {
         body.add(micCombo);
         body.add(Box.createVerticalStrut(10));
 
+        // Noise suppression toggle (Discord Krisp-like)
+        JCheckBox noiseBox = new JCheckBox("Khử tiếng ồn môi trường (quạt, điều hòa, tiếng ù)");
+        noiseBox.setSelected(VoiceAudioEngine.isNoiseSuppressionEnabled());
+        noiseBox.setFont(DiscordTheme.regular(12f));
+        noiseBox.setForeground(Color.WHITE);
+        noiseBox.setOpaque(false);
+        noiseBox.setFocusPainted(false);
+        noiseBox.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        noiseBox.addActionListener(e -> VoiceAudioEngine.setNoiseSuppressionEnabled(noiseBox.isSelected()));
+        body.add(noiseBox);
+        body.add(Box.createVerticalStrut(10));
+
         // Mic volume meter
         JLabel testMicLabel = new JLabel("KIỂM TRA ÂM LƯỢNG MIC (NÓI VÀO MIC ĐỂ THỬ)");
         testMicLabel.setFont(DiscordTheme.bold(10f));

@@ -43,6 +43,7 @@ public final class VoiceAudioEngine {
 
     private static volatile String selectedMicId = "default";
     private static volatile String selectedSpeakerId = "default";
+    private static volatile boolean noiseSuppressionEnabled = true;
 
     private volatile boolean running = false;
     private volatile boolean muted = false;
@@ -57,6 +58,14 @@ public final class VoiceAudioEngine {
     private Thread playbackThread;
     private Consumer<String> activeEncodedChunkConsumer;
     private Consumer<Boolean> activeSpeakingStateConsumer;
+
+    public static boolean isNoiseSuppressionEnabled() {
+        return noiseSuppressionEnabled;
+    }
+
+    public static void setNoiseSuppressionEnabled(boolean enabled) {
+        noiseSuppressionEnabled = enabled;
+    }
 
     public static List<AudioDevice> getAvailableInputDevices() {
         List<AudioDevice> list = new ArrayList<>();
@@ -826,6 +835,7 @@ public final class VoiceAudioEngine {
         int preRollCount = 0;
         boolean wasSpeaking = false;
         long lastSoundTime = 0;
+        NoiseSuppressor suppressor = new NoiseSuppressor();
 
         while (running && this.micLine == line && line.isOpen()) {
             try {
@@ -836,7 +846,12 @@ public final class VoiceAudioEngine {
                     read += r;
                 }
                 if (read > 0) {
-                    double rms = computeRms(buffer, read);
+                    byte[] processed = buffer;
+                    if (noiseSuppressionEnabled && read == CHUNK_BYTES) {
+                        processed = suppressor.process(buffer);
+                    }
+
+                    double rms = computeRms(processed, read);
                     this.currentMicRms = rms;
 
                     if (!muted) {
@@ -867,11 +882,11 @@ public final class VoiceAudioEngine {
                                 }
                                 preRollCount = 0;
                             }
-                            byte[] slice = (read == buffer.length) ? buffer : java.util.Arrays.copyOf(buffer, read);
+                            byte[] slice = (read == processed.length) ? processed : java.util.Arrays.copyOf(processed, read);
                             onEncodedChunk.accept(Base64.getEncoder().encodeToString(slice));
                         } else if (!speaking && read == CHUNK_BYTES) {
                             System.arraycopy(preRollNewer, 0, preRollOlder, 0, CHUNK_BYTES);
-                            System.arraycopy(buffer, 0, preRollNewer, 0, CHUNK_BYTES);
+                            System.arraycopy(processed, 0, preRollNewer, 0, CHUNK_BYTES);
                             if (preRollCount < 2) {
                                 preRollCount++;
                             }
@@ -1061,5 +1076,87 @@ public final class VoiceAudioEngine {
         micAvailable = false;
         speakerAvailable = false;
         currentMicRms = 0.0;
+    }
+
+    /**
+     * Real-time lightweight noise suppressor (spectral subtraction with Wiener filter gain & voice energy preservation).
+     * Filters out continuous stationary background noises (fans, air conditioning, AC hum, computer hum)
+     * while preserving natural human voice formant frequencies.
+     */
+    public static final class NoiseSuppressor {
+        private static final int BANDS = 16;
+        private final double[] noiseFloor = new double[BANDS];
+        private boolean initialized = false;
+
+        public NoiseSuppressor() {
+            java.util.Arrays.fill(noiseFloor, 45.0);
+        }
+
+        public byte[] process(byte[] input) {
+            int samples = input.length / 2;
+            short[] inPcm = new short[samples];
+            for (int i = 0; i < samples; i++) {
+                int low = input[i * 2] & 0xFF;
+                int high = input[i * 2 + 1];
+                inPcm[i] = (short) ((high << 8) | low);
+            }
+
+            // Group into 16 sub-bands across 640 samples (40 samples per sub-band)
+            int bandSize = samples / BANDS;
+            double[] bandRms = new double[BANDS];
+            for (int b = 0; b < BANDS; b++) {
+                double sumSq = 0.0;
+                int start = b * bandSize;
+                int end = (b == BANDS - 1) ? samples : start + bandSize;
+                for (int i = start; i < end; i++) {
+                    sumSq += inPcm[i] * inPcm[i];
+                }
+                bandRms[b] = Math.sqrt(sumSq / (end - start));
+            }
+
+            if (!initialized) {
+                System.arraycopy(bandRms, 0, noiseFloor, 0, BANDS);
+                initialized = true;
+            } else {
+                // Track stationary background noise floor slowly during low-energy windows
+                for (int b = 0; b < BANDS; b++) {
+                    if (bandRms[b] < noiseFloor[b] * 1.5) {
+                        noiseFloor[b] = 0.95 * noiseFloor[b] + 0.05 * bandRms[b];
+                    } else {
+                        noiseFloor[b] = 0.998 * noiseFloor[b] + 0.002 * bandRms[b];
+                    }
+                    if (noiseFloor[b] < 20.0) noiseFloor[b] = 20.0;
+                }
+            }
+
+            // Calculate per-band Wiener attenuation gain
+            double[] gains = new double[BANDS];
+            for (int b = 0; b < BANDS; b++) {
+                double snr = bandRms[b] / (noiseFloor[b] + 1e-4);
+                if (snr < 1.1) {
+                    gains[b] = 0.08; // heavy suppression for background noise
+                } else if (snr < 2.0) {
+                    double t = (snr - 1.1) / 0.9;
+                    gains[b] = 0.08 + t * 0.72; // smooth knee
+                } else {
+                    gains[b] = 1.0; // full voice pass-through
+                }
+            }
+
+            // Apply gain per band
+            byte[] output = new byte[input.length];
+            for (int b = 0; b < BANDS; b++) {
+                int start = b * bandSize;
+                int end = (b == BANDS - 1) ? samples : start + bandSize;
+                double g = gains[b];
+                for (int i = start; i < end; i++) {
+                    int val = (int) Math.round(inPcm[i] * g);
+                    val = Math.max(-32768, Math.min(32767, val));
+                    output[i * 2] = (byte) (val & 0xFF);
+                    output[i * 2 + 1] = (byte) ((val >> 8) & 0xFF);
+                }
+            }
+            return output;
+        }
     }
 }

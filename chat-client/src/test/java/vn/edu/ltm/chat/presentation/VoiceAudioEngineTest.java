@@ -203,4 +203,26 @@ class VoiceAudioEngineTest {
         var cameras = VideoCaptureEngine.getAvailableCameras();
         assertFalse(cameras.isEmpty(), "Camera list must contain at least one default or detected webcam");
     }
+
+    @Test
+    void testNoiseSuppressorAttenuatesStationaryHum() {
+        VoiceAudioEngine.NoiseSuppressor suppressor = new VoiceAudioEngine.NoiseSuppressor();
+        byte[] stationaryHum = new byte[1280];
+        // Low amplitude stationary noise ~60
+        for (int i = 0; i < stationaryHum.length / 2; i++) {
+            short s = (short) (Math.sin(2 * Math.PI * 120 * i / 16000.0) * 60);
+            stationaryHum[i * 2] = (byte) (s & 0xFF);
+            stationaryHum[i * 2 + 1] = (byte) ((s >> 8) & 0xFF);
+        }
+
+        // Process a few frames to let noise floor adapt
+        byte[] out = null;
+        for (int f = 0; f < 5; f++) {
+            out = suppressor.process(stationaryHum);
+        }
+
+        double inRms = VoiceAudioEngine.computeRms(stationaryHum, stationaryHum.length);
+        double outRms = VoiceAudioEngine.computeRms(out, out.length);
+        assertTrue(outRms < inRms * 0.5, "Noise suppressor must attenuate stationary background hum: in=" + inRms + ", out=" + outRms);
+    }
 }
