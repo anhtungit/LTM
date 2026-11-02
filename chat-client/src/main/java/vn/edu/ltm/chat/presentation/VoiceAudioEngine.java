@@ -537,16 +537,16 @@ public final class VoiceAudioEngine {
     }
 
     private static boolean isLinuxInternalCard(int cardIdx) {
-        java.nio.file.Path udevPath = java.nio.file.Paths.get("/run/udev/data/+sound:card" + cardIdx);
-        if (java.nio.file.Files.isReadable(udevPath)) {
-            try {
+        try {
+            java.nio.file.Path udevPath = java.nio.file.Paths.get("/run/udev/data/+sound:card" + cardIdx);
+            if (java.nio.file.Files.isReadable(udevPath)) {
                 for (String line : java.nio.file.Files.readAllLines(udevPath)) {
                     if ("E:SOUND_FORM_FACTOR=internal".equals(line.trim())) {
                         return true;
                     }
                 }
-            } catch (Exception ignored) {
             }
+        } catch (Exception ignored) {
         }
         return false;
     }

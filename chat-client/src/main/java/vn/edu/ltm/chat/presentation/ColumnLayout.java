@@ -43,6 +43,9 @@ final class ColumnLayout implements LayoutManager2 {
         int wrapWidth = wrapWidth(width);
         int height = 0;
         for (Component child : parent.getComponents()) {
+            if (child instanceof FloatingActionToolbar) {
+                continue;
+            }
             if (child instanceof MessageRow row) {
                 row.updateWrapWidth(wrapWidth);
             }
@@ -88,7 +91,7 @@ final class ColumnLayout implements LayoutManager2 {
         int wrapWidth = wrapWidth(width);
 
         for (Component child : parent.getComponents()) {
-            if (!child.isVisible()) {
+            if (!child.isVisible() || child instanceof FloatingActionToolbar) {
                 continue;
             }
             if (child instanceof MessageRow row) {

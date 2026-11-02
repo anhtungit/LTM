@@ -14,6 +14,9 @@ import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JLayeredPane;
+import javax.swing.JRootPane;
+import javax.swing.SwingUtilities;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
@@ -84,6 +87,7 @@ final class MessageRow extends JPanel {
     private boolean isEditing = false;
     private int currentWrapWidth;
     private final String currentUserId;
+    private final boolean beginsSenderGroup;
     private String parsedReplyAuthor = null;
     private String parsedReplySnippet = null;
     private String parsedMainContent = null;
@@ -95,6 +99,7 @@ final class MessageRow extends JPanel {
     MessageRow(ChatMessage message, int wrapWidth, boolean beginsSenderGroup, String currentUserId, MessageActionListener listener) {
         this.message = message;
         this.currentUserId = currentUserId;
+        this.beginsSenderGroup = beginsSenderGroup;
         this.listener = listener;
         this.currentWrapWidth = wrapWidth;
         parseReplyHeader();
@@ -112,6 +117,9 @@ final class MessageRow extends JPanel {
                     if (bounds.contains(pt)) {
                         return;
                     }
+                    if (isMouseOverToolbar()) {
+                        return;
+                    }
                 }
             } catch (Exception ignored) {}
             hideToolbar();
@@ -124,7 +132,7 @@ final class MessageRow extends JPanel {
         setLayout(null);
         setOpaque(false);
         setAlignmentX(CENTER_ALIGNMENT);
-        setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 7 : 2, 4, 4, 4));
+        setBorder(BorderFactory.createEmptyBorder(beginsSenderGroup ? 8 : 4, 4, 4, 4));
 
         mainRowPanel.setOpaque(false);
 
@@ -173,10 +181,7 @@ final class MessageRow extends JPanel {
         body.add(contentHolder, BorderLayout.CENTER);
         mainRowPanel.add(body, BorderLayout.CENTER);
 
-        add(actionToolbar);
         add(mainRowPanel);
-        setComponentZOrder(actionToolbar, 0);
-        setComponentZOrder(mainRowPanel, 1);
 
         this.hoverAdapter = new MouseAdapter() {
             @Override
@@ -188,6 +193,9 @@ final class MessageRow extends JPanel {
             @Override
             public void mouseExited(MouseEvent e) {
                 try {
+                    if (isMouseOverToolbar()) {
+                        return;
+                    }
                     if (isShowing()) {
                         Point p = getMousePosition();
                         if (p != null) {
@@ -203,7 +211,14 @@ final class MessageRow extends JPanel {
 
     private void recreateActionToolbar() {
         if (actionToolbar != null) {
+            if (actionToolbar.getParent() != null) {
+                actionToolbar.getParent().remove(actionToolbar);
+            }
             remove(actionToolbar);
+        }
+        if (isCallLog()) {
+            actionToolbar = null;
+            return;
         }
         boolean canEdit = message.fromCurrentUser() && !message.hasAttachment() && !message.recalled();
         this.actionToolbar = new FloatingActionToolbar(canEdit, new FloatingActionToolbar.Listener() {
@@ -233,8 +248,6 @@ final class MessageRow extends JPanel {
             }
         });
         actionToolbar.setVisible(false);
-        add(actionToolbar);
-        setComponentZOrder(actionToolbar, 0);
         attachHoverRecursively(actionToolbar);
     }
 
@@ -252,13 +265,7 @@ final class MessageRow extends JPanel {
         mainRowPanel.doLayout();
 
         if (actionToolbar != null && actionToolbar.isVisible()) {
-            Dimension tbSize = actionToolbar.getPreferredSize();
-            int tbW = tbSize.width;
-            int tbH = tbSize.height;
-            int tbX = Math.max(0, w - insets.right - tbW - 14);
-            int tbY = Math.max(1, insets.top);
-            actionToolbar.setBounds(tbX, tbY, tbW, tbH);
-            actionToolbar.doLayout();
+            layoutToolbar();
         }
     }
 
@@ -276,16 +283,78 @@ final class MessageRow extends JPanel {
         return getPreferredSize();
     }
 
+    private boolean isMouseOverToolbar() {
+        if (actionToolbar == null || !actionToolbar.isShowing()) {
+            return false;
+        }
+        try {
+            PointerInfo pi = MouseInfo.getPointerInfo();
+            if (pi != null) {
+                Point pt = pi.getLocation();
+                Point tbLoc = actionToolbar.getLocationOnScreen();
+                Rectangle tbBounds = new Rectangle(tbLoc.x - 4, tbLoc.y - 4,
+                        actionToolbar.getWidth() + 8, actionToolbar.getHeight() + 8);
+                return tbBounds.contains(pt);
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void layoutToolbar() {
+        if (actionToolbar == null || !actionToolbar.isVisible()) {
+            return;
+        }
+        Container parent = getParent();
+        if (parent == null) {
+            return;
+        }
+
+        Dimension tbSize = actionToolbar.getPreferredSize();
+        int tbW = tbSize.width;
+        int tbH = tbSize.height;
+        int tbX = Math.max(0, getX() + getWidth() - tbW - 20);
+        int tbY = Math.max(2, getY() - tbH / 2);
+
+        JRootPane root = getRootPane();
+        if (root != null) {
+            JLayeredPane layeredPane = root.getLayeredPane();
+            Point pt = SwingUtilities.convertPoint(parent, tbX, tbY, layeredPane);
+            if (actionToolbar.getParent() != layeredPane) {
+                if (actionToolbar.getParent() != null) {
+                    actionToolbar.getParent().remove(actionToolbar);
+                }
+                layeredPane.add(actionToolbar, JLayeredPane.POPUP_LAYER, 0);
+            } else {
+                layeredPane.setComponentZOrder(actionToolbar, 0);
+            }
+            actionToolbar.setBounds(pt.x, pt.y, tbW, tbH);
+            actionToolbar.doLayout();
+            layeredPane.repaint(pt.x, pt.y, tbW, tbH);
+        } else {
+            if (actionToolbar.getParent() != parent) {
+                parent.add(actionToolbar, 0);
+            } else {
+                parent.setComponentZOrder(actionToolbar, 0);
+            }
+            actionToolbar.setBounds(tbX, tbY, tbW, tbH);
+            actionToolbar.doLayout();
+            parent.repaint(tbX, tbY, tbW, tbH);
+        }
+    }
+
     public void showToolbar() {
-        if (isEditing || message.recalled()) return;
+        if (isEditing || message.recalled() || isCallLog()) return;
         if (activeHoveredRow != null && activeHoveredRow != this) {
+            if (activeHoveredRow.isMouseOverToolbar()) {
+                return;
+            }
             activeHoveredRow.hideToolbar();
         }
         activeHoveredRow = this;
         isHovered = true;
-        if (actionToolbar != null && !actionToolbar.isVisible()) {
+        if (actionToolbar != null) {
             actionToolbar.setVisible(true);
-            revalidate();
+            layoutToolbar();
         }
         if (compactTimeLabel != null) {
             compactTimeLabel.setText(COMPACT_TIME_FORMAT.format(message.sentAt()));
@@ -301,7 +370,12 @@ final class MessageRow extends JPanel {
         isHovered = false;
         if (actionToolbar != null && actionToolbar.isVisible()) {
             actionToolbar.setVisible(false);
-            revalidate();
+            Container parent = actionToolbar.getParent();
+            if (parent != null) {
+                Rectangle b = actionToolbar.getBounds();
+                parent.remove(actionToolbar);
+                parent.repaint(b.x, b.y, b.width, b.height);
+            }
         }
         if (compactTimeLabel != null) {
             compactTimeLabel.setText("");
@@ -334,11 +408,14 @@ final class MessageRow extends JPanel {
 
     @Override
     protected void paintComponent(Graphics g) {
-        if (isHovered && !isEditing && !message.recalled()) {
+        if (isHovered && !isEditing && !message.recalled() && !isCallLog()) {
             g.setColor(new Color(0x2E, 0x30, 0x35, 120));
             g.fillRect(0, 0, getWidth(), getHeight());
         }
         super.paintComponent(g);
+        if (actionToolbar != null && actionToolbar.isVisible()) {
+            actionToolbar.repaint();
+        }
     }
 
     private void parseReplyHeader() {
@@ -539,10 +616,16 @@ final class MessageRow extends JPanel {
 
             java.util.List<String> emojis = EmojiAssets.parseAllEmojis(text);
             if (hasAttachment && isDefaultAttachmentText) {
-                mainContentComp = buildAttachmentCard();
+                JPanel attachHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+                attachHolder.setOpaque(false);
+                attachHolder.add(buildAttachmentCard());
+                mainContentComp = attachHolder;
             } else if (text != null && text.startsWith("[Sticker:") && text.endsWith("]")) {
                 String inner = text.substring(9, text.length() - 1).trim();
-                mainContentComp = buildStickerCard(inner);
+                JPanel stickerHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+                stickerHolder.setOpaque(false);
+                stickerHolder.add(buildStickerCard(inner));
+                mainContentComp = stickerHolder;
             } else if (emojis.size() == 1) {
                 ImageIcon jumbo = EmojiAssets.getIcon(emojis.get(0), 44);
                 if (jumbo != null) {
@@ -850,9 +933,15 @@ final class MessageRow extends JPanel {
         return card;
     }
 
+    private boolean isCallLog() {
+        String text = parsedMainContent != null ? parsedMainContent : message.content();
+        return isCallLogMessage(text);
+    }
+
     private boolean isCallLogMessage(String text) {
         if (text == null) return false;
-        return text.startsWith("[call:") || text.contains("đã bắt đầu cuộc gọi") || text.contains("started a call");
+        String lower = text.toLowerCase(Locale.ROOT);
+        return text.startsWith("[call:") || lower.contains("bắt đầu cuộc gọi") || lower.contains("started a call") || lower.contains("cuộc gọi");
     }
 
     private JPanel buildCallLogRow(String text, java.time.LocalDateTime sentAt) {
@@ -884,6 +973,21 @@ final class MessageRow extends JPanel {
         return row;
     }
 
+    private static String truncateFileName(String fileName, int maxChars) {
+        if (fileName == null || fileName.length() <= maxChars) {
+            return fileName != null ? fileName : "";
+        }
+        int dotIdx = fileName.lastIndexOf('.');
+        if (dotIdx > 0 && fileName.length() - dotIdx <= 8) {
+            String ext = fileName.substring(dotIdx);
+            int keep = Math.max(4, maxChars - ext.length() - 3);
+            if (keep > 0 && keep < dotIdx) {
+                return fileName.substring(0, keep) + "..." + ext;
+            }
+        }
+        return fileName.substring(0, Math.max(1, maxChars - 3)) + "...";
+    }
+
     private JComponent buildAttachmentCard() {
         RoundedPanel card = new RoundedPanel(8);
         card.setLayout(new BorderLayout(10, 0));
@@ -900,17 +1004,27 @@ final class MessageRow extends JPanel {
         details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
         details.setOpaque(false);
 
-        String fileName = message.attachmentName() != null ? message.attachmentName() : "tệp_đính_kèm";
-        JLabel nameLabel = new JLabel(fileName);
+        String rawFileName = message.attachmentName() != null ? message.attachmentName() : "tệp_đính_kèm";
+        String displayFileName = truncateFileName(rawFileName, 26);
+        JLabel nameLabel = new JLabel(displayFileName);
         nameLabel.setFont(DiscordTheme.semibold(12.5f));
         nameLabel.setForeground(new Color(0x00, 0xA8, 0xFC));
         nameLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        nameLabel.setToolTipText(rawFileName);
+        nameLabel.setAlignmentX(0.0f);
+        nameLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (listener != null) listener.onDownload(message);
+            }
+        });
         details.add(nameLabel);
 
         String sizeStr = formatFileSize(message.attachmentSize());
         JLabel sizeLabel = new JLabel(sizeStr);
         sizeLabel.setFont(DiscordTheme.font(10.5f));
         sizeLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        sizeLabel.setAlignmentX(0.0f);
         details.add(sizeLabel);
 
         card.add(details, BorderLayout.CENTER);
@@ -928,10 +1042,26 @@ final class MessageRow extends JPanel {
             dlBtn.addActionListener(e -> {
                 if (listener != null) listener.onDownload(message);
             });
+            dlBtn.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    dlBtn.setIcon(IconFactory.phosphor("download-simple.svg", 16, DiscordTheme.TEXT_PRIMARY));
+                }
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    dlBtn.setIcon(IconFactory.phosphor("download-simple.svg", 16, DiscordTheme.TEXT_SECONDARY));
+                }
+            });
             rightActions.add(dlBtn);
 
             card.add(rightActions, BorderLayout.EAST);
         }
+
+        Dimension pref = card.getPreferredSize();
+        int targetW = Math.max(220, Math.min(340, pref.width + 10));
+        int targetH = Math.max(50, pref.height);
+        card.setPreferredSize(new Dimension(targetW, targetH));
+        card.setMaximumSize(new Dimension(340, targetH));
 
         return card;
     }
