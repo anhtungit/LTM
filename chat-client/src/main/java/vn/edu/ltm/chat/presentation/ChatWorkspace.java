@@ -19,6 +19,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.Scrollable;
+import java.awt.Rectangle;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
@@ -99,7 +101,7 @@ public final class ChatWorkspace extends JPanel {
 
     // Chat transcript & input bar
     private final JPanel chatArea = new JPanel(new BorderLayout());
-    private final JPanel transcript = new JPanel();
+    private final JPanel transcript = new TranscriptScrollablePanel();
     private final JScrollPane transcriptScroll = new JScrollPane(transcript);
     private final TypingIndicatorBubble typingBubble = new TypingIndicatorBubble();
     private final javax.swing.Timer typingTimeoutTimer = new javax.swing.Timer(4000, e -> typingBubble.hideTyping());
@@ -1311,6 +1313,7 @@ public final class ChatWorkspace extends JPanel {
         transcriptScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         transcriptScroll.getVerticalScrollBar().setUnitIncrement(18);
         transcriptScroll.getVerticalScrollBar().addAdjustmentListener(e -> MessageRow.clearActiveHover());
+        transcriptScroll.getViewport().addChangeListener(e -> MessageRow.clearActiveHover());
         area.add(transcriptScroll, BorderLayout.CENTER);
         area.add(typingBubble, BorderLayout.SOUTH);
         return area;
@@ -2332,5 +2335,32 @@ public final class ChatWorkspace extends JPanel {
         WorkspaceDialogs.downloadAttachmentToFile(this, chatService, message,
                 msg -> showHint(msg, DiscordTheme.SUCCESS),
                 err -> showHint(err, DiscordTheme.DANGER));
+    }
+
+    private static final class TranscriptScrollablePanel extends JPanel implements Scrollable {
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 18;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 72;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }

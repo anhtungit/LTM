@@ -129,13 +129,20 @@ final class FloatingActionToolbar extends JPanel {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // Discord floating background
-        g2.setColor(new Color(0x31, 0x33, 0x38));
-        g2.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 8, 8);
+        int w = getWidth();
+        int h = getHeight();
 
-        // Discord subtle border
-        g2.setColor(new Color(0x3F, 0x42, 0x48));
-        g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 8, 8);
+        // 1. Subtle dark outer outline for elevation & contrast against any background
+        g2.setColor(new Color(0x1E, 0x1F, 0x22, 200));
+        g2.drawRoundRect(0, 0, w - 1, h - 1, 8, 8);
+
+        // 2. Discord floating background
+        g2.setColor(new Color(0x31, 0x33, 0x38));
+        g2.fillRoundRect(1, 1, w - 2, h - 2, 7, 7);
+
+        // 3. Crisp Discord border on all 4 sides (top, bottom, left, right)
+        g2.setColor(new Color(0x4E, 0x50, 0x58));
+        g2.drawRoundRect(1, 1, w - 3, h - 3, 7, 7);
 
         g2.dispose();
         super.paintComponent(g);
