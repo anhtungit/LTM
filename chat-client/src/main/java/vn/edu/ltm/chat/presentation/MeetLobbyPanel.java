@@ -240,20 +240,42 @@ public final class MeetLobbyPanel extends JPanel {
         card.add(toggleRow);
         card.add(Box.createVerticalStrut(18));
 
-        // Join button
-        JButton joinBtn = new JButton("Vào phòng");
+        // Action buttons row (Join & Cancel)
+        JPanel actionRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 14, 0));
+        actionRow.setOpaque(false);
+        actionRow.setAlignmentX(CENTER_ALIGNMENT);
+
+        JButton cancelBtn = new JButton("Rời sảnh", IconFactory.phosphor("phone-x.svg", 16, Color.WHITE));
+        cancelBtn.setFont(DiscordTheme.bold(14f));
+        cancelBtn.setForeground(Color.WHITE);
+        cancelBtn.setBackground(DiscordTheme.DANGER);
+        cancelBtn.setPreferredSize(new Dimension(140, 40));
+        cancelBtn.setMaximumSize(new Dimension(140, 40));
+        cancelBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        cancelBtn.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
+        cancelBtn.addActionListener(e -> {
+            stopLobbyPreview();
+            if (onBackToChat != null) {
+                onBackToChat.run();
+            }
+        });
+        actionRow.add(cancelBtn);
+
+        JButton joinBtn = new JButton("Vào phòng", IconFactory.phosphor("phone-call.svg", 16, Color.WHITE));
         joinBtn.setFont(DiscordTheme.bold(14f));
         joinBtn.setForeground(Color.WHITE);
         joinBtn.setBackground(DiscordTheme.ACCENT);
-        joinBtn.setAlignmentX(CENTER_ALIGNMENT);
-        joinBtn.setPreferredSize(new Dimension(200, 40));
-        joinBtn.setMaximumSize(new Dimension(200, 40));
+        joinBtn.setPreferredSize(new Dimension(160, 40));
+        joinBtn.setMaximumSize(new Dimension(160, 40));
         joinBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        joinBtn.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
         joinBtn.addActionListener(e -> {
             stopLobbyPreview();
             onJoinRoom.run();
         });
-        card.add(joinBtn);
+        actionRow.add(joinBtn);
+
+        card.add(actionRow);
 
         host.add(card);
         return host;

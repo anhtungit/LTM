@@ -156,6 +156,9 @@ public final class ChatWorkspace extends JPanel {
                     }
                 },
                 conv -> {
+                    if (conv.isGroup() && !conv.channels().isEmpty()) {
+                        selectedChannel = conv.channels().getFirst();
+                    }
                     selectConversation(conv);
                     sidebarLayout.show(sidebarHost, "group-sidebar");
                     showChatView();
@@ -1507,15 +1510,40 @@ public final class ChatWorkspace extends JPanel {
         AvatarBadge avatar = new AvatarBadge(conversation.initials(), conversation.id(), 30,
                 isPeerOnline ? DiscordTheme.SUCCESS : null,
                 selected ? DiscordTheme.SELECTED : DiscordTheme.SIDEBAR, true);
+        avatar.setFocusable(false);
         row.add(avatar, BorderLayout.WEST);
 
         JPanel centerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         centerPanel.setOpaque(false);
+        centerPanel.setFocusable(false);
         JLabel name = new JLabel(conversation.displayName());
         name.setFont(DiscordTheme.semibold(13f));
         name.setForeground(selected ? Color.WHITE : new Color(0xB9, 0xBA, 0xC2));
         centerPanel.add(name);
         row.add(centerPanel, BorderLayout.CENTER);
+
+        // Forward child click events so clicking avatar or name triggers row selection immediately
+        MouseListener forwardClick = new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                row.doClick();
+            }
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                for (MouseListener ml : row.getMouseListeners()) {
+                    ml.mouseEntered(e);
+                }
+            }
+            @Override
+            public void mouseExited(MouseEvent e) {
+                for (MouseListener ml : row.getMouseListeners()) {
+                    ml.mouseExited(e);
+                }
+            }
+        };
+        avatar.addMouseListener(forwardClick);
+        centerPanel.addMouseListener(forwardClick);
+        name.addMouseListener(forwardClick);
 
         if (!conversation.isGroup()) {
             JButton closeBtn = new JButton(IconFactory.phosphor("x.svg", 12, DiscordTheme.TEXT_MUTED));
@@ -1583,6 +1611,7 @@ public final class ChatWorkspace extends JPanel {
 
         if (conversation.isGroup()) {
             railPanel.setActiveGroupId(conversation.id());
+            // Sync selectedChannel immediately to the group's first channel if not present or switching groups
             if (!conversation.channels().contains(selectedChannel)) {
                 selectedChannel = conversation.channels().isEmpty() ? "chung" : conversation.channels().getFirst();
             }
