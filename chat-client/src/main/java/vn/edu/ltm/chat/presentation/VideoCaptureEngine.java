@@ -1,7 +1,6 @@
 package vn.edu.ltm.chat.presentation;
 
 import com.github.sarxos.webcam.Webcam;
-import com.github.sarxos.webcam.WebcamResolution;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;

@@ -8,6 +8,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -108,7 +109,7 @@ public final class VoiceSettingsDialog extends JDialog {
         // Noise suppression toggle (Discord Krisp-like)
         JCheckBox noiseBox = new JCheckBox("Khử tiếng ồn môi trường (quạt, điều hòa, tiếng ù)");
         noiseBox.setSelected(VoiceAudioEngine.isNoiseSuppressionEnabled());
-        noiseBox.setFont(DiscordTheme.regular(12f));
+        noiseBox.setFont(DiscordTheme.font(12f));
         noiseBox.setForeground(Color.WHITE);
         noiseBox.setOpaque(false);
         noiseBox.setFocusPainted(false);

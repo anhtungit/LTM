@@ -1316,22 +1316,22 @@ public final class ChatWorkspace extends JPanel {
         return area;
     }
 
-    private JComponent buildDemoBanner() {
-        JPanel banner = new JPanel(new BorderLayout(9, 0));
-        banner.setBackground(DiscordTheme.BANNER);
-        banner.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, DiscordTheme.HAIRLINE),
-                BorderFactory.createEmptyBorder(9, 18, 9, 18)));
+    // private JComponent buildDemoBanner() {
+    //     JPanel banner = new JPanel(new BorderLayout(9, 0));
+    //     banner.setBackground(DiscordTheme.BANNER);
+    //     banner.setBorder(BorderFactory.createCompoundBorder(
+    //             BorderFactory.createMatteBorder(0, 0, 1, 0, DiscordTheme.HAIRLINE),
+    //             BorderFactory.createEmptyBorder(9, 18, 9, 18)));
 
-        JLabel icon = new JLabel(IconFactory.phosphor("info.svg", 16, DiscordTheme.TEXT_SECONDARY));
-        banner.add(icon, BorderLayout.WEST);
+    //     JLabel icon = new JLabel(IconFactory.phosphor("info.svg", 16, DiscordTheme.TEXT_SECONDARY));
+    //     banner.add(icon, BorderLayout.WEST);
 
-        JLabel text = new JLabel("Phiên demo: hỗ trợ gửi tệp thực tế/mẫu, emoji/sticker, sửa/xoá tin, nhóm & kênh gặp.");
-        text.setFont(DiscordTheme.font(11f));
-        text.setForeground(DiscordTheme.TEXT_SECONDARY);
-        banner.add(text, BorderLayout.CENTER);
-        return banner;
-    }
+    //     JLabel text = new JLabel("Phiên demo: hỗ trợ gửi tệp thực tế/mẫu, emoji/sticker, sửa/xoá tin, nhóm & kênh gặp.");
+    //     text.setFont(DiscordTheme.font(11f));
+    //     text.setForeground(DiscordTheme.TEXT_SECONDARY);
+    //     banner.add(text, BorderLayout.CENTER);
+    //     return banner;
+    // }
 
 
 

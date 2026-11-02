@@ -9,10 +9,8 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
-import java.awt.Component;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
@@ -272,62 +270,62 @@ public final class MeetLobbyPanel extends JPanel {
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
     }
 
-    private JPanel buildRightSidebar() {
-        JPanel pane = new JPanel(new BorderLayout());
-        pane.setBackground(DiscordTheme.SIDEBAR);
-        pane.setPreferredSize(new Dimension(220, 0));
-        pane.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 1, 0, 0, DiscordTheme.HAIRLINE),
-                BorderFactory.createEmptyBorder(16, 14, 16, 14)
-        ));
+    // private JPanel buildRightSidebar() {
+    //     JPanel pane = new JPanel(new BorderLayout());
+    //     pane.setBackground(DiscordTheme.SIDEBAR);
+    //     pane.setPreferredSize(new Dimension(220, 0));
+    //     pane.setBorder(BorderFactory.createCompoundBorder(
+    //             BorderFactory.createMatteBorder(0, 1, 0, 0, DiscordTheme.HAIRLINE),
+    //             BorderFactory.createEmptyBorder(16, 14, 16, 14)
+    //     ));
 
-        JPanel content = new JPanel();
-        content.setOpaque(false);
-        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+    //     JPanel content = new JPanel();
+    //     content.setOpaque(false);
+    //     content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 
-        JLabel title = new JLabel("ĐANG Ở TRONG PHÒNG");
-        title.setFont(DiscordTheme.extrabold(10f));
-        title.setForeground(DiscordTheme.TEXT_MUTED);
-        title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        content.add(title);
-        content.add(Box.createVerticalStrut(12));
+    //     JLabel title = new JLabel("ĐANG Ở TRONG PHÒNG");
+    //     title.setFont(DiscordTheme.extrabold(10f));
+    //     title.setForeground(DiscordTheme.TEXT_MUTED);
+    //     title.setAlignmentX(Component.LEFT_ALIGNMENT);
+    //     content.add(title);
+    //     content.add(Box.createVerticalStrut(12));
 
-        content.add(buildMemberTile("MA", "Minh Anh", "Mẫu · đang trực tuyến"));
-        content.add(Box.createVerticalStrut(8));
-        content.add(buildMemberTile("KL", "Khánh Linh", "Mẫu · đang trực tuyến"));
-        content.add(Box.createVerticalStrut(8));
-        content.add(buildMemberTile("HP", "Hữu Phúc", "Mẫu · đang trực tuyến"));
+    //     content.add(buildMemberTile("MA", "Minh Anh", "Mẫu · đang trực tuyến"));
+    //     content.add(Box.createVerticalStrut(8));
+    //     content.add(buildMemberTile("KL", "Khánh Linh", "Mẫu · đang trực tuyến"));
+    //     content.add(Box.createVerticalStrut(8));
+    //     content.add(buildMemberTile("HP", "Hữu Phúc", "Mẫu · đang trực tuyến"));
 
-        pane.add(content, BorderLayout.NORTH);
-        return pane;
-    }
+    //     pane.add(content, BorderLayout.NORTH);
+    //     return pane;
+    // }
 
-    private JPanel buildMemberTile(String initials, String name, String status) {
-        JPanel row = new JPanel(new BorderLayout(8, 0));
-        row.setOpaque(false);
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-        row.setPreferredSize(new Dimension(190, 36));
-        row.add(new AvatarBadge(initials, name, 28, DiscordTheme.SUCCESS, DiscordTheme.SIDEBAR, true), BorderLayout.WEST);
+    // private JPanel buildMemberTile(String initials, String name, String status) {
+    //     JPanel row = new JPanel(new BorderLayout(8, 0));
+    //     row.setOpaque(false);
+    //     row.setAlignmentX(Component.LEFT_ALIGNMENT);
+    //     row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+    //     row.setPreferredSize(new Dimension(190, 36));
+    //     row.add(new AvatarBadge(initials, name, 28, DiscordTheme.SUCCESS, DiscordTheme.SIDEBAR, true), BorderLayout.WEST);
 
-        JPanel info = new JPanel();
-        info.setOpaque(false);
-        info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+    //     JPanel info = new JPanel();
+    //     info.setOpaque(false);
+    //     info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
 
-        JLabel nameLbl = new JLabel(name);
-        nameLbl.setFont(DiscordTheme.semibold(12f));
-        nameLbl.setForeground(Color.WHITE);
-        nameLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-        info.add(nameLbl);
+    //     JLabel nameLbl = new JLabel(name);
+    //     nameLbl.setFont(DiscordTheme.semibold(12f));
+    //     nameLbl.setForeground(Color.WHITE);
+    //     nameLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+    //     info.add(nameLbl);
 
-        JLabel statLbl = new JLabel(status);
-        statLbl.setFont(DiscordTheme.font(10f));
-        statLbl.setForeground(DiscordTheme.TEXT_MUTED);
-        statLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-        info.add(statLbl);
+    //     JLabel statLbl = new JLabel(status);
+    //     statLbl.setFont(DiscordTheme.font(10f));
+    //     statLbl.setForeground(DiscordTheme.TEXT_MUTED);
+    //     statLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+    //     info.add(statLbl);
 
-        row.add(info, BorderLayout.CENTER);
-        return row;
-    }
+    //     row.add(info, BorderLayout.CENTER);
+    //     return row;
+    // }
 }
 
