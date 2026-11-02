@@ -1523,20 +1523,20 @@ public final class ChatWorkspace extends JPanel {
         row.add(centerPanel, BorderLayout.CENTER);
 
         // Forward child click events so clicking avatar or name triggers row selection immediately
-        MouseListener forwardClick = new MouseAdapter() {
+        MouseAdapter forwardClick = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 row.doClick();
             }
             @Override
             public void mouseEntered(MouseEvent e) {
-                for (MouseListener ml : row.getMouseListeners()) {
+                for (java.awt.event.MouseListener ml : row.getMouseListeners()) {
                     ml.mouseEntered(e);
                 }
             }
             @Override
             public void mouseExited(MouseEvent e) {
-                for (MouseListener ml : row.getMouseListeners()) {
+                for (java.awt.event.MouseListener ml : row.getMouseListeners()) {
                     ml.mouseExited(e);
                 }
             }
