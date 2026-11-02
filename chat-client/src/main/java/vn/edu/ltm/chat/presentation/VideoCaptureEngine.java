@@ -26,13 +26,15 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Real-time MJPEG webcam capture engine (320x240 @ 10fps) with multi-instance shared frame support.
+ * Real-time MJPEG webcam capture engine (HD 1280x720 @ 30fps) with multi-instance shared frame support.
  * Uses native DirectShow/V4L2 via Sarxos Webcam Capture (zero external install) with FFmpeg fallback.
  */
 public final class VideoCaptureEngine {
-    // shortcut: 320x240 MJPEG @ 10fps (~3.5KB/frame over UDP), upgrade to H.264/VP8 RTP when scaling > 4 video peers
-    private static final int WIDTH = 320;
-    private static final int HEIGHT = 240;
+    // HD 720p @ 30fps (~30-38KB/frame over UDP, within 65507 byte IP payload)
+    private static final int WIDTH = 1280;
+    private static final int HEIGHT = 720;
+    private static final int FPS = 30;
+    private static final int FRAME_INTERVAL_MS = 1000 / FPS; // ~33ms
     private static final Path SHARED_FRAME_PATH = Path.of(System.getProperty("java.io.tmpdir"), "ltm_shared_webcam.jpg");
     private static volatile String selectedCameraId = "default";
 
@@ -212,7 +214,7 @@ public final class VideoCaptureEngine {
                     }
                 }
                 try {
-                    Thread.sleep(100); // 10 fps
+                    Thread.sleep(FRAME_INTERVAL_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -311,7 +313,7 @@ public final class VideoCaptureEngine {
                         byte[] sharedJpeg = Files.readAllBytes(SHARED_FRAME_PATH);
                         if (sharedJpeg.length > 100) {
                             dispatchFrame(sharedJpeg, onJpegFrame, onLocalPreview);
-                            Thread.sleep(100);
+                            Thread.sleep(FRAME_INTERVAL_MS);
                             continue;
                         }
                     }
@@ -324,19 +326,19 @@ public final class VideoCaptureEngine {
                 g.setPaint(new GradientPaint(0, 0, new Color(0x1E, 0x22, 0x2D), WIDTH, HEIGHT, new Color(0x2B, 0x31, 0x42)));
                 g.fillRect(0, 0, WIDTH, HEIGHT);
 
-                int pulse = (int) (Math.sin(tick * 0.35) * 8);
+                int pulse = (int) (Math.sin(tick * 0.35) * 16);
                 g.setColor(new Color(0x58, 0x65, 0xF2));
-                g.fillOval(WIDTH / 2 - 36 - pulse / 2, HEIGHT / 2 - 48 - pulse / 2, 72 + pulse, 72 + pulse);
+                g.fillOval(WIDTH / 2 - 72 - pulse / 2, HEIGHT / 2 - 96 - pulse / 2, 144 + pulse, 144 + pulse);
 
                 g.setColor(Color.WHITE);
-                g.setFont(new Font("SansSerif", Font.BOLD, 14));
-                g.drawString("LTM LIVE CAMERA", WIDTH / 2 - 66, HEIGHT / 2 + 48);
-                g.setFont(new Font("Monospaced", Font.PLAIN, 12));
+                g.setFont(new Font("SansSerif", Font.BOLD, 26));
+                g.drawString("LTM HD 720p LIVE CAMERA", WIDTH / 2 - 180, HEIGHT / 2 + 80);
+                g.setFont(new Font("Monospaced", Font.PLAIN, 18));
                 g.setColor(new Color(0x57, 0xF2, 0x87));
-                g.drawString("● REC " + LocalTime.now().format(fmt), WIDTH / 2 - 54, HEIGHT / 2 + 68);
+                g.drawString("● REC 30FPS " + LocalTime.now().format(fmt), WIDTH / 2 - 120, HEIGHT / 2 + 115);
                 g.dispose();
 
-                ByteArrayOutputStream baos = new ByteArrayOutputStream(8192);
+                ByteArrayOutputStream baos = new ByteArrayOutputStream(32768);
                 ImageIO.write(img, "jpg", baos);
                 byte[] jpeg = baos.toByteArray();
                 if (onLocalPreview != null) {
@@ -346,7 +348,7 @@ public final class VideoCaptureEngine {
                     onJpegFrame.accept(jpeg);
                 }
                 tick++;
-                Thread.sleep(100);
+                Thread.sleep(FRAME_INTERVAL_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -387,9 +389,9 @@ public final class VideoCaptureEngine {
                 if (dev == null) return null;
                 return new ProcessBuilder(
                         "ffmpeg", "-nostdin", "-loglevel", "quiet",
-                        "-f", "v4l2", "-i", dev,
-                        "-vf", "fps=10,scale=" + WIDTH + ":" + HEIGHT + ",hflip",
-                        "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "14", "-"
+                        "-f", "v4l2", "-input_format", "mjpeg", "-video_size", WIDTH + "x" + HEIGHT, "-i", dev,
+                        "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT + ",hflip",
+                        "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "8", "-"
                 ).redirectErrorStream(false).start();
             }
         } catch (Exception ignored) {
