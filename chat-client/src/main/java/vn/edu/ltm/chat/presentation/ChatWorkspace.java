@@ -1530,14 +1530,24 @@ public final class ChatWorkspace extends JPanel {
             }
             @Override
             public void mouseEntered(MouseEvent e) {
+                MouseEvent retargeted = new MouseEvent(
+                        row, MouseEvent.MOUSE_ENTERED, System.currentTimeMillis(),
+                        e.getModifiersEx(), e.getX(), e.getY(),
+                        e.getClickCount(), e.isPopupTrigger(), e.getButton()
+                );
                 for (java.awt.event.MouseListener ml : row.getMouseListeners()) {
-                    ml.mouseEntered(e);
+                    ml.mouseEntered(retargeted);
                 }
             }
             @Override
             public void mouseExited(MouseEvent e) {
+                MouseEvent retargeted = new MouseEvent(
+                        row, MouseEvent.MOUSE_EXITED, System.currentTimeMillis(),
+                        e.getModifiersEx(), e.getX(), e.getY(),
+                        e.getClickCount(), e.isPopupTrigger(), e.getButton()
+                );
                 for (java.awt.event.MouseListener ml : row.getMouseListeners()) {
-                    ml.mouseExited(e);
+                    ml.mouseExited(retargeted);
                 }
             }
         };
