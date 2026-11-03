@@ -116,8 +116,15 @@ public final class MeetRoomPanel extends JPanel {
         callTimer.restart();
     }
 
+    public boolean isCamMuted() {
+        return camMuted;
+    }
+
     public void updateParticipantVideo(String id, BufferedImage frame) {
         if (id == null || id.isBlank()) return;
+        if (id.equals(selfParticipantId) && camMuted && frame != null) {
+            return;
+        }
         boolean hadVideo = videoFrames.containsKey(id);
         if (frame != null) {
             videoFrames.put(id, frame);

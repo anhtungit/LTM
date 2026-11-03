@@ -211,12 +211,13 @@ public final class VideoCaptureEngine {
             boolean capturedAny = false;
             while (running && webcam.isOpen()) {
                 BufferedImage raw = webcam.getImage();
+                if (!running) break;
                 if (raw != null) {
                     capturedAny = true;
                     // Scale if driver returned different resolution
                     BufferedImage frame = (raw.getWidth() == WIDTH && raw.getHeight() == HEIGHT) ? raw : scaleFrame(raw);
                     byte[] jpeg = encodeToJpeg(frame);
-                    if (jpeg != null) {
+                    if (running && jpeg != null) {
                         publishSharedFrame(jpeg);
                         if (onLocalPreview != null) onLocalPreview.accept(frame);
                         if (onJpegFrame != null) onJpegFrame.accept(jpeg);
@@ -271,6 +272,7 @@ public final class VideoCaptureEngine {
                             frameBuf.write(b);
                             if (prevByte == 0xFF && b == 0xD9) {
                                 inFrame = false;
+                                if (!running) break;
                                 byte[] jpeg = frameBuf.toByteArray();
                                 capturedAnyHardwareFrame = true;
                                 publishSharedFrame(jpeg);
@@ -349,6 +351,7 @@ public final class VideoCaptureEngine {
 
                 ByteArrayOutputStream baos = new ByteArrayOutputStream(32768);
                 ImageIO.write(img, "jpg", baos);
+                if (!running) break;
                 byte[] jpeg = baos.toByteArray();
                 if (onLocalPreview != null) {
                     onLocalPreview.accept(img);
@@ -375,17 +378,18 @@ public final class VideoCaptureEngine {
         }
     }
 
-    private static void dispatchFrame(byte[] jpeg, Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+    private void dispatchFrame(byte[] jpeg, Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+        if (!running) return;
         if (onLocalPreview != null) {
             try {
                 BufferedImage img = ImageIO.read(new ByteArrayInputStream(jpeg));
-                if (img != null) {
+                if (running && img != null) {
                     onLocalPreview.accept(img);
                 }
             } catch (Exception ignored) {
             }
         }
-        if (onJpegFrame != null) {
+        if (running && onJpegFrame != null) {
             onJpegFrame.accept(jpeg);
         }
     }

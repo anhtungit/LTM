@@ -132,6 +132,8 @@ public final class ChatWorkspace extends JPanel {
     private volatile String activeCallChannel = "";
     private javax.swing.JDialog incomingCallDialog;
     private final Map<String, javax.swing.Timer> peerSpeakingTimers = new ConcurrentHashMap<>();
+    private final Map<String, javax.swing.Timer> peerVideoTimers = new ConcurrentHashMap<>();
+    private final Map<String, Long> camOffTimestamps = new ConcurrentHashMap<>();
     private final java.util.Set<String> mutedPeers = ConcurrentHashMap.newKeySet();
 
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
@@ -367,14 +369,18 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void startLocalCamera() {
+        String initCid = activeCallConversationId;
+        if (initCid != null) {
+            chatService.sendCallSignal(initCid, activeCallChannel, "CAM_ON", "");
+        }
         videoEngine.start(jpegBytes -> {
             String cid = activeCallConversationId;
-            if (cid != null) {
+            if (cid != null && videoEngine.isRunning() && !meetRoomPanel.isCamMuted()) {
                 String b64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
                 chatService.sendCallSignal(cid, activeCallChannel, "VIDEO", b64);
             }
         }, img -> SwingUtilities.invokeLater(() -> {
-            if (activeCallConversationId != null && user != null) {
+            if (activeCallConversationId != null && user != null && videoEngine.isRunning() && !meetRoomPanel.isCamMuted()) {
                 meetRoomPanel.updateParticipantVideo(user.id(), img);
             }
         }));
@@ -384,6 +390,11 @@ public final class ChatWorkspace extends JPanel {
         videoEngine.stop();
         if (user != null) {
             meetRoomPanel.updateParticipantVideo(user.id(), null);
+            SwingUtilities.invokeLater(() -> {
+                if (user != null && (!videoEngine.isRunning() || meetRoomPanel.isCamMuted())) {
+                    meetRoomPanel.updateParticipantVideo(user.id(), null);
+                }
+            });
         }
         String cid = activeCallConversationId;
         if (notifyPeers && cid != null) {
@@ -401,6 +412,9 @@ public final class ChatWorkspace extends JPanel {
         activeCallConversationId = conv.id();
         activeCallChannel = conv.isGroup() ? selectedChannel : "";
         mutedPeers.clear();
+        camOffTimestamps.clear();
+        peerVideoTimers.values().forEach(javax.swing.Timer::stop);
+        peerVideoTimers.clear();
 
         boolean initialMuted = !meetLobbyPanel.isMicEnabled();
         boolean initialCamOn = meetLobbyPanel.isCamEnabled();
@@ -440,8 +454,11 @@ public final class ChatWorkspace extends JPanel {
         voiceEngine.stop();
         stopLocalCamera(false);
         mutedPeers.clear();
+        camOffTimestamps.clear();
         peerSpeakingTimers.values().forEach(javax.swing.Timer::stop);
         peerSpeakingTimers.clear();
+        peerVideoTimers.values().forEach(javax.swing.Timer::stop);
+        peerVideoTimers.clear();
         String duration = meetRoomPanel.stopSessionAndFormatDuration();
         String cid = activeCallConversationId;
         String chan = activeCallChannel;
@@ -474,13 +491,27 @@ public final class ChatWorkspace extends JPanel {
 
         if ("VIDEO".equals(action)) {
             if (ev.conversationId().equals(activeCallConversationId) && ev.data() != null && !ev.data().isEmpty()) {
+                Long offAt = camOffTimestamps.get(ev.senderId());
+                if (offAt != null && System.currentTimeMillis() - offAt < 1000L) {
+                    return;
+                }
                 try {
                     byte[] jpeg = java.util.Base64.getDecoder().decode(ev.data());
                     java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(jpeg));
                     if (img != null) {
                         SwingUtilities.invokeLater(() -> {
+                            Long offNow = camOffTimestamps.get(ev.senderId());
+                            if (offNow != null && System.currentTimeMillis() - offNow < 1000L) {
+                                return;
+                            }
                             if (ev.conversationId().equals(activeCallConversationId)) {
                                 meetRoomPanel.updateParticipantVideo(ev.senderId(), img);
+                                javax.swing.Timer vTimer = peerVideoTimers.computeIfAbsent(ev.senderId(), id -> {
+                                    javax.swing.Timer t = new javax.swing.Timer(1500, e -> meetRoomPanel.updateParticipantVideo(id, null));
+                                    t.setRepeats(false);
+                                    return t;
+                                });
+                                vTimer.restart();
                             }
                         });
                     }
@@ -490,9 +521,20 @@ public final class ChatWorkspace extends JPanel {
             return;
         }
 
+        if ("CAM_ON".equals(action)) {
+            if (ev.conversationId().equals(activeCallConversationId)) {
+                camOffTimestamps.remove(ev.senderId());
+            }
+            return;
+        }
+
         if ("CAM_OFF".equals(action)) {
             if (ev.conversationId().equals(activeCallConversationId)) {
+                camOffTimestamps.put(ev.senderId(), System.currentTimeMillis());
+                javax.swing.Timer vTimer = peerVideoTimers.remove(ev.senderId());
+                if (vTimer != null) vTimer.stop();
                 meetRoomPanel.updateParticipantVideo(ev.senderId(), null);
+                SwingUtilities.invokeLater(() -> meetRoomPanel.updateParticipantVideo(ev.senderId(), null));
             }
             return;
         }
@@ -537,13 +579,19 @@ public final class ChatWorkspace extends JPanel {
             }
             if (ev.conversationId().equals(activeCallConversationId)) {
                 mutedPeers.remove(ev.senderId());
+                camOffTimestamps.remove(ev.senderId());
                 meetRoomPanel.removeParticipant(ev.senderId());
                 javax.swing.Timer t = peerSpeakingTimers.remove(ev.senderId());
                 if (t != null) t.stop();
+                javax.swing.Timer vt = peerVideoTimers.remove(ev.senderId());
+                if (vt != null) vt.stop();
                 if (meetRoomPanel.getParticipantCount() <= 1) {
                     voiceEngine.stop();
                     stopLocalCamera(false);
                     mutedPeers.clear();
+                    camOffTimestamps.clear();
+                    peerVideoTimers.values().forEach(javax.swing.Timer::stop);
+                    peerVideoTimers.clear();
                     meetRoomPanel.stopSessionAndFormatDuration();
                     activeCallConversationId = null;
                     showChatView();
