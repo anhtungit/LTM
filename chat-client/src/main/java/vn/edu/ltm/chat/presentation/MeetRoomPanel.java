@@ -103,9 +103,10 @@ public final class MeetRoomPanel extends JPanel {
             camBtn.setBackground(this.camMuted ? DiscordTheme.DANGER : DiscordTheme.SUCCESS);
         }
         titleLabel.setText(roomTitle != null && !roomTitle.isBlank() ? roomTitle : "Cuộc gọi thoại");
-        participants.clear();
+        // Clear all cached video frames from previous calls/sessions
         videoFrames.clear();
         tileViews.clear();
+        participants.clear();
         String micSub = !micReady
                 ? "Bạn · Chế độ nghe (không tìm thấy mic)"
                 : (this.micMuted ? "Bạn · Đã tắt mic" : "Bạn · Mic đang bật");
@@ -179,6 +180,9 @@ public final class MeetRoomPanel extends JPanel {
 
     public String stopSessionAndFormatDuration() {
         callTimer.stop();
+        videoFrames.clear();
+        tileViews.clear();
+        participants.clear();
         int mins = elapsedSeconds / 60;
         int secs = elapsedSeconds % 60;
         return String.format("%02d:%02d", mins, secs);

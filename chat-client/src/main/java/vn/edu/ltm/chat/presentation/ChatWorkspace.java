@@ -427,7 +427,7 @@ public final class ChatWorkspace extends JPanel {
         if (initialCamOn) {
             startLocalCamera();
         } else {
-            videoEngine.stop();
+            stopLocalCamera(false);
         }
         chatService.sendCallSignal(conv.id(), activeCallChannel, "INVITE", "");
         if (initialMuted) {
@@ -651,7 +651,7 @@ public final class ChatWorkspace extends JPanel {
             if (initialCamOn) {
                 startLocalCamera();
             } else {
-                videoEngine.stop();
+                stopLocalCamera(false);
             }
             chatService.sendCallSignal(ev.conversationId(), activeCallChannel, "ACCEPT", "");
             if (initialMuted) {

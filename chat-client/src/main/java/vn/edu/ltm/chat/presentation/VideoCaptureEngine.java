@@ -150,6 +150,15 @@ public final class VideoCaptureEngine {
                 Thread.currentThread().interrupt();
             }
         }
+        cleanSharedFrame();
+    }
+
+    private static void cleanSharedFrame() {
+        try {
+            Files.deleteIfExists(SHARED_FRAME_PATH);
+            Files.deleteIfExists(Path.of(SHARED_FRAME_PATH.toString() + ".tmp"));
+        } catch (Exception ignored) {
+        }
     }
 
     public boolean isRunning() {
