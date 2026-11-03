@@ -151,10 +151,14 @@ public final class ChatWorkspace extends JPanel {
                 () -> this.conversations,
                 () -> {
                     sidebarLayout.show(sidebarHost, "dm-sidebar");
-                    showChatView();
                     for (Conversation c : conversations) {
                         if (!c.isGroup()) {
                             selectConversation(c);
+                            if (c.id().equals(activeCallConversationId)) {
+                                centerLayout.show(centerHost, "meet-room");
+                            } else {
+                                showChatView();
+                            }
                             break;
                         }
                     }
@@ -165,7 +169,11 @@ public final class ChatWorkspace extends JPanel {
                     }
                     selectConversation(conv);
                     sidebarLayout.show(sidebarHost, "group-sidebar");
-                    showChatView();
+                    if (conv.id().equals(activeCallConversationId)) {
+                        centerLayout.show(centerHost, "meet-room");
+                    } else {
+                        showChatView();
+                    }
                 },
                 this::openCreateGroupDialog
         );
@@ -248,6 +256,7 @@ public final class ChatWorkspace extends JPanel {
             }
         });
         this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
+        this.meetRoomPanel.setOnOpenChat(this::showChatView);
         this.meetLobbyPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         if (isConnected) {
             handleServerBroadcast();
@@ -358,6 +367,10 @@ public final class ChatWorkspace extends JPanel {
 
     private void showMeetLobby() {
         Conversation conv = currentConversation();
+        if (conv != null && conv.id().equals(activeCallConversationId)) {
+            centerLayout.show(centerHost, "meet-room");
+            return;
+        }
         if (conv != null) {
             meetLobbyPanel.updateRoomInfo(conv.displayName());
         }
@@ -365,6 +378,11 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void showMeetRoom() {
+        Conversation conv = currentConversation();
+        if (conv != null && conv.id().equals(activeCallConversationId)) {
+            centerLayout.show(centerHost, "meet-room");
+            return;
+        }
         startActiveCall();
     }
 
@@ -448,6 +466,9 @@ public final class ChatWorkspace extends JPanel {
             chatService.sendCallSignal(conv.id(), activeCallChannel, "MUTE", "true");
         }
         centerLayout.show(centerHost, "meet-room");
+        rebuildConversationButtons();
+        rebuildAccountFooters();
+        headerPanel.setInCall(true, () -> centerLayout.show(centerHost, "meet-room"));
     }
 
     private void endActiveCall() {
@@ -464,6 +485,9 @@ public final class ChatWorkspace extends JPanel {
         String chan = activeCallChannel;
         activeCallConversationId = null;
         showChatView();
+        rebuildConversationButtons();
+        rebuildAccountFooters();
+        headerPanel.setInCall(false, null);
 
         if (cid != null) {
             chatService.sendCallSignal(cid, chan, "LEAVE", duration);
@@ -595,6 +619,9 @@ public final class ChatWorkspace extends JPanel {
                     meetRoomPanel.stopSessionAndFormatDuration();
                     activeCallConversationId = null;
                     showChatView();
+                    rebuildConversationButtons();
+                    rebuildAccountFooters();
+                    headerPanel.setInCall(false, null);
                 }
             }
         }
@@ -706,6 +733,9 @@ public final class ChatWorkspace extends JPanel {
                 chatService.sendCallSignal(ev.conversationId(), activeCallChannel, "MUTE", "true");
             }
             centerLayout.show(centerHost, "meet-room");
+            rebuildConversationButtons();
+            rebuildAccountFooters();
+            headerPanel.setInCall(true, () -> centerLayout.show(centerHost, "meet-room"));
         });
 
         actions.add(rejectBtn);
@@ -1056,7 +1086,11 @@ public final class ChatWorkspace extends JPanel {
 
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    showMeetLobby();
+                    if (group.id().equals(activeCallConversationId)) {
+                        centerLayout.show(centerHost, "meet-room");
+                    } else {
+                        showMeetLobby();
+                    }
                 }
             };
             vRow.addMouseListener(vRowClick);
@@ -1228,28 +1262,41 @@ public final class ChatWorkspace extends JPanel {
         voiceState.setMaximumSize(new Dimension(SIDEBAR_WIDTH - 16, 58));
         voiceState.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
+        boolean inCall = (activeCallConversationId != null);
+        Conversation callConv = inCall
+                ? conversations.stream().filter(c -> c.id().equals(activeCallConversationId)).findFirst().orElse(null)
+                : null;
+
         JPanel stateTitle = new JPanel(new BorderLayout(8, 0));
         stateTitle.setOpaque(false);
         stateTitle.setAlignmentX(LEFT_ALIGNMENT);
-        stateTitle.add(new JLabel(IconFactory.phosphor("headset.svg", 16, DiscordTheme.SUCCESS)),
+        stateTitle.add(new JLabel(IconFactory.phosphor(inCall ? "phone.svg" : "headset.svg", 16, DiscordTheme.SUCCESS)),
                 BorderLayout.WEST);
-        JLabel state = new JLabel("Kênh gặp · Sẵn sàng");
+        JLabel state = new JLabel(inCall && callConv != null ? ("Đang gọi · " + callConv.displayName()) : "Kênh gặp · Sẵn sàng");
         state.setFont(DiscordTheme.bold(11f));
-        state.setForeground(new Color(0xC5, 0xC6, 0xCD));
+        state.setForeground(inCall ? DiscordTheme.SUCCESS : new Color(0xC5, 0xC6, 0xCD));
         stateTitle.add(state, BorderLayout.CENTER);
         voiceState.add(stateTitle);
         voiceState.add(Box.createVerticalStrut(3));
 
-        JLabel stateSubtext = new JLabel("Bấm để mở sảnh gặp mặt");
+        JLabel stateSubtext = new JLabel(inCall ? "Bấm để quay lại cuộc gọi" : "Bấm để mở sảnh gặp mặt");
         stateSubtext.setFont(DiscordTheme.font(10f));
-        stateSubtext.setForeground(DiscordTheme.TEXT_MUTED);
+        stateSubtext.setForeground(inCall ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_MUTED);
         stateSubtext.setAlignmentX(LEFT_ALIGNMENT);
         padRight(stateSubtext);
         voiceState.add(stateSubtext);
 
         voiceState.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
-                showMeetLobby();
+                if (activeCallConversationId != null) {
+                    conversations.stream()
+                            .filter(c -> c.id().equals(activeCallConversationId))
+                            .findFirst()
+                            .ifPresent(ChatWorkspace.this::selectConversation);
+                    centerLayout.show(centerHost, "meet-room");
+                } else {
+                    showMeetLobby();
+                }
             }
         });
 
@@ -1571,6 +1618,13 @@ public final class ChatWorkspace extends JPanel {
         name.setFont(DiscordTheme.semibold(13f));
         name.setForeground(selected ? Color.WHITE : new Color(0xB9, 0xBA, 0xC2));
         centerPanel.add(name);
+        boolean isCallingThis = conversation.id().equals(activeCallConversationId);
+        if (isCallingThis) {
+            JLabel callTag = new JLabel("· Đang gọi", IconFactory.phosphor("phone.svg", 12, DiscordTheme.SUCCESS), JLabel.LEFT);
+            callTag.setFont(DiscordTheme.font(10f));
+            callTag.setForeground(DiscordTheme.SUCCESS);
+            centerPanel.add(callTag);
+        }
         row.add(centerPanel, BorderLayout.CENTER);
 
         // Forward child click events so clicking avatar or name triggers row selection immediately
@@ -1635,7 +1689,11 @@ public final class ChatWorkspace extends JPanel {
 
         row.addActionListener(e -> {
             selectConversation(conversation);
-            showChatView();
+            if (conversation.id().equals(activeCallConversationId)) {
+                centerLayout.show(centerHost, "meet-room");
+            } else {
+                showChatView();
+            }
         });
         return row;
     }
@@ -1708,6 +1766,8 @@ public final class ChatWorkspace extends JPanel {
         }
         String title = conversation.isGroup() ? selectedChannel : conversation.displayName();
         headerPanel.update(title, conversation.about(), headerAvatar);
+        boolean isCallingThis = conversation.id().equals(activeCallConversationId);
+        headerPanel.setInCall(isCallingThis, () -> centerLayout.show(centerHost, "meet-room"));
     }
 
     private static void clearPanel(JComponent panel) {

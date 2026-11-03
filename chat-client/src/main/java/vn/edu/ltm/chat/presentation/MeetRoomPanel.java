@@ -33,6 +33,7 @@ import java.util.function.Consumer;
 public final class MeetRoomPanel extends JPanel {
     private final Runnable onLeave;
     private Runnable onOpenVoiceSettings;
+    private Runnable onOpenChat;
     private Consumer<Boolean> onMuteToggle;
     private Consumer<Boolean> onCamToggle;
     private boolean micMuted = false;
@@ -80,6 +81,10 @@ public final class MeetRoomPanel extends JPanel {
 
     public void setOnOpenVoiceSettings(Runnable onOpenVoiceSettings) {
         this.onOpenVoiceSettings = onOpenVoiceSettings;
+    }
+
+    public void setOnOpenChat(Runnable onOpenChat) {
+        this.onOpenChat = onOpenChat;
     }
 
     public void startSession(String roomTitle, String selfId, String selfInitials, String selfName, boolean micReady) {
@@ -233,6 +238,24 @@ public final class MeetRoomPanel extends JPanel {
         left.add(statusLabel);
 
         header.add(left, BorderLayout.CENTER);
+
+        JButton chatBtn = new JButton("Mở đoạn chat", IconFactory.phosphor("chat-circle-dots.svg", 16, DiscordTheme.TEXT_PRIMARY));
+        chatBtn.setFont(DiscordTheme.semibold(12f));
+        chatBtn.setForeground(DiscordTheme.TEXT_PRIMARY);
+        chatBtn.setBackground(new Color(0x2B, 0x2D, 0x31));
+        chatBtn.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1),
+                BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        ));
+        chatBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        chatBtn.setFocusPainted(false);
+        chatBtn.setToolTipText("Xem và gửi tin nhắn văn bản trong khi đang gọi");
+        chatBtn.addActionListener(e -> {
+            if (onOpenChat != null) {
+                onOpenChat.run();
+            }
+        });
+        header.add(chatBtn, BorderLayout.EAST);
         return header;
     }
 

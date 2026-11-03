@@ -24,6 +24,9 @@ final class ChatHeaderPanel extends JPanel {
     private final JLabel titleLabel = new JLabel();
     private final JLabel subtitleLabel = new JLabel();
     private final JLabel connectionBadgeLabel = new JLabel();
+    private final JButton inCallPill = new JButton("Đang trong cuộc gọi", IconFactory.phosphor("phone.svg", 13, DiscordTheme.SUCCESS));
+    private final JPanel titleStack = new JPanel();
+    private Runnable onReturnToCall;
 
     ChatHeaderPanel(Runnable onVoiceCall,
                     Runnable onVideoCall,
@@ -43,7 +46,6 @@ final class ChatHeaderPanel extends JPanel {
         avatarHolder.setOpaque(false);
         identity.add(avatarHolder, BorderLayout.WEST);
 
-        JPanel titleStack = new JPanel();
         titleStack.setOpaque(false);
         titleStack.setLayout(new BoxLayout(titleStack, BoxLayout.Y_AXIS));
         titleStack.setMinimumSize(new Dimension(0, 0));
@@ -53,11 +55,32 @@ final class ChatHeaderPanel extends JPanel {
         titleLabel.setAlignmentX(LEFT_ALIGNMENT);
         titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 4));
 
+        inCallPill.setFont(DiscordTheme.bold(11f));
+        inCallPill.setForeground(DiscordTheme.SUCCESS);
+        inCallPill.setBackground(new Color(0x23, 0x3E, 0x2A));
+        inCallPill.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(DiscordTheme.SUCCESS, 1),
+                BorderFactory.createEmptyBorder(2, 6, 2, 6)
+        ));
+        inCallPill.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        inCallPill.setFocusPainted(false);
+        inCallPill.setVisible(false);
+        inCallPill.setToolTipText("Bấm để quay lại màn hình cuộc gọi");
+        inCallPill.addActionListener(e -> {
+            if (onReturnToCall != null) onReturnToCall.run();
+        });
+
+        JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        titleRow.setOpaque(false);
+        titleRow.setAlignmentX(LEFT_ALIGNMENT);
+        titleRow.add(titleLabel);
+        titleRow.add(inCallPill);
+
         subtitleLabel.setFont(DiscordTheme.font(11f));
         subtitleLabel.setForeground(DiscordTheme.TEXT_SECONDARY);
         subtitleLabel.setAlignmentX(LEFT_ALIGNMENT);
 
-        titleStack.add(titleLabel);
+        titleStack.add(titleRow);
         titleStack.add(Box.createVerticalStrut(1));
         titleStack.add(subtitleLabel);
         identity.add(titleStack, BorderLayout.CENTER);
@@ -107,6 +130,13 @@ final class ChatHeaderPanel extends JPanel {
         }
         avatarHolder.revalidate();
         avatarHolder.repaint();
+    }
+
+    void setInCall(boolean inCall, Runnable onReturnToCall) {
+        this.onReturnToCall = onReturnToCall;
+        inCallPill.setVisible(inCall);
+        titleStack.revalidate();
+        titleStack.repaint();
     }
 
     void setTitle(String title) {
