@@ -53,7 +53,8 @@ public final class VoiceAudioEngine {
 
     private volatile TargetDataLine micLine;
     private volatile SourceDataLine speakerLine;
-    private final ArrayBlockingQueue<byte[]> playbackQueue = new ArrayBlockingQueue<>(JITTER_QUEUE_CAPACITY);
+    // One jitter queue per remote speaker; frames are summed (mixed) at playback so group calls don't serialize voices.
+    private final java.util.concurrent.ConcurrentHashMap<String, ArrayBlockingQueue<byte[]>> peerQueues = new java.util.concurrent.ConcurrentHashMap<>();
     private Thread captureThread;
     private Thread playbackThread;
     private Consumer<String> activeEncodedChunkConsumer;
@@ -652,7 +653,7 @@ public final class VoiceAudioEngine {
     synchronized void start(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         stop();
         running = true;
-        playbackQueue.clear();
+        peerQueues.clear();
         this.activeEncodedChunkConsumer = onEncodedChunk;
         this.activeSpeakingStateConsumer = onSpeakingState;
 
@@ -925,7 +926,7 @@ public final class VoiceAudioEngine {
                     continue;
                 }
                 if (prebuffering) {
-                    if (playbackQueue.size() < PREBUFFER_FRAMES) {
+                    if (maxQueued() < PREBUFFER_FRAMES) {
                         // Keep ALSA/PipeWire DMA buffer continuously fed with silence to prevent XRUN underruns
                         out.write(SILENCE_FRAME, 0, CHUNK_BYTES);
                         continue;
@@ -934,10 +935,16 @@ public final class VoiceAudioEngine {
                     emptyTicks = 0;
                 }
                 // Trim excess queue buildup (>320ms) if sender clock is slightly faster
-                while (playbackQueue.size() > 8) {
-                    playbackQueue.poll();
+                for (ArrayBlockingQueue<byte[]> q : peerQueues.values()) {
+                    while (q.size() > 8) {
+                        q.poll();
+                    }
                 }
-                byte[] pcm = playbackQueue.poll(15, TimeUnit.MILLISECONDS);
+                byte[] pcm = pollMixed();
+                if (pcm == null) {
+                    Thread.sleep(15);
+                    pcm = pollMixed();
+                }
                 if (pcm != null) {
                     emptyTicks = 0;
                     lastFrame = pcm;
@@ -999,20 +1006,71 @@ public final class VoiceAudioEngine {
         return Math.sqrt(varSum / samples);
     }
 
+    private int maxQueued() {
+        int max = 0;
+        for (ArrayBlockingQueue<byte[]> q : peerQueues.values()) {
+            max = Math.max(max, q.size());
+        }
+        return max;
+    }
+
+    /** Takes one frame from every peer queue and sums them with clipping; null when all queues are empty. */
+    private byte[] pollMixed() {
+        byte[] first = null;
+        int[] acc = null;
+        int count = 0;
+        for (ArrayBlockingQueue<byte[]> q : peerQueues.values()) {
+            byte[] f = q.poll();
+            if (f == null) continue;
+            count++;
+            if (count == 1) {
+                first = f;
+                continue;
+            }
+            if (acc == null) {
+                acc = new int[first.length / 2];
+                for (int i = 0; i < acc.length; i++) {
+                    acc[i] = (short) ((first[2 * i + 1] << 8) | (first[2 * i] & 0xFF));
+                }
+            }
+            for (int i = 0; i < acc.length && 2 * i + 1 < f.length; i++) {
+                acc[i] += (short) ((f[2 * i + 1] << 8) | (f[2 * i] & 0xFF));
+            }
+        }
+        if (acc == null) return first;
+        byte[] mixed = new byte[acc.length * 2];
+        for (int i = 0; i < acc.length; i++) {
+            int v = Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, acc[i]));
+            mixed[2 * i] = (byte) v;
+            mixed[2 * i + 1] = (byte) (v >> 8);
+        }
+        return mixed;
+    }
+
     void playChunk(String base64Pcm) {
+        playChunk("", base64Pcm);
+    }
+
+    void playChunk(String peerId, String base64Pcm) {
         if (!running || base64Pcm == null || base64Pcm.isEmpty()) return;
         try {
             byte[] pcm = Base64.getDecoder().decode(base64Pcm);
-            while (!playbackQueue.offer(pcm)) {
-                playbackQueue.poll(); // Drop only the single oldest 40ms frame on overflow instead of flushing line
+            ArrayBlockingQueue<byte[]> q = peerQueues.computeIfAbsent(peerId == null ? "" : peerId,
+                    k -> new ArrayBlockingQueue<>(JITTER_QUEUE_CAPACITY));
+            while (!q.offer(pcm)) {
+                q.poll(); // Drop only the single oldest 40ms frame on overflow instead of flushing line
             }
         } catch (Exception ex) {
             System.err.println("[VoiceAudioEngine] Error queueing audio chunk: " + ex.getMessage());
         }
     }
 
+    void flushPeer(String peerId) {
+        peerQueues.remove(peerId);
+    }
+
     void flushSpeaker() {
-        playbackQueue.clear();
+        peerQueues.clear();
         SourceDataLine out = this.speakerLine;
         if (out != null && out.isOpen()) {
             try {
@@ -1057,7 +1115,7 @@ public final class VoiceAudioEngine {
 
     synchronized void stop() {
         running = false;
-        playbackQueue.clear();
+        peerQueues.clear();
         closeCurrentMicLineAndWait();
         Thread oldPlay = this.playbackThread;
         this.playbackThread = null;
