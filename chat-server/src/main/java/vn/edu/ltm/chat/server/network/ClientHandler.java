@@ -28,6 +28,8 @@ public final class ClientHandler implements Runnable {
     private final DatabaseManager db;
     private PrintWriter out;
     private UserDto currentUser;
+    private volatile String callConvId;
+    private volatile String callChannel = "";
 
     public ClientHandler(Socket socket, ChatServer server, DatabaseManager db) {
         this.socket = socket;
@@ -76,6 +78,16 @@ public final class ClientHandler implements Runnable {
         } catch (IOException ignored) {
             // Client disconnected
         } finally {
+            if (callConvId != null && currentUser != null) {
+                try {
+                    handleCallSignal(Packet.broadcast("CALL_SIGNAL_REQ")
+                            .put("conversationId", callConvId)
+                            .put("channel", callChannel)
+                            .put("action", "LEAVE")
+                            .put("data", ""));
+                } catch (Exception ignored) {
+                }
+            }
             server.unregisterHandler(this);
             if (currentUser != null && server.isRunning()) {
                 db.updateUserOnlineStatus(currentUser.id(), false);
@@ -621,6 +633,14 @@ public final class ClientHandler implements Runnable {
         String data = req.getString("data", "");
 
         if (convId == null || convId.isBlank() || senderId.isBlank()) return;
+
+        // Remember the call this connection joined so a dropped socket can announce LEAVE.
+        if ("INVITE".equals(action) || "ACCEPT".equals(action)) {
+            callConvId = convId;
+            callChannel = channel != null ? channel : "";
+        } else if ("LEAVE".equals(action) || "REJECT".equals(action)) {
+            if (convId.equals(callConvId)) callConvId = null;
+        }
 
         if (db.isGroupConversation(convId)) {
             if (!db.isUserMemberOfGroup(senderId, convId)) return;
