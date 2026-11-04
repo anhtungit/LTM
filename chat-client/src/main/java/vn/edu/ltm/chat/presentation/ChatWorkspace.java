@@ -132,6 +132,8 @@ public final class ChatWorkspace extends JPanel {
     private volatile String activeCallChannel = "";
     private volatile String activeCallTextChannel = "";
     private volatile String selectedVoiceChannel;
+    /** Who is in each group voice channel, keyed by conversationId|channel, built from INVITE/ACCEPT/LEAVE signals. */
+    private final Map<String, Map<String, String>> voiceRoster = new ConcurrentHashMap<>();
     private javax.swing.JDialog incomingCallDialog;
     private final Map<String, javax.swing.Timer> peerSpeakingTimers = new ConcurrentHashMap<>();
     private final Map<String, javax.swing.Timer> peerVideoTimers = new ConcurrentHashMap<>();
@@ -492,6 +494,8 @@ public final class ChatWorkspace extends JPanel {
         rebuildConversationButtons();
         rebuildAccountFooters();
         headerPanel.setInCall(false, null);
+        Conversation after = currentConversation();
+        if (after != null && after.isGroup()) rebuildGroupChannels(after);
 
         if (cid != null) {
             chatService.sendCallSignal(cid, chan, "LEAVE", duration);
@@ -504,12 +508,34 @@ public final class ChatWorkspace extends JPanel {
         }
     }
 
+    private void updateVoiceRoster(ChatGateway.CallSignalEvent ev, String action) {
+        boolean group = conversations.stream().anyMatch(c -> c.id().equals(ev.conversationId()) && c.isGroup());
+        if (!group) return;
+        String key = ev.conversationId() + "|" + (ev.channel() == null ? "" : ev.channel());
+        if ("INVITE".equals(action) || "ACCEPT".equals(action)) {
+            voiceRoster.computeIfAbsent(key, k -> new ConcurrentHashMap<>()).put(ev.senderId(), ev.senderName());
+        } else if ("LEAVE".equals(action) || "REJECT".equals(action)) {
+            Map<String, String> m = voiceRoster.get(key);
+            if (m == null || m.remove(ev.senderId()) == null) return;
+        } else {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            Conversation c = currentConversation();
+            if (c != null && c.isGroup()) rebuildGroupChannels(c);
+        });
+    }
+
     private boolean inActiveCall(ChatGateway.CallSignalEvent ev) {
         String cid = activeCallConversationId;
         if (cid == null || !cid.equals(ev.conversationId())) return false;
         String a = activeCallChannel == null ? "" : activeCallChannel;
         String b = ev.channel() == null ? "" : ev.channel();
         return a.isEmpty() || b.isEmpty() || a.equals(b);
+    }
+
+    private boolean isGroupConversation(String id) {
+        return conversations.stream().anyMatch(c -> c.id().equals(id) && c.isGroup());
     }
 
     private boolean isActiveCallGroup() {
@@ -522,6 +548,7 @@ public final class ChatWorkspace extends JPanel {
             return;
         }
         String action = ev.action();
+        updateVoiceRoster(ev, action);
         if ("AUDIO".equals(action)) {
             if (inActiveCall(ev) && !mutedPeers.contains(ev.senderId())) {
                 voiceEngine.playChunk(ev.senderId(), ev.data());
@@ -605,7 +632,9 @@ public final class ChatWorkspace extends JPanel {
                 }
                 return;
             }
-            showIncomingCallPrompt(ev);
+            if (!isGroupConversation(ev.conversationId())) {
+                showIncomingCallPrompt(ev);
+            }
         } else if ("ACCEPT".equals(action)) {
             if (inActiveCall(ev)) {
                 meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", false);
@@ -719,6 +748,9 @@ public final class ChatWorkspace extends JPanel {
         acceptBtn.addActionListener(e -> {
             dialog.dispose();
             incomingCallDialog = null;
+            if (activeCallConversationId != null) {
+                endActiveCall();
+            }
             conversations.stream()
                     .filter(c -> c.id().equals(ev.conversationId()))
                     .findFirst()
@@ -1120,6 +1152,21 @@ public final class ChatWorkspace extends JPanel {
             vChanLbl.addMouseListener(vRowClick);
 
             groupChannelsPanel.add(vRow);
+            Map<String, String> inRoom = voiceRoster.get(group.id() + "|" + vChan);
+            java.util.Collection<String> names = new java.util.ArrayList<>(inRoom != null ? inRoom.values() : java.util.List.of());
+            if (vChan.equals(activeCallChannel) && group.id().equals(activeCallConversationId) && user != null
+                    && !(inRoom != null && inRoom.containsKey(user.id()))) {
+                names.add(user.displayName());
+            }
+            for (String memberName : names) {
+                JLabel who = new JLabel(memberName, IconFactory.phosphor("user-circle.svg", 14, DiscordTheme.TEXT_MUTED), SwingConstants.LEFT);
+                who.setIconTextGap(6);
+                who.setFont(DiscordTheme.font(12f));
+                who.setForeground(DiscordTheme.TEXT_MUTED);
+                who.setBorder(BorderFactory.createEmptyBorder(1, 30, 1, 6));
+                who.setAlignmentX(LEFT_ALIGNMENT);
+                groupChannelsPanel.add(who);
+            }
             groupChannelsPanel.add(Box.createVerticalStrut(2));
         }
 
