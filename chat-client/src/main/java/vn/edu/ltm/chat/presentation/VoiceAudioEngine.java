@@ -43,6 +43,7 @@ public final class VoiceAudioEngine {
 
     private static volatile String selectedMicId = "default";
     private static volatile String selectedSpeakerId = "default";
+    private volatile Consumer<byte[]> micLoopbackConsumer;
     private static volatile boolean noiseSuppressionEnabled = true;
 
     private volatile boolean running = false;
@@ -585,11 +586,26 @@ public final class VoiceAudioEngine {
         }, "audio-test-speaker").start();
     }
 
-    public synchronized void switchMicDevice(String deviceId) {
+    public void setMicLoopback(Consumer<byte[]> consumer) {
+        this.micLoopbackConsumer = consumer;
+    }
+
+    public static void setSelectedMicId(String deviceId) {
         selectedMicId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
         if (selectedMicId.startsWith("pw:")) {
             activatePipeWireDevice(selectedMicId, true);
         }
+    }
+
+    public static void setSelectedSpeakerId(String deviceId) {
+        selectedSpeakerId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
+        if (selectedSpeakerId.startsWith("pw:")) {
+            activatePipeWireDevice(selectedSpeakerId, false);
+        }
+    }
+
+    public synchronized void switchMicDevice(String deviceId) {
+        setSelectedMicId(deviceId);
         if (running) {
             closeCurrentMicLineAndWait();
             TargetDataLine newLine = openMicLine(selectedMicId);
@@ -607,10 +623,7 @@ public final class VoiceAudioEngine {
     }
 
     public synchronized void switchSpeakerDevice(String deviceId) {
-        selectedSpeakerId = (deviceId != null && !deviceId.isBlank()) ? deviceId : "default";
-        if (selectedSpeakerId.startsWith("pw:")) {
-            activatePipeWireDevice(selectedSpeakerId, false);
-        }
+        setSelectedSpeakerId(deviceId);
         if (running) {
             if (speakerLine != null) {
                 try {
@@ -850,6 +863,11 @@ public final class VoiceAudioEngine {
                     byte[] processed = buffer;
                     if (noiseSuppressionEnabled && read == CHUNK_BYTES) {
                         processed = suppressor.process(buffer);
+                    }
+
+                    Consumer<byte[]> loopback = this.micLoopbackConsumer;
+                    if (loopback != null) {
+                        loopback.accept((read == processed.length) ? processed : java.util.Arrays.copyOf(processed, read));
                     }
 
                     double rms = computeRms(processed, read);

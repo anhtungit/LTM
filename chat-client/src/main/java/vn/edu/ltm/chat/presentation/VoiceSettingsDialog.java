@@ -3,6 +3,7 @@ package vn.edu.ltm.chat.presentation;
 import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
+import javax.sound.sampled.SourceDataLine;
 import javax.sound.sampled.TargetDataLine;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -13,6 +14,7 @@ import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
@@ -34,7 +36,10 @@ public final class VoiceSettingsDialog extends JDialog {
     private final JComboBox<VoiceAudioEngine.AudioDevice> spkCombo = new JComboBox<>();
     private final JComboBox<VideoCaptureEngine.CameraDevice> camCombo = new JComboBox<>();
     private final JProgressBar micLevelBar = new JProgressBar(0, 100);
+    private JButton testMicBtn;
     private volatile boolean testingMic = false;
+    private volatile boolean isTestingLoopback = false;
+    private volatile SourceDataLine testLoopbackLine;
     private boolean updatingCombos = false;
     private Thread micMonitorThread;
     private TargetDataLine testMicLine;
@@ -93,12 +98,17 @@ public final class VoiceSettingsDialog extends JDialog {
         micCombo.addActionListener(e -> {
             if (updatingCombos) return;
             VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) micCombo.getSelectedItem();
-            if (sel != null && voiceEngine != null) {
+            if (sel != null) {
                 String id = sel.id();
-                CompletableFuture.runAsync(() -> {
-                    voiceEngine.switchMicDevice(id);
-                    SwingUtilities.invokeLater(() -> restartMicLevelMonitor(id));
-                });
+                VoiceAudioEngine.setSelectedMicId(id);
+                if (voiceEngine != null) {
+                    CompletableFuture.runAsync(() -> {
+                        voiceEngine.switchMicDevice(id);
+                        SwingUtilities.invokeLater(() -> restartMicLevelMonitor(id));
+                    });
+                } else {
+                    restartMicLevelMonitor(id);
+                }
             }
         });
         body.add(micCombo);
@@ -129,6 +139,21 @@ public final class VoiceSettingsDialog extends JDialog {
         micLevelBar.setBackground(new Color(0x2B, 0x2D, 0x31));
         micLevelBar.setBorder(BorderFactory.createEmptyBorder());
         body.add(micLevelBar);
+        body.add(Box.createVerticalStrut(8));
+
+        testMicBtn = new JButton("Thử mic (nghe lại âm thanh)", IconFactory.phosphor("microphone.svg", 14, Color.WHITE));
+        testMicBtn.setIconTextGap(8);
+        testMicBtn.setFont(DiscordTheme.semibold(12f));
+        testMicBtn.setForeground(Color.WHITE);
+        testMicBtn.setBackground(new Color(0x3B, 0x3D, 0x44));
+        testMicBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        testMicBtn.setBorder(BorderFactory.createEmptyBorder(7, 14, 7, 14));
+        testMicBtn.addActionListener(e -> toggleMicLoopback());
+        JPanel micBtnHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        micBtnHolder.setOpaque(true);
+        micBtnHolder.setBackground(DiscordTheme.SIDEBAR);
+        micBtnHolder.add(testMicBtn);
+        body.add(micBtnHolder);
         body.add(Box.createVerticalStrut(14));
 
         // 2. Speaker section
@@ -140,9 +165,15 @@ public final class VoiceSettingsDialog extends JDialog {
         spkCombo.addActionListener(e -> {
             if (updatingCombos) return;
             VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) spkCombo.getSelectedItem();
-            if (sel != null && voiceEngine != null) {
+            if (sel != null) {
                 String id = sel.id();
-                CompletableFuture.runAsync(() -> voiceEngine.switchSpeakerDevice(id));
+                VoiceAudioEngine.setSelectedSpeakerId(id);
+                if (voiceEngine != null) {
+                    CompletableFuture.runAsync(() -> voiceEngine.switchSpeakerDevice(id));
+                }
+                if (isTestingLoopback) {
+                    stopMicLoopback();
+                }
             }
         });
         body.add(spkCombo);
@@ -354,6 +385,11 @@ public final class VoiceSettingsDialog extends JDialog {
                         double rms = VoiceAudioEngine.computeRms(processed, read);
                         int level = mapRmsToLevel(rms);
                         updateLevelBarSafe(level);
+
+                        SourceDataLine loopback = testLoopbackLine;
+                        if (isTestingLoopback && loopback != null && loopback.isOpen()) {
+                            loopback.write(processed, 0, read);
+                        }
                     }
                 }
             } catch (Exception ignored) {
@@ -365,7 +401,63 @@ public final class VoiceSettingsDialog extends JDialog {
         micMonitorThread.start();
     }
 
+    private synchronized void toggleMicLoopback() {
+        if (isTestingLoopback) {
+            stopMicLoopback();
+        } else {
+            startMicLoopback();
+        }
+    }
+
+    private synchronized void startMicLoopback() {
+        stopMicLoopback();
+        VoiceAudioEngine.AudioDevice spk = (VoiceAudioEngine.AudioDevice) spkCombo.getSelectedItem();
+        String spkId = (spk != null) ? spk.id() : VoiceAudioEngine.getSelectedSpeakerId();
+        SourceDataLine line = VoiceAudioEngine.openSpeakerLine(spkId);
+        if (line == null) {
+            JOptionPane.showMessageDialog(this, "Không thể mở thiết bị loa / tai nghe để nghe lại.", "Lỗi âm thanh", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        testLoopbackLine = line;
+        isTestingLoopback = true;
+        if (voiceEngine != null && voiceEngine.isRunning()) {
+            voiceEngine.setMicLoopback(buf -> {
+                SourceDataLine l = testLoopbackLine;
+                if (l != null && l.isOpen()) {
+                    l.write(buf, 0, buf.length);
+                }
+            });
+        }
+        if (testMicBtn != null) {
+            testMicBtn.setText("Dừng thử mic");
+            testMicBtn.setIcon(IconFactory.phosphor("x.svg", 14, Color.WHITE));
+            testMicBtn.setBackground(DiscordTheme.DANGER);
+        }
+    }
+
+    private synchronized void stopMicLoopback() {
+        isTestingLoopback = false;
+        if (voiceEngine != null) {
+            voiceEngine.setMicLoopback(null);
+        }
+        if (testLoopbackLine != null) {
+            try {
+                testLoopbackLine.stop();
+                testLoopbackLine.flush();
+                testLoopbackLine.close();
+            } catch (Exception ignored) {
+            }
+            testLoopbackLine = null;
+        }
+        if (testMicBtn != null) {
+            testMicBtn.setText("Thử mic (nghe lại âm thanh)");
+            testMicBtn.setIcon(IconFactory.phosphor("microphone.svg", 14, Color.WHITE));
+            testMicBtn.setBackground(new Color(0x3B, 0x3D, 0x44));
+        }
+    }
+
     private synchronized void stopMicLevelMonitor() {
+        stopMicLoopback();
         testingMic = false;
         if (testMicLine != null) {
             try {
