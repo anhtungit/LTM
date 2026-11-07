@@ -261,9 +261,10 @@ public final class ChatWorkspace extends JPanel {
             }
         });
         this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
-        this.meetRoomPanel.setOnOpenChat(this::showChatView);
+        this.meetRoomPanel.setOnOpenChat(this::toggleInCallChat);
         this.meetRoomPanel.setOnWatchTogether(this::openWatchTogether);
-        this.meetRoomPanel.setOnStartScreenShare(this::startScreenShare);
+        this.meetRoomPanel.setOnStartScreenShare(() -> startScreenShare(ScreenCaptureEngine.SOURCE_SCREEN, false));
+        this.meetRoomPanel.setOnStartScreenShareConfig(this::startScreenShare);
         this.meetRoomPanel.setOnStopScreenShare(this::stopScreenShare);
         this.meetLobbyPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         if (isConnected) {
@@ -370,7 +371,30 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void showChatView() {
+        restoreChatAreaToHost();
         centerLayout.show(centerHost, "chat");
+    }
+
+    private void toggleInCallChat() {
+        if (meetRoomPanel.isChatDrawerOpen()) {
+            restoreChatAreaToHost();
+        } else {
+            headerPanel.setVisible(false);
+            infoPane.setVisible(false);
+            meetRoomPanel.openChatDrawer(chatArea);
+        }
+    }
+
+    private void restoreChatAreaToHost() {
+        if (meetRoomPanel.isChatDrawerOpen()) {
+            meetRoomPanel.closeChatDrawer();
+        }
+        headerPanel.setVisible(true);
+        if (chatArea.getParent() != centerHost) {
+            centerHost.add(chatArea, "chat");
+        }
+        centerHost.revalidate();
+        centerHost.repaint();
     }
 
     private void showMeetLobby() {
@@ -517,7 +541,10 @@ public final class ChatWorkspace extends JPanel {
     private void openWatchTogether() {
         WatchTogether w = watchSession();
         if (w == null) return;
-        if (!w.isActive()) w.requestState();
+        if (!w.isActive()) {
+            w.startSession();
+            w.requestState();
+        }
         javax.swing.JComponent playerComp = w.createInAppPlayerComponent();
         if (playerComp != null) {
             meetRoomPanel.showWatchTogetherStage(playerComp, () -> {
@@ -544,13 +571,9 @@ public final class ChatWorkspace extends JPanel {
                 SwingUtilities.invokeLater(meetRoomPanel::hideWatchTogetherStage);
             }
             case WatchTogether.ACTION_STATE -> {
-                boolean first = !w.isActive();
-                if (w.onRemoteState(ev.senderId(), ev.data()) && first) {
+                if (w.onRemoteState(ev.senderId(), ev.data())) {
                     SwingUtilities.invokeLater(() -> {
-                        int ans = javax.swing.JOptionPane.showConfirmDialog(this,
-                                ev.senderName() + " đang xem YouTube cùng nhau. Tham gia xem trực tiếp?",
-                                "Xem YouTube cùng nhau", javax.swing.JOptionPane.YES_NO_OPTION);
-                        if (ans == javax.swing.JOptionPane.YES_OPTION) {
+                        if (inActiveCall(ev) && !meetRoomPanel.isWatchingTogether()) {
                             openWatchTogether();
                         }
                     });
@@ -560,18 +583,33 @@ public final class ChatWorkspace extends JPanel {
         }
     }
 
-    private void startScreenShare() {
+    private void startScreenShare(int sourceType, boolean hd) {
         if (!call.isActive()) return;
         String cid = call.conversationId();
         String chan = call.channel();
         if (cid == null) return;
+        screenEngine.setSourceType(sourceType);
+        if (hd) {
+            screenEngine.setConfig(30, 1920, 1080);
+        } else {
+            screenEngine.setConfig(15, 1280, 720);
+        }
+        meetRoomPanel.setScreenSharingActive(true);
         screenEngine.start(jpegBytes -> {
             String base64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
             chatService.sendCallSignal(cid, chan, "SCREEN", base64);
         }, rawImg -> {
             SwingUtilities.invokeLater(() -> meetRoomPanel.updateScreenShare(user.id(), user.displayName(), rawImg));
-        });
-        meetRoomPanel.setScreenSharingActive(true);
+        }, () -> SwingUtilities.invokeLater(() -> {
+            meetRoomPanel.setScreenSharingActive(false);
+            String activeCid = call.conversationId();
+            if (activeCid != null) {
+                chatService.sendCallSignal(activeCid, call.channel(), "SCREEN_OFF", "");
+            }
+            if (user != null) {
+                meetRoomPanel.updateScreenShare(user.id(), user.displayName(), null);
+            }
+        }));
     }
 
     private void stopScreenShare() {

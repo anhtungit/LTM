@@ -12,17 +12,28 @@ import java.awt.RenderingHints;
 import java.awt.Robot;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.EOFException;
 import java.util.Iterator;
 import java.util.function.Consumer;
 
 /**
- * Thu hình màn hình thời gian thực (Screen Capture) bằng Robot và nén JPEG gửi qua kênh cuộc gọi.
+ * Thu hình màn hình / cửa sổ thời gian thực (Screen & Window Capture).
+ * - Trên Linux Wayland: Sử dụng XDG Desktop Portal (org.freedesktop.portal.ScreenCast) + PipeWire + GStreamer
+ *   để chọn Màn hình hoặc Cửa sổ ứng dụng cụ thể chỉ với 1 lần cấp quyền duy nhất (giống Discord), không bị màn hình đen.
+ * - Trên Windows / macOS / X11: Sử dụng java.awt.Robot.
  */
 public final class ScreenCaptureEngine {
 
+    public static final int SOURCE_SCREEN = 1;
+    public static final int SOURCE_WINDOW = 2;
+
     private volatile boolean running = false;
     private Thread captureThread;
+    private volatile Process portalProcess;
+    private int sourceType = SOURCE_SCREEN;
     private int targetFps = 15;
     private int maxWidth = 1280;
     private int maxHeight = 720;
@@ -32,6 +43,22 @@ public final class ScreenCaptureEngine {
         return running;
     }
 
+    public synchronized void setSourceType(int sourceType) {
+        this.sourceType = (sourceType == SOURCE_WINDOW) ? SOURCE_WINDOW : SOURCE_SCREEN;
+    }
+
+    public synchronized int getSourceType() {
+        return sourceType;
+    }
+
+    public synchronized int getTargetFps() {
+        return targetFps;
+    }
+
+    public synchronized int getMaxHeight() {
+        return maxHeight;
+    }
+
     public synchronized void setConfig(int fps, int maxWidth, int maxHeight) {
         this.targetFps = Math.max(5, Math.min(30, fps));
         this.maxWidth = maxWidth;
@@ -39,46 +66,157 @@ public final class ScreenCaptureEngine {
     }
 
     public synchronized void start(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+        start(onJpegFrame, onLocalPreview, null);
+    }
+
+    public synchronized void start(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview, Runnable onStopped) {
         stop();
         this.running = true;
+        final int srcType = this.sourceType;
+        final int fps = this.targetFps;
+        final int maxW = this.maxWidth;
+        final int maxH = this.maxHeight;
+        final float qual = this.jpegQuality;
 
         captureThread = new Thread(() -> {
-            Robot robot;
             try {
-                robot = new Robot();
-            } catch (Throwable t) {
-                System.err.println("[ScreenCaptureEngine] Không khởi tạo được Robot capture: " + t.getMessage());
-                running = false;
-                return;
+                if (isWaylandSession()) {
+                    runWaylandPortalCapture(srcType, fps, maxW, maxH, qual, onJpegFrame, onLocalPreview);
+                } else {
+                    runRobotCapture(fps, maxW, maxH, qual, onJpegFrame, onLocalPreview);
+                }
+            } finally {
+                boolean wasRunning = this.running;
+                this.running = false;
+                destroyPortalProcess();
+                if (wasRunning && onStopped != null) {
+                    onStopped.run();
+                }
             }
+        }, "screen-capture-thread");
 
-            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-            Rectangle screenRect = new Rectangle(0, 0, screenSize.width, screenSize.height);
-            long frameIntervalMs = 1000L / targetFps;
+        captureThread.setDaemon(true);
+        captureThread.setPriority(Thread.NORM_PRIORITY);
+        captureThread.start();
+    }
 
-            ImageWriter writer = null;
-            Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
-            if (writers.hasNext()) {
-                writer = writers.next();
+    public synchronized void stop() {
+        this.running = false;
+        destroyPortalProcess();
+        Thread t = this.captureThread;
+        this.captureThread = null;
+        if (t != null && t != Thread.currentThread()) {
+            t.interrupt();
+            try {
+                t.join(300);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
+        }
+    }
 
-            while (running) {
-                long start = System.currentTimeMillis();
-                try {
-                    BufferedImage raw = robot.createScreenCapture(screenRect);
-                    if (raw != null) {
-                        BufferedImage scaled = scaleIfNeeded(raw, maxWidth, maxHeight);
+    private void destroyPortalProcess() {
+        Process p = this.portalProcess;
+        this.portalProcess = null;
+        if (p != null) {
+            try {
+                p.getOutputStream().close();
+            } catch (Throwable ignored) {
+            }
+            p.destroy();
+        }
+    }
+
+    private static boolean isWaylandSession() {
+        String wayland = System.getenv("WAYLAND_DISPLAY");
+        String session = System.getenv("XDG_SESSION_TYPE");
+        return (wayland != null && !wayland.isBlank()) || "wayland".equalsIgnoreCase(session);
+    }
+
+    private void runWaylandPortalCapture(int srcType, int fps, int maxW, int maxH, float qual,
+                                         Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+        int qPercent = Math.max(30, Math.min(90, Math.round(qual * 100f)));
+        ProcessBuilder pb = new ProcessBuilder(
+                "python3", "-u", "-c", WAYLAND_PORTAL_PY,
+                Integer.toString(srcType),
+                Integer.toString(fps),
+                Integer.toString(qPercent)
+        );
+        try {
+            Process proc = pb.start();
+            this.portalProcess = proc;
+            ImageWriter writer = createJpegWriter();
+            try (DataInputStream dis = new DataInputStream(proc.getInputStream())) {
+                while (running && proc.isAlive()) {
+                    int len;
+                    try {
+                        len = dis.readInt();
+                    } catch (EOFException eof) {
+                        break;
+                    }
+                    if (len <= 0 || len > 10_000_000) {
+                        break;
+                    }
+                    byte[] rawJpeg = new byte[len];
+                    dis.readFully(rawJpeg);
+                    if (!running) break;
+
+                    BufferedImage img = ImageIO.read(new ByteArrayInputStream(rawJpeg));
+                    if (img != null) {
+                        boolean needsScale = img.getWidth() > maxW || img.getHeight() > maxH;
+                        BufferedImage scaled = needsScale ? scaleIfNeeded(img, maxW, maxH) : img;
                         if (onLocalPreview != null) {
                             onLocalPreview.accept(scaled);
                         }
                         if (onJpegFrame != null) {
-                            byte[] jpeg = compressJpeg(scaled, writer, jpegQuality);
-                            if (jpeg != null && jpeg.length > 0) {
-                                onJpegFrame.accept(jpeg);
+                            byte[] outJpeg = needsScale ? compressJpeg(scaled, writer, qual) : rawJpeg;
+                            if (outJpeg != null && outJpeg.length > 0) {
+                                onJpegFrame.accept(outJpeg);
                             }
                         }
                     }
-                } catch (Throwable ignored) {
+                }
+            } finally {
+                if (writer != null) writer.dispose();
+            }
+        } catch (Throwable t) {
+            System.err.println("[ScreenCaptureEngine] Lỗi thu hình Wayland Portal: " + t.getMessage());
+        }
+    }
+
+    private void runRobotCapture(int fps, int maxW, int maxH, float qual,
+                                 Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+        Robot robot;
+        try {
+            robot = new Robot();
+        } catch (Throwable t) {
+            System.err.println("[ScreenCaptureEngine] Không khởi tạo được Robot capture: " + t.getMessage());
+            return;
+        }
+
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        Rectangle screenRect = new Rectangle(0, 0, screenSize.width, screenSize.height);
+        long frameIntervalMs = 1000L / fps;
+        ImageWriter writer = createJpegWriter();
+
+        try {
+            while (running) {
+                long start = System.currentTimeMillis();
+                try {
+                    BufferedImage raw = robot.createScreenCapture(screenRect);
+                    if (raw == null) break;
+                    BufferedImage scaled = scaleIfNeeded(raw, maxW, maxH);
+                    if (onLocalPreview != null) {
+                        onLocalPreview.accept(scaled);
+                    }
+                    if (onJpegFrame != null) {
+                        byte[] jpeg = compressJpeg(scaled, writer, qual);
+                        if (jpeg != null && jpeg.length > 0) {
+                            onJpegFrame.accept(jpeg);
+                        }
+                    }
+                } catch (Throwable t) {
+                    break;
                 }
 
                 long elapsed = System.currentTimeMillis() - start;
@@ -92,29 +230,16 @@ public final class ScreenCaptureEngine {
                     }
                 }
             }
-
+        } finally {
             if (writer != null) {
                 writer.dispose();
             }
-        }, "screen-capture-thread");
-
-        captureThread.setDaemon(true);
-        captureThread.setPriority(Thread.NORM_PRIORITY);
-        captureThread.start();
+        }
     }
 
-    public synchronized void stop() {
-        this.running = false;
-        Thread t = this.captureThread;
-        this.captureThread = null;
-        if (t != null && t != Thread.currentThread()) {
-            t.interrupt();
-            try {
-                t.join(300);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
+    private static ImageWriter createJpegWriter() {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
+        return writers.hasNext() ? writers.next() : null;
     }
 
     private static BufferedImage scaleIfNeeded(BufferedImage src, int maxW, int maxH) {
@@ -155,4 +280,142 @@ public final class ScreenCaptureEngine {
             return null;
         }
     }
+
+    private static final String WAYLAND_PORTAL_PY = """
+            import sys, os, struct, random, threading
+            import gi
+            gi.require_version('Gst', '1.0')
+            from gi.repository import Gst, Gio, GLib
+
+            Gst.init(None)
+            src_type = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+            fps = int(sys.argv[2]) if len(sys.argv) > 2 else 15
+            quality = int(sys.argv[3]) if len(sys.argv) > 3 else 65
+
+            def watch_stdin():
+                try:
+                    sys.stdin.read()
+                except Exception:
+                    pass
+                os._exit(0)
+
+            threading.Thread(target=watch_stdin, daemon=True).start()
+
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            sender = bus.get_unique_name().lstrip(':').replace('.', '_')
+
+            def call_portal(method, args_variant, token):
+                req_path = f'/org/freedesktop/portal/desktop/request/{sender}/{token}'
+                loop = GLib.MainLoop()
+                res_holder = {}
+                def on_resp(conn, s, path, iface, sig, params):
+                    code, out = params.unpack()
+                    res_holder['code'] = code
+                    res_holder['out'] = out
+                    loop.quit()
+                sub = bus.signal_subscribe(
+                    'org.freedesktop.portal.Desktop',
+                    'org.freedesktop.portal.Request',
+                    'Response',
+                    req_path,
+                    None,
+                    Gio.DBusSignalFlags.NO_MATCH_RULE,
+                    on_resp
+                )
+                bus.call_sync(
+                    'org.freedesktop.portal.Desktop',
+                    '/org/freedesktop/portal/desktop',
+                    'org.freedesktop.portal.ScreenCast',
+                    method,
+                    args_variant,
+                    None,
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    None
+                )
+                loop.run()
+                bus.signal_unsubscribe(sub)
+                return res_holder.get('code', 1), res_holder.get('out', {})
+
+            t1 = f'ltm_{random.randint(10000, 99999)}'
+            c1, r1 = call_portal('CreateSession', GLib.Variant('(a{sv})', ({
+                'handle_token': GLib.Variant('s', t1),
+                'session_handle_token': GLib.Variant('s', f'sess_{t1}')
+            },)), t1)
+            if c1 != 0 or 'session_handle' not in r1:
+                sys.exit(2)
+            sess = r1['session_handle']
+
+            t2 = f'ltm_{random.randint(10000, 99999)}'
+            c2, _ = call_portal('SelectSources', GLib.Variant('(oa{sv})', (sess, {
+                'handle_token': GLib.Variant('s', t2),
+                'types': GLib.Variant('u', src_type),
+                'multiple': GLib.Variant('b', False),
+                'cursor_mode': GLib.Variant('u', 2)
+            })), t2)
+            if c2 != 0:
+                sys.exit(2)
+
+            t3 = f'ltm_{random.randint(10000, 99999)}'
+            c3, r3 = call_portal('Start', GLib.Variant('(osa{sv})', (sess, '', {
+                'handle_token': GLib.Variant('s', t3)
+            })), t3)
+            if c3 != 0 or not r3.get('streams'):
+                sys.exit(2)
+
+            node_id = r3['streams'][0][0]
+            ret, fd_list = bus.call_with_unix_fd_list_sync(
+                'org.freedesktop.portal.Desktop',
+                '/org/freedesktop/portal/desktop',
+                'org.freedesktop.portal.ScreenCast',
+                'OpenPipeWireRemote',
+                GLib.Variant('(oa{sv})', (sess, {})),
+                GLib.VariantType.new('(h)'),
+                Gio.DBusCallFlags.NONE,
+                -1,
+                None,
+                None
+            )
+            pw_fd = fd_list.get(ret.unpack()[0])
+
+            pipeline_desc = (
+                f'pipewiresrc fd={pw_fd} path={node_id} do-timestamp=true ! '
+                f'videoconvert ! videorate ! video/x-raw,framerate={fps}/1 ! '
+                f'jpegenc quality={quality} ! '
+                f'appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false'
+            )
+            pipeline = Gst.parse_launch(pipeline_desc)
+            sink = pipeline.get_by_name('sink')
+            main_loop = GLib.MainLoop()
+
+            def on_new_sample(appsink):
+                sample = appsink.emit('pull-sample')
+                if not sample:
+                    return Gst.FlowReturn.OK
+                buf = sample.get_buffer()
+                ok, mapinfo = buf.map(Gst.MapFlags.READ)
+                if ok:
+                    try:
+                        data = bytes(mapinfo.data)
+                        sys.stdout.buffer.write(struct.pack('>I', len(data)))
+                        sys.stdout.buffer.write(data)
+                        sys.stdout.buffer.flush()
+                    except Exception:
+                        main_loop.quit()
+                    finally:
+                        buf.unmap(mapinfo)
+                return Gst.FlowReturn.OK
+
+            sink.connect('new-sample', on_new_sample)
+            gst_bus = pipeline.get_bus()
+            gst_bus.add_signal_watch()
+            gst_bus.connect('message::eos', lambda b, m: main_loop.quit())
+            gst_bus.connect('message::error', lambda b, m: main_loop.quit())
+
+            pipeline.set_state(Gst.State.PLAYING)
+            try:
+                main_loop.run()
+            finally:
+                pipeline.set_state(Gst.State.NULL)
+            """;
 }
