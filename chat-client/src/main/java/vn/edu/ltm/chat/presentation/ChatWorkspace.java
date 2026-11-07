@@ -261,6 +261,7 @@ public final class ChatWorkspace extends JPanel {
         });
         this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         this.meetRoomPanel.setOnOpenChat(this::showChatView);
+        this.meetRoomPanel.setOnWatchTogether(this::openWatchTogether);
         this.meetLobbyPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         if (isConnected) {
             handleServerBroadcast();
@@ -476,7 +477,51 @@ public final class ChatWorkspace extends JPanel {
         headerPanel.setInCall(true, () -> centerLayout.show(centerHost, "meet-room"));
     }
 
+    private WatchTogether watchTogether;
+
+    private WatchTogether watchSession() {
+        if (watchTogether == null && activeCallConversationId != null) {
+            String cid = activeCallConversationId;
+            String chan = activeCallChannel;
+            watchTogether = new WatchTogether(user.id(), (action, data) -> chatService.sendCallSignal(cid, chan, action, data));
+        }
+        return watchTogether;
+    }
+
+    private void openWatchTogether() {
+        WatchTogether w = watchSession();
+        if (w == null) return;
+        if (!w.isActive()) w.requestState();
+        w.openBrowser();
+    }
+
+    private void handleWatchSignal(ChatGateway.CallSignalEvent ev, String action) {
+        if (!inActiveCall(ev)) return;
+        WatchTogether w = watchSession();
+        if (w == null) return;
+        switch (action) {
+            case WatchTogether.ACTION_REQ -> w.onRequest();
+            case WatchTogether.ACTION_STOP -> w.onRemoteStop();
+            case WatchTogether.ACTION_STATE -> {
+                boolean first = !w.isActive();
+                if (w.onRemoteState(ev.senderId(), ev.data()) && first) {
+                    SwingUtilities.invokeLater(() -> {
+                        int ans = javax.swing.JOptionPane.showConfirmDialog(this,
+                                ev.senderName() + " đang xem YouTube cùng nhau. Tham gia xem?",
+                                "Xem YouTube cùng nhau", javax.swing.JOptionPane.YES_NO_OPTION);
+                        if (ans == javax.swing.JOptionPane.YES_OPTION) w.openBrowser();
+                    });
+                }
+            }
+            default -> { }
+        }
+    }
+
     private void endActiveCall() {
+        if (watchTogether != null) {
+            watchTogether.stop();
+            watchTogether = null;
+        }
         voiceEngine.stop();
         stopLocalCamera(false);
         mutedPeers.clear();
@@ -549,6 +594,10 @@ public final class ChatWorkspace extends JPanel {
         }
         String action = ev.action();
         updateVoiceRoster(ev, action);
+        if (action != null && action.startsWith("YT_")) {
+            handleWatchSignal(ev, action);
+            return;
+        }
         if ("AUDIO".equals(action)) {
             if (inActiveCall(ev) && !mutedPeers.contains(ev.senderId())) {
                 voiceEngine.playChunk(ev.senderId(), ev.data());

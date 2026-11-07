@@ -38,6 +38,7 @@ public final class MeetRoomPanel extends JPanel {
     private final Runnable onLeave;
     private Runnable onOpenVoiceSettings;
     private Runnable onOpenChat;
+    private Runnable onWatchTogether;
     private Consumer<Boolean> onMuteToggle;
     private Consumer<Boolean> onCamToggle;
     private boolean micMuted = false;
@@ -89,6 +90,10 @@ public final class MeetRoomPanel extends JPanel {
 
     public void setOnOpenVoiceSettings(Runnable onOpenVoiceSettings) {
         this.onOpenVoiceSettings = onOpenVoiceSettings;
+    }
+
+    public void setOnWatchTogether(Runnable onWatchTogether) {
+        this.onWatchTogether = onWatchTogether;
     }
 
     public void setOnOpenChat(Runnable onOpenChat) {
@@ -535,6 +540,15 @@ public final class MeetRoomPanel extends JPanel {
         shareBtn.setFont(DiscordTheme.semibold(12f));
         shareBtn.addActionListener(e -> showShareScreenDialog());
         bar.add(shareBtn);
+
+        JButton ytBtn = new JButton("Xem YouTube", IconFactory.phosphor("video-camera.svg", 18, Color.WHITE));
+        styleControlBtn(ytBtn, new Color(0x3B, 0x3D, 0x44));
+        ytBtn.setFont(DiscordTheme.semibold(12f));
+        ytBtn.setToolTipText("Xem YouTube cùng nhau với mọi người trong cuộc gọi");
+        ytBtn.addActionListener(e -> {
+            if (onWatchTogether != null) onWatchTogether.run();
+        });
+        bar.add(ytBtn);
 
         JButton settingsBtn = new JButton(IconFactory.phosphor("gear.svg", 18, Color.WHITE));
         styleControlBtn(settingsBtn, new Color(0x3B, 0x3D, 0x44));
