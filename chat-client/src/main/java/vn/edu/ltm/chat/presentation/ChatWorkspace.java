@@ -445,7 +445,25 @@ public final class ChatWorkspace extends JPanel {
         return initialMuted;
     }
 
+    private void cleanupFloatingPopups() {
+        MessageRow.clearActiveHover();
+        try {
+            javax.swing.JRootPane rp = getRootPane();
+            if (rp != null && rp.getLayeredPane() != null) {
+                javax.swing.JLayeredPane lp = rp.getLayeredPane();
+                for (java.awt.Component c : lp.getComponentsInLayer(javax.swing.JLayeredPane.POPUP_LAYER)) {
+                    if (c instanceof FloatingActionToolbar) {
+                        lp.remove(c);
+                        lp.repaint(c.getBounds());
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void startActiveCall() {
+        cleanupFloatingPopups();
         meetLobbyPanel.stopLobbyPreview();
         Conversation conv = currentConversation();
         if (conv == null) {
@@ -665,7 +683,7 @@ public final class ChatWorkspace extends JPanel {
 
         if ("INVITE".equals(action)) {
             if (inActiveCall(ev)) {
-                meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", false);
+                meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "", false);
                 chatService.sendCallSignal(ev.conversationId(), ev.channel(), "ACCEPT", "");
                 if (voiceEngine.isMuted()) {
                     chatService.sendCallSignal(ev.conversationId(), ev.channel(), "MUTE", "true");
@@ -677,7 +695,7 @@ public final class ChatWorkspace extends JPanel {
             }
         } else if ("ACCEPT".equals(action)) {
             if (inActiveCall(ev)) {
-                meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", false);
+                meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "", false);
                 if (voiceEngine.isMuted()) {
                     chatService.sendCallSignal(ev.conversationId(), ev.channel(), "MUTE", "true");
                 }
@@ -722,7 +740,7 @@ public final class ChatWorkspace extends JPanel {
         try {
             byte[] pcm = java.util.Base64.getDecoder().decode(base64Pcm);
             double rms = VoiceAudioEngine.computeRms(pcm, pcm.length);
-            if (rms > 150.0) {
+            if (rms > 40.0) {
                 SwingUtilities.invokeLater(() -> {
                     meetRoomPanel.setParticipantSpeaking(peerId, true);
                     javax.swing.Timer timer = peerSpeakingTimers.computeIfAbsent(peerId, id -> {
@@ -740,6 +758,7 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void showIncomingCallPrompt(ChatGateway.CallSignalEvent ev) {
+        cleanupFloatingPopups();
         if (incomingCallDialog != null && incomingCallDialog.isVisible()) {
             incomingCallDialog.dispose();
         }
@@ -788,6 +807,7 @@ public final class ChatWorkspace extends JPanel {
         acceptBtn.addActionListener(e -> {
             dialog.dispose();
             incomingCallDialog = null;
+            cleanupFloatingPopups();
             if (call.conversationId() != null) {
                 endActiveCall();
             }
@@ -799,7 +819,7 @@ public final class ChatWorkspace extends JPanel {
             meetLobbyPanel.stopLobbyPreview();
             boolean initialMuted = startCallMedia("Cuộc gọi với " + ev.senderName());
             boolean initialCamOn = meetLobbyPanel.isCamEnabled();
-            meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "Đang kết nối âm thanh trực tiếp", false);
+            meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "", false);
             if (initialCamOn) {
                 startLocalCamera();
             } else {

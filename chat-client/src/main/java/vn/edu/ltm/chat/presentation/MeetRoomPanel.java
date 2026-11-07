@@ -118,7 +118,7 @@ public final class MeetRoomPanel extends JPanel {
             micBtn.setBackground(this.micMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
         }
         if (camBtn != null) {
-            camBtn.setBackground(this.camMuted ? DiscordTheme.DANGER : DiscordTheme.SUCCESS);
+            camBtn.setBackground(this.camMuted ? new Color(0x3B, 0x3D, 0x44) : DiscordTheme.SUCCESS);
         }
         titleLabel.setText(roomTitle != null && !roomTitle.isBlank() ? roomTitle : "Cuộc gọi thoại");
         // Clear all cached video frames from previous calls/sessions
@@ -132,9 +132,10 @@ public final class MeetRoomPanel extends JPanel {
             layoutModeBtn.setText("Bố cục: Lưới");
         }
         String micSub = !micReady
-                ? "Bạn · Chế độ nghe (không tìm thấy mic)"
-                : (this.micMuted ? "Bạn · Đã tắt mic" : "Bạn · Mic đang bật");
-        participants.put(selfId, new ParticipantEntry(selfId, selfInitials, selfName + " (Bạn)", micSub, false));
+                ? "Chế độ nghe (không tìm thấy mic)"
+                : (this.micMuted ? "Đã tắt mic" : "");
+        String selfDisplayName = (selfName != null && selfName.endsWith("(Bạn)")) ? selfName : (selfName + " (Bạn)");
+        participants.put(selfId, new ParticipantEntry(selfId, selfInitials, selfDisplayName, micSub, false));
         rebuildGrid();
         updateHeaderStatus();
         callTimer.restart();
@@ -170,7 +171,7 @@ public final class MeetRoomPanel extends JPanel {
         if (id == null || id.isBlank()) return;
         ParticipantEntry existing = participants.get(id);
         if (existing != null) {
-            String newSub = muted ? "Đã tắt mic" : "Đang kết nối âm thanh trực tiếp";
+            String newSub = muted ? "Đã tắt mic" : "";
             boolean newSpeaking = muted ? false : existing.speaking();
             participants.put(id, new ParticipantEntry(existing.id(), existing.initials(), existing.name(), newSub, newSpeaking));
             rebuildGrid();
@@ -455,12 +456,14 @@ public final class MeetRoomPanel extends JPanel {
             inner.setOpaque(false);
             inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
 
-            AvatarBadge avatar = new AvatarBadge(initials, name, compact ? 42 : 64);
+            int avatarSize = compact ? 42 : (participants.size() <= 2 ? 84 : 64);
+            AvatarBadge avatar = new AvatarBadge(initials, name, avatarSize);
             avatar.setAlignmentX(CENTER_ALIGNMENT);
             inner.add(avatar);
             inner.add(Box.createVerticalStrut(compact ? 4 : 10));
 
-            JLabel status = new JLabel(speaking ? "Đang nói..." : (compact ? "" : "Đang kết nối âm thanh trực tiếp"));
+            String statusText = speaking ? "Đang nói..." : (sub != null && sub.contains("Đã tắt mic") ? "Đã tắt mic" : "");
+            JLabel status = new JLabel(statusText);
             status.setFont(DiscordTheme.font(compact ? 10f : 11f));
             status.setForeground(speaking ? DiscordTheme.SUCCESS : DiscordTheme.TEXT_MUTED);
             status.setAlignmentX(CENTER_ALIGNMENT);
@@ -480,7 +483,7 @@ public final class MeetRoomPanel extends JPanel {
         nameLbl.setForeground(Color.WHITE);
         tagPill.add(nameLbl);
 
-        if (!compact) {
+        if (!compact && sub != null && !sub.isBlank()) {
             JLabel subLbl = new JLabel("· " + sub);
             subLbl.setFont(DiscordTheme.font(10f));
             subLbl.setForeground(DiscordTheme.TEXT_MUTED);
@@ -509,8 +512,8 @@ public final class MeetRoomPanel extends JPanel {
                 ParticipantEntry selfEntry = participants.get(selfParticipantId);
                 if (selfEntry != null) {
                     String newSub = !micAvailable
-                            ? "Bạn · Chế độ nghe (không tìm thấy mic)"
-                            : (micMuted ? "Bạn · Đã tắt mic" : "Bạn · Mic đang bật");
+                            ? "Chế độ nghe (không tìm thấy mic)"
+                            : (micMuted ? "Đã tắt mic" : "");
                     participants.put(selfParticipantId, new ParticipantEntry(
                             selfEntry.id(), selfEntry.initials(), selfEntry.name(), newSub, micMuted ? false : selfEntry.speaking()
                     ));
@@ -524,11 +527,11 @@ public final class MeetRoomPanel extends JPanel {
         bar.add(micBtn);
 
         camBtn = new JButton(IconFactory.phosphor("video-camera.svg", 18, Color.WHITE));
-        styleControlBtn(camBtn, DiscordTheme.DANGER);
+        styleControlBtn(camBtn, new Color(0x3B, 0x3D, 0x44));
         camBtn.setToolTipText("Bật/Tắt camera");
         camBtn.addActionListener(e -> {
             camMuted = !camMuted;
-            camBtn.setBackground(camMuted ? DiscordTheme.DANGER : DiscordTheme.SUCCESS);
+            camBtn.setBackground(camMuted ? new Color(0x3B, 0x3D, 0x44) : DiscordTheme.SUCCESS);
             if (onCamToggle != null) {
                 onCamToggle.accept(camMuted);
             }

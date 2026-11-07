@@ -51,7 +51,7 @@ final class MessageRow extends JPanel {
 
     public static void clearActiveHover() {
         if (activeHoveredRow != null) {
-            activeHoveredRow.hideToolbar();
+            activeHoveredRow.hideToolbarForce();
             activeHoveredRow = null;
         }
     }
@@ -128,6 +128,12 @@ final class MessageRow extends JPanel {
             }
         });
         this.hideToolbarTimer.setRepeats(false);
+
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0 && !isShowing()) {
+                hideToolbarForce();
+            }
+        });
 
         setLayout(null);
         setOpaque(false);
@@ -366,9 +372,14 @@ final class MessageRow extends JPanel {
         if (isPopupShowing) {
             return;
         }
+        hideToolbarForce();
+    }
+
+    public void hideToolbarForce() {
+        isPopupShowing = false;
         hideToolbarTimer.stop();
         isHovered = false;
-        if (actionToolbar != null && actionToolbar.isVisible()) {
+        if (actionToolbar != null) {
             actionToolbar.setVisible(false);
             Container parent = actionToolbar.getParent();
             if (parent != null) {

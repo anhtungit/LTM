@@ -45,6 +45,27 @@ public final class VoiceAudioEngine {
     private static volatile String selectedSpeakerId = "default";
     private volatile Consumer<byte[]> micLoopbackConsumer;
     private static volatile boolean noiseSuppressionEnabled = true;
+    private static volatile double micVolume = 1.0;
+
+    public static double getMicVolume() {
+        return micVolume;
+    }
+
+    public static void setMicVolume(double volume) {
+        micVolume = Math.max(0.0, Math.min(1.5, volume));
+    }
+
+    public static void applyGain(byte[] pcmData, int length, double gain) {
+        if (gain == 1.0 || pcmData == null) return;
+        for (int i = 0; i < length - 1; i += 2) {
+            short sample = (short) ((pcmData[i] & 0xFF) | (pcmData[i + 1] << 8));
+            int amplified = (int) (sample * gain);
+            if (amplified > Short.MAX_VALUE) amplified = Short.MAX_VALUE;
+            else if (amplified < Short.MIN_VALUE) amplified = Short.MIN_VALUE;
+            pcmData[i] = (byte) (amplified & 0xFF);
+            pcmData[i + 1] = (byte) ((amplified >> 8) & 0xFF);
+        }
+    }
 
     private volatile boolean running = false;
     private volatile boolean muted = false;
@@ -863,6 +884,9 @@ public final class VoiceAudioEngine {
                     byte[] processed = buffer;
                     if (noiseSuppressionEnabled && read == CHUNK_BYTES) {
                         processed = suppressor.process(buffer);
+                    }
+                    if (micVolume != 1.0) {
+                        applyGain(processed, read, micVolume);
                     }
 
                     Consumer<byte[]> loopback = this.micLoopbackConsumer;

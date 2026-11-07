@@ -19,6 +19,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -138,6 +139,28 @@ public final class VoiceSettingsDialog extends JDialog {
         });
         body.add(micCombo);
         body.add(Box.createVerticalStrut(10));
+
+        // Mic Input Volume (Discord-style Input Volume Slider)
+        int currentVolPct = (int) Math.round(VoiceAudioEngine.getMicVolume() * 100.0);
+        JLabel volLabel = new JLabel("ÂM LƯỢNG ĐẦU VÀO: " + currentVolPct + "%");
+        volLabel.setFont(DiscordTheme.bold(10f));
+        volLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        volLabel.setAlignmentX(LEFT_ALIGNMENT);
+        body.add(volLabel);
+        body.add(Box.createVerticalStrut(4));
+
+        JSlider volSlider = new JSlider(0, 100, currentVolPct);
+        volSlider.setOpaque(false);
+        volSlider.setFocusable(false);
+        volSlider.setMaximumSize(new Dimension(Short.MAX_VALUE, 24));
+        volSlider.setAlignmentX(LEFT_ALIGNMENT);
+        volSlider.addChangeListener(e -> {
+            int val = volSlider.getValue();
+            volLabel.setText("ÂM LƯỢNG ĐẦU VÀO: " + val + "%");
+            VoiceAudioEngine.setMicVolume(val / 100.0);
+        });
+        body.add(volSlider);
+        body.add(Box.createVerticalStrut(8));
 
         // Noise suppression toggle (Discord Krisp-like)
         JCheckBox noiseBox = new JCheckBox("Khử tiếng ồn môi trường (quạt, điều hòa, tiếng ù)");
@@ -415,6 +438,9 @@ public final class VoiceSettingsDialog extends JDialog {
                         byte[] processed = buf;
                         if (VoiceAudioEngine.isNoiseSuppressionEnabled() && read == VoiceAudioEngine.CHUNK_BYTES) {
                             processed = suppressor.process(buf);
+                        }
+                        if (VoiceAudioEngine.getMicVolume() != 1.0) {
+                            VoiceAudioEngine.applyGain(processed, read, VoiceAudioEngine.getMicVolume());
                         }
                         double rms = VoiceAudioEngine.computeRms(processed, read);
                         int level = mapRmsToLevel(rms);
