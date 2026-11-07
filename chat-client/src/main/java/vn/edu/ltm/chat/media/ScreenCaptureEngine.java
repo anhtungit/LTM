@@ -131,6 +131,40 @@ public final class ScreenCaptureEngine {
         }
     }
 
+    static {
+        if (isLinux()) {
+            ensureDesktopEntry();
+        }
+    }
+
+    private static boolean isLinux() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        return os.contains("linux");
+    }
+
+    private static void ensureDesktopEntry() {
+        try {
+            String home = System.getProperty("user.home");
+            if (home == null || home.isBlank()) return;
+            java.nio.file.Path appDir = java.nio.file.Path.of(home, ".local", "share", "applications");
+            java.nio.file.Files.createDirectories(appDir);
+            java.nio.file.Path desktopFile = appDir.resolve("vn.edu.ltm.chat.desktop");
+            if (!java.nio.file.Files.exists(desktopFile)) {
+                String content = """
+                        [Desktop Entry]
+                        Name=LTM Chat
+                        Comment=LTM Multi-threaded Chat
+                        Exec=java
+                        Terminal=false
+                        Type=Application
+                        Categories=Network;InstantMessaging;
+                        """;
+                java.nio.file.Files.writeString(desktopFile, content);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static boolean isWaylandSession() {
         String wayland = System.getenv("WAYLAND_DISPLAY");
         String session = System.getenv("XDG_SESSION_TYPE");
@@ -140,14 +174,25 @@ public final class ScreenCaptureEngine {
     private void runWaylandPortalCapture(int srcType, int fps, int maxW, int maxH, float qual,
                                          Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
         int qPercent = Math.max(30, Math.min(90, Math.round(qual * 100f)));
-        ProcessBuilder pb = new ProcessBuilder(
-                "python3", "-u", "-c", WAYLAND_PORTAL_PY,
-                Integer.toString(srcType),
-                Integer.toString(fps),
-                Integer.toString(qPercent),
-                Integer.toString(maxW),
-                Integer.toString(maxH)
-        );
+        java.util.List<String> cmd = new java.util.ArrayList<>();
+        if (isLinux() && new java.io.File("/usr/bin/systemd-run").exists()) {
+            cmd.add("systemd-run");
+            cmd.add("--user");
+            cmd.add("--scope");
+            cmd.add("--quiet");
+            cmd.add("--unit=app-vn.edu.ltm.chat-" + System.currentTimeMillis());
+        }
+        cmd.add("python3");
+        cmd.add("-u");
+        cmd.add("-c");
+        cmd.add(WAYLAND_PORTAL_PY);
+        cmd.add(Integer.toString(srcType));
+        cmd.add(Integer.toString(fps));
+        cmd.add(Integer.toString(qPercent));
+        cmd.add(Integer.toString(maxW));
+        cmd.add(Integer.toString(maxH));
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         try {
             Process proc = pb.start();
             this.portalProcess = proc;
@@ -392,10 +437,10 @@ public final class ScreenCaptureEngine {
             pw_fd = fd_list.get(ret.unpack()[0])
 
             pipeline_desc = (
-                f'pipewiresrc fd={pw_fd} path={node_id} do-timestamp=true ! '
+                f'pipewiresrc fd={pw_fd} path={node_id} do-timestamp=true keepalive-time=1000 ! '
                 f'videoconvert ! videoscale method=1 ! '
-                f'video/x-raw,width=[1,{max_w}],height=[1,{max_h}] ! '
-                f'videorate ! video/x-raw,framerate={fps}/1 ! '
+                f'video/x-raw,width=[1,{max_w}],height=[1,{max_h}],pixel-aspect-ratio=1/1 ! '
+                f'videorate drop-only=true max-rate={fps} ! '
                 f'jpegenc quality={quality} ! '
                 f'appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false'
             )

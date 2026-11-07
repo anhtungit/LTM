@@ -28,6 +28,7 @@ import java.awt.GridLayout;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.LinkedHashMap;
@@ -768,7 +769,7 @@ public final class MeetRoomPanel extends JPanel {
         RoundedPanel tagPill = new RoundedPanel(6);
         tagPill.setBackground(hasVideo ? new Color(0x11, 0x12, 0x14, 200) : new Color(0x1E, 0x1F, 0x23));
         tagPill.setLayout(new FlowLayout(FlowLayout.LEFT, compact ? 4 : 6, compact ? 2 : 4));
-        JLabel nameLbl = new JLabel(isPinned ? ("📌 " + name) : name);
+        JLabel nameLbl = new JLabel(name);
         nameLbl.setFont(DiscordTheme.bold(compact ? 11f : 12f));
         nameLbl.setForeground(Color.WHITE);
         tagPill.add(nameLbl);
@@ -925,22 +926,25 @@ public final class MeetRoomPanel extends JPanel {
             }
         };
 
-        screenOpt.addMouseListener(new MouseAdapter() {
+        MouseAdapter screenListener = new MouseAdapter() {
             @Override
-            public void mouseClicked(MouseEvent e) {
+            public void mousePressed(MouseEvent e) {
                 selectedSource[0] = 1;
                 updateSelection.run();
                 if (e.getClickCount() == 2) confirmShare.run();
             }
-        });
-        windowOpt.addMouseListener(new MouseAdapter() {
+        };
+        attachCardClickListener(screenOpt, screenListener);
+
+        MouseAdapter windowListener = new MouseAdapter() {
             @Override
-            public void mouseClicked(MouseEvent e) {
+            public void mousePressed(MouseEvent e) {
                 selectedSource[0] = 2;
                 updateSelection.run();
                 if (e.getClickCount() == 2) confirmShare.run();
             }
-        });
+        };
+        attachCardClickListener(windowOpt, windowListener);
 
         sources.add(screenOpt);
         sources.add(windowOpt);
@@ -1025,5 +1029,16 @@ public final class MeetRoomPanel extends JPanel {
         opt.add(subLbl);
 
         return opt;
+    }
+
+    private void attachCardClickListener(JComponent comp, MouseListener listener) {
+        comp.addMouseListener(listener);
+        for (java.awt.Component child : comp.getComponents()) {
+            if (child instanceof JComponent jc) {
+                attachCardClickListener(jc, listener);
+            } else {
+                child.addMouseListener(listener);
+            }
+        }
     }
 }

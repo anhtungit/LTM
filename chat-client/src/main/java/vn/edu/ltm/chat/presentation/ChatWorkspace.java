@@ -779,12 +779,6 @@ public final class ChatWorkspace extends JPanel {
                             try {
                                 if (inActiveCall(ev)) {
                                     meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), img);
-                                    javax.swing.Timer sTimer = peerScreenTimers.computeIfAbsent(ev.senderId(), id -> {
-                                        javax.swing.Timer t = new javax.swing.Timer(2500, e -> meetRoomPanel.updateScreenShare(id, ev.senderName(), null));
-                                        t.setRepeats(false);
-                                        return t;
-                                    });
-                                    sTimer.restart();
                                 }
                             } finally {
                                 drawing.set(false);
