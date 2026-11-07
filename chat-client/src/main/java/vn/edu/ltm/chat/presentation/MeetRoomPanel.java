@@ -128,11 +128,18 @@ public final class MeetRoomPanel extends JPanel {
         this.onStopScreenShare = onStopScreenShare;
     }
 
+    public boolean isScreenSharingActive() {
+        return screenSharingActive;
+    }
+
     public void setScreenSharingActive(boolean active) {
         this.screenSharingActive = active;
         if (shareBtn != null) {
             shareBtn.setText(active ? "Dừng chia sẻ" : "Chia sẻ màn hình");
             shareBtn.setBackground(active ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
+        }
+        if (!active && selfParticipantId != null) {
+            updateScreenShare(selfParticipantId, null, null);
         }
     }
 
@@ -277,12 +284,22 @@ public final class MeetRoomPanel extends JPanel {
 
     public void updateScreenShare(String id, String name, BufferedImage img) {
         if (id == null || id.isBlank()) return;
+        if (id.equals(selfParticipantId) && !screenSharingActive && img != null) {
+            return;
+        }
         String screenId = id + ":screen";
         boolean had = videoFrames.containsKey(screenId);
         if (img != null) {
             videoFrames.put(screenId, img);
             if (!had) {
-                String title = (name != null && !name.isBlank()) ? "Màn hình: " + name : "Màn hình chia sẻ";
+                String title;
+                if (id.equals(selfParticipantId)) {
+                    title = "Màn hình của bạn";
+                } else if (name != null && !name.isBlank()) {
+                    title = "Màn hình của " + name;
+                } else {
+                    title = "Màn hình chia sẻ";
+                }
                 participants.put(screenId, new ParticipantEntry(screenId, "🖥", title, "Trực tiếp", false));
                 pinnedParticipantId = screenId;
                 speakerLayoutMode = true;
@@ -311,7 +328,8 @@ public final class MeetRoomPanel extends JPanel {
                 boolean anyScreenLeft = participants.keySet().stream().anyMatch(k -> k.endsWith(":screen"));
                 if (!anyScreenLeft) {
                     membersHidden = false;
-                    if (pinnedParticipantId == null && speakerLayoutMode) {
+                    if ((pinnedParticipantId == null || pinnedParticipantId.endsWith(":screen")) && speakerLayoutMode) {
+                        pinnedParticipantId = null;
                         speakerLayoutMode = false;
                         if (layoutModeBtn != null) {
                             layoutModeBtn.setText("Bố cục: Lưới");
@@ -674,14 +692,33 @@ public final class MeetRoomPanel extends JPanel {
             }
         });
 
+        JPanel northBadges = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        northBadges.setOpaque(false);
+        boolean showHideMembers = !compact && (speakerLayoutMode || pinnedParticipantId != null) && participants.size() >= 2;
+        if (showHideMembers) {
+            JButton hideMembersBtn = new JButton(membersHidden ? "Hiện thành viên" : "Ẩn thành viên");
+            hideMembersBtn.setFont(DiscordTheme.semibold(10f));
+            hideMembersBtn.setForeground(Color.WHITE);
+            hideMembersBtn.setBackground(new Color(0x11, 0x12, 0x14, 210));
+            hideMembersBtn.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1),
+                    BorderFactory.createEmptyBorder(3, 8, 3, 8)
+            ));
+            hideMembersBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            hideMembersBtn.setFocusPainted(false);
+            hideMembersBtn.addActionListener(e -> {
+                membersHidden = !membersHidden;
+                rebuildGrid();
+            });
+            northBadges.add(hideMembersBtn);
+        }
+
         if (isScreen) {
-            JPanel northBadges = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-            northBadges.setOpaque(false);
             if (!compact) {
                 RoundedPanel resBadge = new RoundedPanel(6);
                 resBadge.setBackground(new Color(0x11, 0x12, 0x14, 210));
                 resBadge.setLayout(new FlowLayout(FlowLayout.CENTER, 6, 3));
-                JLabel resLbl = new JLabel("720P 15FPS");
+                JLabel resLbl = new JLabel("720P 30FPS");
                 resLbl.setFont(DiscordTheme.bold(10f));
                 resLbl.setForeground(DiscordTheme.TEXT_PRIMARY);
                 resBadge.add(resLbl);
@@ -695,6 +732,8 @@ public final class MeetRoomPanel extends JPanel {
             liveLbl.setForeground(Color.WHITE);
             liveBadge.add(liveLbl);
             northBadges.add(liveBadge);
+        }
+        if (northBadges.getComponentCount() > 0) {
             tile.add(northBadges, BorderLayout.NORTH);
         }
 
@@ -747,23 +786,6 @@ public final class MeetRoomPanel extends JPanel {
         leftTag.setOpaque(false);
         leftTag.add(tagPill);
         southWrap.add(leftTag, BorderLayout.WEST);
-
-        if (!compact && (speakerLayoutMode || pinnedParticipantId != null) && participants.size() >= 2) {
-            JButton hideMembersBtn = new JButton(membersHidden ? "Hiện thành viên" : "Ẩn thành viên");
-            hideMembersBtn.setFont(DiscordTheme.semibold(11f));
-            hideMembersBtn.setForeground(Color.WHITE);
-            hideMembersBtn.setBackground(new Color(0x11, 0x12, 0x14, 210));
-            hideMembersBtn.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-            hideMembersBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            hideMembersBtn.addActionListener(e -> {
-                membersHidden = !membersHidden;
-                rebuildGrid();
-            });
-            JPanel rightBtnWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-            rightBtnWrap.setOpaque(false);
-            rightBtnWrap.add(hideMembersBtn);
-            southWrap.add(rightBtnWrap, BorderLayout.EAST);
-        }
 
         tile.add(southWrap, BorderLayout.SOUTH);
         return tile;
@@ -927,7 +949,7 @@ public final class MeetRoomPanel extends JPanel {
         JPanel bottomBar = new JPanel(new BorderLayout());
         bottomBar.setOpaque(false);
 
-        JButton qualityBtn = new JButton("Chất lượng: 720p · 15 FPS");
+        JButton qualityBtn = new JButton("Chất lượng: 720p · 30 FPS");
         qualityBtn.setFont(DiscordTheme.semibold(11f));
         qualityBtn.setForeground(DiscordTheme.TEXT_PRIMARY);
         qualityBtn.setBackground(new Color(0x2B, 0x2D, 0x31));
@@ -938,7 +960,7 @@ public final class MeetRoomPanel extends JPanel {
         qualityBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         qualityBtn.addActionListener(e -> {
             hdQuality[0] = !hdQuality[0];
-            qualityBtn.setText(hdQuality[0] ? "Chất lượng: 1080p · 30 FPS" : "Chất lượng: 720p · 15 FPS");
+            qualityBtn.setText(hdQuality[0] ? "Chất lượng: 1080p · 30 FPS" : "Chất lượng: 720p · 30 FPS");
         });
         bottomBar.add(qualityBtn, BorderLayout.WEST);
 
@@ -952,7 +974,7 @@ public final class MeetRoomPanel extends JPanel {
         cancel.addActionListener(e -> dialog.dispose());
         actions.add(cancel);
 
-        JButton share = new JButton("Chọn nguồn chia sẻ");
+        JButton share = new JButton("Bắt đầu chia sẻ");
         share.setFont(DiscordTheme.bold(12f));
         share.setForeground(Color.WHITE);
         share.setBackground(DiscordTheme.ACCENT);

@@ -34,10 +34,10 @@ public final class ScreenCaptureEngine {
     private Thread captureThread;
     private volatile Process portalProcess;
     private int sourceType = SOURCE_SCREEN;
-    private int targetFps = 15;
+    private int targetFps = 30;
     private int maxWidth = 1280;
     private int maxHeight = 720;
-    private float jpegQuality = 0.65f;
+    private float jpegQuality = 0.55f;
 
     public synchronized boolean isRunning() {
         return running;
@@ -124,6 +124,10 @@ public final class ScreenCaptureEngine {
             } catch (Throwable ignored) {
             }
             p.destroy();
+            try {
+                p.destroyForcibly();
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -140,12 +144,13 @@ public final class ScreenCaptureEngine {
                 "python3", "-u", "-c", WAYLAND_PORTAL_PY,
                 Integer.toString(srcType),
                 Integer.toString(fps),
-                Integer.toString(qPercent)
+                Integer.toString(qPercent),
+                Integer.toString(maxW),
+                Integer.toString(maxH)
         );
         try {
             Process proc = pb.start();
             this.portalProcess = proc;
-            ImageWriter writer = createJpegWriter();
             try (DataInputStream dis = new DataInputStream(proc.getInputStream())) {
                 while (running && proc.isAlive()) {
                     int len;
@@ -161,23 +166,19 @@ public final class ScreenCaptureEngine {
                     dis.readFully(rawJpeg);
                     if (!running) break;
 
-                    BufferedImage img = ImageIO.read(new ByteArrayInputStream(rawJpeg));
-                    if (img != null) {
-                        boolean needsScale = img.getWidth() > maxW || img.getHeight() > maxH;
-                        BufferedImage scaled = needsScale ? scaleIfNeeded(img, maxW, maxH) : img;
-                        if (onLocalPreview != null) {
-                            onLocalPreview.accept(scaled);
-                        }
-                        if (onJpegFrame != null) {
-                            byte[] outJpeg = needsScale ? compressJpeg(scaled, writer, qual) : rawJpeg;
-                            if (outJpeg != null && outJpeg.length > 0) {
-                                onJpegFrame.accept(outJpeg);
+                    if (onJpegFrame != null) {
+                        onJpegFrame.accept(rawJpeg);
+                    }
+                    if (onLocalPreview != null && running) {
+                        try {
+                            BufferedImage img = ImageIO.read(new ByteArrayInputStream(rawJpeg));
+                            if (img != null && running) {
+                                onLocalPreview.accept(img);
                             }
+                        } catch (Throwable ignored) {
                         }
                     }
                 }
-            } finally {
-                if (writer != null) writer.dispose();
             }
         } catch (Throwable t) {
             System.err.println("[ScreenCaptureEngine] Lỗi thu hình Wayland Portal: " + t.getMessage());
@@ -287,10 +288,21 @@ public final class ScreenCaptureEngine {
             gi.require_version('Gst', '1.0')
             from gi.repository import Gst, Gio, GLib
 
+            try:
+                import ctypes
+                libc = ctypes.CDLL('libc.so.6')
+                libc.prctl(15, b'LTM Chat', 0, 0, 0)
+            except Exception:
+                pass
+            GLib.set_prgname('LTM Chat')
+            GLib.set_application_name('LTM Chat')
+
             Gst.init(None)
             src_type = int(sys.argv[1]) if len(sys.argv) > 1 else 1
-            fps = int(sys.argv[2]) if len(sys.argv) > 2 else 15
-            quality = int(sys.argv[3]) if len(sys.argv) > 3 else 65
+            fps = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+            quality = int(sys.argv[3]) if len(sys.argv) > 3 else 55
+            max_w = int(sys.argv[4]) if len(sys.argv) > 4 else 1280
+            max_h = int(sys.argv[5]) if len(sys.argv) > 5 else 720
 
             def watch_stdin():
                 try:
@@ -340,7 +352,8 @@ public final class ScreenCaptureEngine {
             t1 = f'ltm_{random.randint(10000, 99999)}'
             c1, r1 = call_portal('CreateSession', GLib.Variant('(a{sv})', ({
                 'handle_token': GLib.Variant('s', t1),
-                'session_handle_token': GLib.Variant('s', f'sess_{t1}')
+                'session_handle_token': GLib.Variant('s', f'sess_{t1}'),
+                'app_id': GLib.Variant('s', 'vn.edu.ltm.chat')
             },)), t1)
             if c1 != 0 or 'session_handle' not in r1:
                 sys.exit(2)
@@ -380,7 +393,9 @@ public final class ScreenCaptureEngine {
 
             pipeline_desc = (
                 f'pipewiresrc fd={pw_fd} path={node_id} do-timestamp=true ! '
-                f'videoconvert ! videorate ! video/x-raw,framerate={fps}/1 ! '
+                f'videoconvert ! videoscale method=1 ! '
+                f'video/x-raw,width=[1,{max_w}],height=[1,{max_h}] ! '
+                f'videorate ! video/x-raw,framerate={fps}/1 ! '
                 f'jpegenc quality={quality} ! '
                 f'appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false'
             )

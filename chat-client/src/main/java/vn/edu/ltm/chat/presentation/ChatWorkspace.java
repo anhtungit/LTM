@@ -140,6 +140,7 @@ public final class ChatWorkspace extends JPanel {
     private final Map<String, javax.swing.Timer> peerSpeakingTimers = new ConcurrentHashMap<>();
     private final Map<String, javax.swing.Timer> peerVideoTimers = new ConcurrentHashMap<>();
     private final Map<String, javax.swing.Timer> peerScreenTimers = new ConcurrentHashMap<>();
+    private final Map<String, java.util.concurrent.atomic.AtomicBoolean> peerScreenDrawing = new ConcurrentHashMap<>();
 
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
@@ -592,14 +593,20 @@ public final class ChatWorkspace extends JPanel {
         if (hd) {
             screenEngine.setConfig(30, 1920, 1080);
         } else {
-            screenEngine.setConfig(15, 1280, 720);
+            screenEngine.setConfig(30, 1280, 720);
         }
         meetRoomPanel.setScreenSharingActive(true);
         screenEngine.start(jpegBytes -> {
             String base64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
             chatService.sendCallSignal(cid, chan, "SCREEN", base64);
         }, rawImg -> {
-            SwingUtilities.invokeLater(() -> meetRoomPanel.updateScreenShare(user.id(), user.displayName(), rawImg));
+            if (screenEngine.isRunning()) {
+                SwingUtilities.invokeLater(() -> {
+                    if (screenEngine.isRunning() && meetRoomPanel.isScreenSharingActive()) {
+                        meetRoomPanel.updateScreenShare(user.id(), user.displayName(), rawImg);
+                    }
+                });
+            }
         }, () -> SwingUtilities.invokeLater(() -> {
             meetRoomPanel.setScreenSharingActive(false);
             String activeCid = call.conversationId();
@@ -620,13 +627,16 @@ public final class ChatWorkspace extends JPanel {
         if (cid != null) {
             chatService.sendCallSignal(cid, chan, "SCREEN_OFF", "");
         }
-        meetRoomPanel.updateScreenShare(user.id(), user.displayName(), null);
+        if (user != null) {
+            meetRoomPanel.updateScreenShare(user.id(), user.displayName(), null);
+        }
     }
 
     private void endActiveCall() {
         stopScreenShare();
         peerScreenTimers.values().forEach(javax.swing.Timer::stop);
         peerScreenTimers.clear();
+        peerScreenDrawing.clear();
         if (watchTogether != null) {
             watchTogether.stop();
             watchTogether = null;
@@ -755,23 +765,36 @@ public final class ChatWorkspace extends JPanel {
 
         if ("SCREEN".equals(action)) {
             if (inActiveCall(ev) && ev.data() != null && !ev.data().isEmpty()) {
+                String senderId = ev.senderId();
+                java.util.concurrent.atomic.AtomicBoolean drawing = peerScreenDrawing.computeIfAbsent(senderId, k -> new java.util.concurrent.atomic.AtomicBoolean(false));
+                if (!drawing.compareAndSet(false, true)) {
+                    // Previous frame is still pending EDT rendering; drop this frame to eliminate latency lag
+                    return;
+                }
                 try {
                     byte[] jpeg = java.util.Base64.getDecoder().decode(ev.data());
                     java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(jpeg));
                     if (img != null) {
                         SwingUtilities.invokeLater(() -> {
-                            if (inActiveCall(ev)) {
-                                meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), img);
-                                javax.swing.Timer sTimer = peerScreenTimers.computeIfAbsent(ev.senderId(), id -> {
-                                    javax.swing.Timer t = new javax.swing.Timer(2500, e -> meetRoomPanel.updateScreenShare(id, ev.senderName(), null));
-                                    t.setRepeats(false);
-                                    return t;
-                                });
-                                sTimer.restart();
+                            try {
+                                if (inActiveCall(ev)) {
+                                    meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), img);
+                                    javax.swing.Timer sTimer = peerScreenTimers.computeIfAbsent(ev.senderId(), id -> {
+                                        javax.swing.Timer t = new javax.swing.Timer(2500, e -> meetRoomPanel.updateScreenShare(id, ev.senderName(), null));
+                                        t.setRepeats(false);
+                                        return t;
+                                    });
+                                    sTimer.restart();
+                                }
+                            } finally {
+                                drawing.set(false);
                             }
                         });
+                    } else {
+                        drawing.set(false);
                     }
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    drawing.set(false);
                 }
             }
             return;
@@ -779,6 +802,7 @@ public final class ChatWorkspace extends JPanel {
 
         if ("SCREEN_OFF".equals(action)) {
             if (inActiveCall(ev)) {
+                peerScreenDrawing.remove(ev.senderId());
                 javax.swing.Timer sTimer = peerScreenTimers.remove(ev.senderId());
                 if (sTimer != null) sTimer.stop();
                 SwingUtilities.invokeLater(() -> meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), null));
