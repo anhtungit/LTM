@@ -175,13 +175,6 @@ public final class ScreenCaptureEngine {
                                          Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
         int qPercent = Math.max(30, Math.min(90, Math.round(qual * 100f)));
         java.util.List<String> cmd = new java.util.ArrayList<>();
-        if (isLinux() && new java.io.File("/usr/bin/systemd-run").exists()) {
-            cmd.add("systemd-run");
-            cmd.add("--user");
-            cmd.add("--scope");
-            cmd.add("--quiet");
-            cmd.add("--unit=app-vn.edu.ltm.chat-" + System.currentTimeMillis());
-        }
         cmd.add("python3");
         cmd.add("-u");
         cmd.add("-c");
@@ -448,7 +441,7 @@ public final class ScreenCaptureEngine {
             pipeline_desc = (
                 f'pipewiresrc fd={pw_fd} path={node_id} do-timestamp=true keepalive-time=1000 ! '
                 f'videoconvert ! videoscale method=1 ! '
-                f'video/x-raw,width=[1,{max_w}],height=[1,{max_h}],pixel-aspect-ratio=1/1 ! '
+                f'video/x-raw,width=[1,{max_w}],height=[1,{max_h}] ! '
                 f'videorate drop-only=true max-rate={fps} ! '
                 f'jpegenc quality={quality} ! '
                 f'appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false'
