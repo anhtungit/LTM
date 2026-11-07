@@ -1,4 +1,4 @@
-package vn.edu.ltm.chat.presentation;
+package vn.edu.ltm.chat.media;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -659,11 +659,11 @@ public final class VoiceAudioEngine {
         }
     }
 
-    synchronized void start(Consumer<String> onEncodedChunk) {
+    public synchronized void start(Consumer<String> onEncodedChunk) {
         start(onEncodedChunk, null);
     }
 
-    synchronized void start(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
+    public synchronized void start(Consumer<String> onEncodedChunk, Consumer<Boolean> onSpeakingState) {
         stop();
         running = true;
         peerQueues.clear();
@@ -690,7 +690,7 @@ public final class VoiceAudioEngine {
         }
     }
 
-    static SourceDataLine openSpeakerLine(String deviceId) {
+    public static SourceDataLine openSpeakerLine(String deviceId) {
         DataLine.Info info = new DataLine.Info(SourceDataLine.class, FORMAT);
 
         if (deviceId != null && !"default".equalsIgnoreCase(deviceId)) {
@@ -766,7 +766,7 @@ public final class VoiceAudioEngine {
         return null;
     }
 
-    static TargetDataLine openMicLine(String deviceId) {
+    public static TargetDataLine openMicLine(String deviceId) {
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, FORMAT);
 
         if (deviceId != null && !"default".equalsIgnoreCase(deviceId)) {
@@ -1065,11 +1065,11 @@ public final class VoiceAudioEngine {
         return mixed;
     }
 
-    void playChunk(String base64Pcm) {
+    public void playChunk(String base64Pcm) {
         playChunk("", base64Pcm);
     }
 
-    void playChunk(String peerId, String base64Pcm) {
+    public void playChunk(String peerId, String base64Pcm) {
         if (!running || base64Pcm == null || base64Pcm.isEmpty()) return;
         try {
             byte[] pcm = Base64.getDecoder().decode(base64Pcm);
@@ -1083,7 +1083,7 @@ public final class VoiceAudioEngine {
         }
     }
 
-    void flushPeer(String peerId) {
+    public void flushPeer(String peerId) {
         peerQueues.remove(peerId);
     }
 
@@ -1098,7 +1098,7 @@ public final class VoiceAudioEngine {
         }
     }
 
-    void setMuted(boolean muted) {
+    public void setMuted(boolean muted) {
         this.muted = muted;
         if (muted) {
             TargetDataLine in = this.micLine;
@@ -1115,11 +1115,11 @@ public final class VoiceAudioEngine {
         }
     }
 
-    boolean isMuted() {
+    public boolean isMuted() {
         return muted;
     }
 
-    boolean isMicAvailable() {
+    public boolean isMicAvailable() {
         return micAvailable;
     }
 
@@ -1127,11 +1127,11 @@ public final class VoiceAudioEngine {
         return speakerAvailable;
     }
 
-    boolean isRunning() {
+    public boolean isRunning() {
         return running;
     }
 
-    synchronized void stop() {
+    public synchronized void stop() {
         running = false;
         peerQueues.clear();
         closeCurrentMicLineAndWait();

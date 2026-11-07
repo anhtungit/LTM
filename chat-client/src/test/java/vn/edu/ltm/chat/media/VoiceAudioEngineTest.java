@@ -1,4 +1,4 @@
-package vn.edu.ltm.chat.presentation;
+package vn.edu.ltm.chat.media;
 
 import org.junit.jupiter.api.Test;
 

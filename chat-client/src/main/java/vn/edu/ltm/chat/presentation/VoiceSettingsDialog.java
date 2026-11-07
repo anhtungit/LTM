@@ -1,5 +1,7 @@
 package vn.edu.ltm.chat.presentation;
 
+import vn.edu.ltm.chat.media.VoiceAudioEngine;
+import vn.edu.ltm.chat.media.VideoCaptureEngine;
 import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 

@@ -1,4 +1,4 @@
-package vn.edu.ltm.chat.presentation;
+package vn.edu.ltm.chat.media;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -25,11 +25,11 @@ import java.util.regex.Pattern;
  * Video phát trong trình duyệt hệ thống qua trang cục bộ (YouTube IFrame API, chỉ lắng nghe 127.0.0.1 + token);
  * trạng thái được đồng bộ tới mọi thành viên qua tín hiệu cuộc gọi YT_STATE / YT_STOP / YT_REQ.
  */
-final class WatchTogether {
+public final class WatchTogether {
 
-    static final String ACTION_STATE = "YT_STATE";
-    static final String ACTION_STOP = "YT_STOP";
-    static final String ACTION_REQ = "YT_REQ";
+    public static final String ACTION_STATE = "YT_STATE";
+    public static final String ACTION_STOP = "YT_STOP";
+    public static final String ACTION_REQ = "YT_REQ";
 
     private static final Pattern YT_ID = Pattern.compile(
             "(?:youtu\\.be/|[?&]v=|/embed/|/shorts/|/live/)([A-Za-z0-9_-]{11})|^([A-Za-z0-9_-]{11})$");
@@ -49,7 +49,7 @@ final class WatchTogether {
     private String hostId;
     private long seq = 1;
 
-    WatchTogether(String selfId, BiConsumer<String, String> sendSignal) {
+    public WatchTogether(String selfId, BiConsumer<String, String> sendSignal) {
         this.selfId = selfId;
         this.sendSignal = sendSignal;
     }
@@ -60,7 +60,7 @@ final class WatchTogether {
         return b;
     }
 
-    static String parseVideoId(String text) {
+    public static String parseVideoId(String text) {
         if (text == null) return null;
         Matcher m = YT_ID.matcher(text.trim());
         if (!m.find()) return null;
@@ -68,7 +68,7 @@ final class WatchTogether {
     }
 
     /** Mở trang xem chung trong trình duyệt (khởi động server cục bộ nếu cần). */
-    synchronized void openBrowser() {
+    public synchronized void openBrowser() {
         try {
             if (server == null) {
                 server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -87,7 +87,7 @@ final class WatchTogether {
         }
     }
 
-    synchronized void stop() {
+    public synchronized void stop() {
         if (server != null) {
             server.stop(0);
             server = null;
@@ -99,17 +99,17 @@ final class WatchTogether {
         seq++;
     }
 
-    synchronized boolean isActive() {
+    public synchronized boolean isActive() {
         return hostId != null || !queue.isEmpty();
     }
 
     /** Người mới vào cuộc gọi xin trạng thái hiện tại. */
-    void requestState() {
+    public void requestState() {
         sendSignal.accept(ACTION_REQ, "");
     }
 
     /** Có người xin trạng thái: nếu đang xem thì phát lại cho họ. */
-    void onRequest() {
+    public void onRequest() {
         String data;
         synchronized (this) {
             if (!isActive()) return;
@@ -118,12 +118,12 @@ final class WatchTogether {
         sendSignal.accept(ACTION_STATE, data);
     }
 
-    synchronized boolean canControl() {
+    public synchronized boolean canControl() {
         return everyoneControls || selfId.equals(hostId) || hostId == null;
     }
 
     /** Áp dụng trạng thái do người khác gửi; bỏ qua nếu họ không có quyền điều khiển. */
-    synchronized boolean onRemoteState(String senderId, String data) {
+    public synchronized boolean onRemoteState(String senderId, String data) {
         Map<String, String> m = decode(data);
         boolean allowed = hostId == null || everyoneControls || senderId.equals(hostId);
         if (!allowed) return false;
@@ -267,7 +267,7 @@ final class WatchTogether {
     }
 
     /** Có người dừng xem chung: đóng trạng thái cục bộ (trang trình duyệt tự đóng băng khi hết video). */
-    void onRemoteStop() {
+    public void onRemoteStop() {
         stop();
     }
 
