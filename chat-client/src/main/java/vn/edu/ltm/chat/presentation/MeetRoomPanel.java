@@ -643,6 +643,7 @@ public final class MeetRoomPanel extends JPanel {
                 BufferedImage frame = videoFrames.get(id);
                 if (frame != null) {
                     Graphics2D g2 = (Graphics2D) graphics.create();
+                    g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
                     g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
                     g2.setClip(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 10, 10));
                     int w = getWidth();

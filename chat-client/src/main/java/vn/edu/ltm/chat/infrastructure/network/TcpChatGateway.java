@@ -265,7 +265,7 @@ public final class TcpChatGateway implements ChatGateway {
             var cb = this.onCallSignal;
             if (cb != null) {
                 CallSignalEvent ev = new CallSignalEvent(convId, chan, sId, sName, action, data);
-                if ("AUDIO".equals(action) || "VIDEO".equals(action)) {
+                if ("AUDIO".equals(action) || "VIDEO".equals(action) || "SCREEN".equals(action)) {
                     cb.accept(ev);
                 } else {
                     SwingUtilities.invokeLater(() -> cb.accept(ev));

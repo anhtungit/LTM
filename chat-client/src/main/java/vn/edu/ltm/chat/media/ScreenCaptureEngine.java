@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.util.Iterator;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
@@ -38,6 +39,7 @@ public final class ScreenCaptureEngine {
     private int maxWidth = 1280;
     private int maxHeight = 720;
     private float jpegQuality = 0.55f;
+    private final java.util.concurrent.atomic.AtomicBoolean localPreviewDecoding = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public synchronized boolean isRunning() {
         return running;
@@ -209,12 +211,20 @@ public final class ScreenCaptureEngine {
                         onJpegFrame.accept(rawJpeg);
                     }
                     if (onLocalPreview != null && running) {
-                        try {
-                            BufferedImage img = ImageIO.read(new ByteArrayInputStream(rawJpeg));
-                            if (img != null && running) {
-                                onLocalPreview.accept(img);
-                            }
-                        } catch (Throwable ignored) {
+                        if (localPreviewDecoding.compareAndSet(false, true)) {
+                            CompletableFuture.runAsync(() -> {
+                                try {
+                                    if (running) {
+                                        BufferedImage img = ImageIO.read(new ByteArrayInputStream(rawJpeg));
+                                        if (img != null && running) {
+                                            onLocalPreview.accept(img);
+                                        }
+                                    }
+                                } catch (Throwable ignored) {
+                                } finally {
+                                    localPreviewDecoding.set(false);
+                                }
+                            });
                         }
                     }
                 }
@@ -440,10 +450,10 @@ public final class ScreenCaptureEngine {
 
             pipeline_desc = (
                 f'pipewiresrc fd={pw_fd} path={node_id} do-timestamp=true keepalive-time=1000 ! '
+                f'videorate drop-only=true max-rate={fps} ! '
                 f'videoconvert ! videoscale method=1 ! '
                 f'video/x-raw,width=[1,{max_w}],height=[1,{max_h}] ! '
-                f'videorate drop-only=true max-rate={fps} ! '
-                f'jpegenc quality={quality} ! '
+                f'jpegenc quality={quality} idct-method=1 ! '
                 f'appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false'
             )
             pipeline = Gst.parse_launch(pipeline_desc)

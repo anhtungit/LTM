@@ -141,6 +141,7 @@ public final class ChatWorkspace extends JPanel {
     private final Map<String, javax.swing.Timer> peerVideoTimers = new ConcurrentHashMap<>();
     private final Map<String, javax.swing.Timer> peerScreenTimers = new ConcurrentHashMap<>();
     private final Map<String, java.util.concurrent.atomic.AtomicBoolean> peerScreenDrawing = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicBoolean screenSending = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
@@ -597,8 +598,19 @@ public final class ChatWorkspace extends JPanel {
         }
         meetRoomPanel.setScreenSharingActive(true);
         screenEngine.start(jpegBytes -> {
-            String base64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
-            chatService.sendCallSignal(cid, chan, "SCREEN", base64);
+            if (!screenSending.compareAndSet(false, true)) {
+                return;
+            }
+            CompletableFuture.runAsync(() -> {
+                try {
+                    if (call.isActive() && meetRoomPanel.isScreenSharingActive()) {
+                        String base64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
+                        chatService.sendCallSignal(cid, chan, "SCREEN", base64);
+                    }
+                } finally {
+                    screenSending.set(false);
+                }
+            });
         }, rawImg -> {
             if (screenEngine.isRunning()) {
                 SwingUtilities.invokeLater(() -> {
@@ -620,6 +632,7 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void stopScreenShare() {
+        screenSending.set(false);
         screenEngine.stop();
         meetRoomPanel.setScreenSharingActive(false);
         String cid = call.conversationId();
@@ -768,28 +781,30 @@ public final class ChatWorkspace extends JPanel {
                 String senderId = ev.senderId();
                 java.util.concurrent.atomic.AtomicBoolean drawing = peerScreenDrawing.computeIfAbsent(senderId, k -> new java.util.concurrent.atomic.AtomicBoolean(false));
                 if (!drawing.compareAndSet(false, true)) {
-                    // Previous frame is still pending EDT rendering; drop this frame to eliminate latency lag
+                    // Previous frame is still pending decoding or EDT rendering; drop this frame to eliminate latency lag
                     return;
                 }
-                try {
-                    byte[] jpeg = java.util.Base64.getDecoder().decode(ev.data());
-                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(jpeg));
-                    if (img != null) {
-                        SwingUtilities.invokeLater(() -> {
-                            try {
-                                if (inActiveCall(ev)) {
-                                    meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), img);
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        byte[] jpeg = java.util.Base64.getDecoder().decode(ev.data());
+                        java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(jpeg));
+                        if (img != null && inActiveCall(ev)) {
+                            SwingUtilities.invokeLater(() -> {
+                                try {
+                                    if (inActiveCall(ev)) {
+                                        meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), img);
+                                    }
+                                } finally {
+                                    drawing.set(false);
                                 }
-                            } finally {
-                                drawing.set(false);
-                            }
-                        });
-                    } else {
+                            });
+                        } else {
+                            drawing.set(false);
+                        }
+                    } catch (Exception e) {
                         drawing.set(false);
                     }
-                } catch (Exception e) {
-                    drawing.set(false);
-                }
+                });
             }
             return;
         }
