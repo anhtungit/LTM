@@ -69,9 +69,7 @@ public final class VoiceSettingsDialog extends JDialog {
         title.setForeground(Color.WHITE);
         header.add(title, BorderLayout.WEST);
 
-        JButton closeBtn = new JButton("✕");
-        closeBtn.setFont(DiscordTheme.bold(14f));
-        closeBtn.setForeground(DiscordTheme.TEXT_MUTED);
+        JButton closeBtn = new JButton(IconFactory.phosphor("x.svg", 16, DiscordTheme.TEXT_MUTED));
         closeBtn.setContentAreaFilled(false);
         closeBtn.setBorderPainted(false);
         closeBtn.setFocusPainted(false);
@@ -131,7 +129,7 @@ public final class VoiceSettingsDialog extends JDialog {
         micLevelBar.setBackground(new Color(0x2B, 0x2D, 0x31));
         micLevelBar.setBorder(BorderFactory.createEmptyBorder());
         body.add(micLevelBar);
-        body.add(Box.createVerticalStrut(16));
+        body.add(Box.createVerticalStrut(14));
 
         // 2. Speaker section
         body.add(createSectionLabel("THIẾT BỊ ĐẦU RA (LOA / TAI NGHE)"));
@@ -168,7 +166,7 @@ public final class VoiceSettingsDialog extends JDialog {
         btnHolder.setBackground(DiscordTheme.SIDEBAR);
         btnHolder.add(testSpkBtn);
         body.add(btnHolder);
-        body.add(Box.createVerticalStrut(16));
+        body.add(Box.createVerticalStrut(14));
 
         // 3. Camera section
         body.add(createSectionLabel("THIẾT BỊ HÌNH ẢNH (CAMERA / WEBCAM)"));
@@ -185,7 +183,10 @@ public final class VoiceSettingsDialog extends JDialog {
         });
         body.add(camCombo);
 
-        container.add(body, BorderLayout.CENTER);
+        JPanel bodyWrap = new JPanel(new BorderLayout());
+        bodyWrap.setOpaque(false);
+        bodyWrap.add(body, BorderLayout.NORTH);
+        container.add(bodyWrap, BorderLayout.CENTER);
 
         // Footer
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
@@ -204,7 +205,7 @@ public final class VoiceSettingsDialog extends JDialog {
 
         setContentPane(container);
         pack();
-        setSize(460, 440);
+        setResizable(false);
         setLocationRelativeTo(getOwner());
 
         addWindowListener(new WindowAdapter() {
@@ -301,13 +302,22 @@ public final class VoiceSettingsDialog extends JDialog {
         box.setAlignmentX(LEFT_ALIGNMENT);
     }
 
+    private static int mapRmsToLevel(double rms) {
+        if (rms < 50.0) return 0;
+        double norm = (rms - 50.0) / 10000.0;
+        double curved = Math.sqrt(Math.max(0.0, Math.min(1.0, norm)));
+        return (int) Math.round(curved * 100.0);
+    }
+
     private void updateLevelBarSafe(int level) {
         SwingUtilities.invokeLater(() -> {
             if (micCombo.isPopupVisible() || spkCombo.isPopupVisible() || camCombo.isPopupVisible()) {
                 return;
             }
-            if (micLevelBar.getValue() != level) {
-                micLevelBar.setValue(level);
+            int current = micLevelBar.getValue();
+            int display = level > current ? level : Math.max(0, (int) (current * 0.7 + level * 0.3));
+            if (current != display) {
+                micLevelBar.setValue(display);
             }
         });
     }
@@ -321,7 +331,7 @@ public final class VoiceSettingsDialog extends JDialog {
                 if (voiceEngine != null && voiceEngine.isRunning()) {
                     while (testingMic && voiceEngine.isRunning()) {
                         double rms = voiceEngine.getCurrentMicRms();
-                        int level = Math.min(100, (int) (rms / 40.0));
+                        int level = mapRmsToLevel(rms);
                         updateLevelBarSafe(level);
                         Thread.sleep(80);
                     }
@@ -332,12 +342,17 @@ public final class VoiceSettingsDialog extends JDialog {
                 if (line == null) return;
                 this.testMicLine = line;
                 byte[] buf = new byte[VoiceAudioEngine.CHUNK_BYTES];
+                VoiceAudioEngine.NoiseSuppressor suppressor = new VoiceAudioEngine.NoiseSuppressor();
 
                 while (testingMic && line.isOpen()) {
                     int read = line.read(buf, 0, buf.length);
                     if (read > 0) {
-                        double rms = VoiceAudioEngine.computeRms(buf, read);
-                        int level = Math.min(100, (int) (rms / 40.0));
+                        byte[] processed = buf;
+                        if (VoiceAudioEngine.isNoiseSuppressionEnabled() && read == VoiceAudioEngine.CHUNK_BYTES) {
+                            processed = suppressor.process(buf);
+                        }
+                        double rms = VoiceAudioEngine.computeRms(processed, read);
+                        int level = mapRmsToLevel(rms);
                         updateLevelBarSafe(level);
                     }
                 }
