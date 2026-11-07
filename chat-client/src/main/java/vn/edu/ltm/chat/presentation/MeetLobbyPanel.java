@@ -49,6 +49,9 @@ public final class MeetLobbyPanel extends JPanel {
 
     public void updateRoomInfo(String roomName) {
         String name = (roomName != null && !roomName.isBlank()) ? roomName : "phòng-họp";
+        if (!name.startsWith("#") && !name.isEmpty()) {
+            name = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+        }
         headerTitle.setText(name);
         centerSubtitle.setText("Kiểm tra thiết bị trước khi bắt đầu cuộc gọi với " + name + ".");
     }
@@ -183,7 +186,7 @@ public final class MeetLobbyPanel extends JPanel {
         camNotice.setAlignmentX(CENTER_ALIGNMENT);
         previewContent.add(camNotice);
 
-        JLabel camSub = new JLabel("Truyền giọng nói PCM & hình ảnh thời gian thực qua UDP.");
+        JLabel camSub = new JLabel("Kiểm tra micro và camera trước khi tham gia.");
         camSub.setFont(DiscordTheme.font(11f));
         camSub.setForeground(DiscordTheme.TEXT_MUTED);
         camSub.setAlignmentX(CENTER_ALIGNMENT);
@@ -245,10 +248,10 @@ public final class MeetLobbyPanel extends JPanel {
         actionRow.setOpaque(false);
         actionRow.setAlignmentX(CENTER_ALIGNMENT);
 
-        JButton cancelBtn = new JButton("Rời sảnh", IconFactory.phosphor("phone-x.svg", 16, Color.WHITE));
+        JButton cancelBtn = new JButton("Rời sảnh", IconFactory.phosphor("x.svg", 16, DiscordTheme.TEXT_SECONDARY));
         cancelBtn.setFont(DiscordTheme.bold(14f));
-        cancelBtn.setForeground(Color.WHITE);
-        cancelBtn.setBackground(DiscordTheme.DANGER);
+        cancelBtn.setForeground(DiscordTheme.TEXT_PRIMARY);
+        cancelBtn.setBackground(DiscordTheme.COMPOSER);
         cancelBtn.setPreferredSize(new Dimension(140, 40));
         cancelBtn.setMaximumSize(new Dimension(140, 40));
         cancelBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -261,10 +264,10 @@ public final class MeetLobbyPanel extends JPanel {
         });
         actionRow.add(cancelBtn);
 
-        JButton joinBtn = new JButton("Vào phòng", IconFactory.phosphor("phone-call.svg", 16, Color.WHITE));
+        JButton joinBtn = new JButton("Vào phòng", IconFactory.phosphor("phone.svg", 16, Color.WHITE));
         joinBtn.setFont(DiscordTheme.bold(14f));
         joinBtn.setForeground(Color.WHITE);
-        joinBtn.setBackground(DiscordTheme.ACCENT);
+        joinBtn.setBackground(DiscordTheme.SUCCESS);
         joinBtn.setPreferredSize(new Dimension(160, 40));
         joinBtn.setMaximumSize(new Dimension(160, 40));
         joinBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
