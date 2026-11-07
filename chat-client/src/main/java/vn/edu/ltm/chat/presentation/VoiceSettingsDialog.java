@@ -24,6 +24,9 @@ import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.List;
@@ -35,10 +38,33 @@ public final class VoiceSettingsDialog extends JDialog {
     private final JComboBox<VoiceAudioEngine.AudioDevice> micCombo = new JComboBox<>();
     private final JComboBox<VoiceAudioEngine.AudioDevice> spkCombo = new JComboBox<>();
     private final JComboBox<VideoCaptureEngine.CameraDevice> camCombo = new JComboBox<>();
-    private final JProgressBar micLevelBar = new JProgressBar(0, 100);
+    private final JProgressBar micLevelBar = new JProgressBar(0, 100) {
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth();
+            int h = getHeight();
+            int arc = 6;
+            // Track background (Discord dark)
+            g2.setColor(new Color(0x1E, 0x1F, 0x22));
+            g2.fillRoundRect(0, 0, w, h, arc, arc);
+
+            int val = getValue();
+            if (val > 0) {
+                int fillW = Math.max(arc, (int) (w * (val / 100.0)));
+                fillW = Math.min(w, fillW);
+                // Discord green (#23A55A)
+                g2.setColor(DiscordTheme.SUCCESS);
+                g2.fillRoundRect(0, 0, fillW, h, arc, arc);
+            }
+            g2.dispose();
+        }
+    };
     private JButton testMicBtn;
     private volatile boolean testingMic = false;
     private volatile boolean isTestingLoopback = false;
+    private volatile boolean wasMutedBeforeTest = false;
     private volatile SourceDataLine testLoopbackLine;
     private boolean updatingCombos = false;
     private Thread micMonitorThread;
@@ -102,12 +128,10 @@ public final class VoiceSettingsDialog extends JDialog {
                 String id = sel.id();
                 VoiceAudioEngine.setSelectedMicId(id);
                 if (voiceEngine != null) {
-                    CompletableFuture.runAsync(() -> {
-                        voiceEngine.switchMicDevice(id);
-                        SwingUtilities.invokeLater(() -> restartMicLevelMonitor(id));
-                    });
-                } else {
-                    restartMicLevelMonitor(id);
+                    CompletableFuture.runAsync(() -> voiceEngine.switchMicDevice(id));
+                }
+                if (isTestingLoopback) {
+                    startMicLoopback();
                 }
             }
         });
@@ -126,34 +150,43 @@ public final class VoiceSettingsDialog extends JDialog {
         body.add(noiseBox);
         body.add(Box.createVerticalStrut(10));
 
-        // Mic volume meter
-        JLabel testMicLabel = new JLabel("KIỂM TRA ÂM LƯỢNG MIC (NÓI VÀO MIC ĐỂ THỬ)");
+        // Mic Test section (Discord-style: Title + Subtitle + [Hãy kiểm tra] [Level Bar])
+        JLabel testMicLabel = new JLabel("KIỂM TRA MIC");
         testMicLabel.setFont(DiscordTheme.bold(10f));
         testMicLabel.setForeground(DiscordTheme.TEXT_MUTED);
+        testMicLabel.setAlignmentX(LEFT_ALIGNMENT);
         body.add(testMicLabel);
-        body.add(Box.createVerticalStrut(4));
+        body.add(Box.createVerticalStrut(3));
 
-        micLevelBar.setPreferredSize(new Dimension(360, 8));
-        micLevelBar.setMaximumSize(new Dimension(Short.MAX_VALUE, 8));
-        micLevelBar.setForeground(DiscordTheme.SUCCESS);
-        micLevelBar.setBackground(new Color(0x2B, 0x2D, 0x31));
-        micLevelBar.setBorder(BorderFactory.createEmptyBorder());
-        body.add(micLevelBar);
+        JLabel testMicDesc = new JLabel("Gặp sự cố với mic? Bấm Hãy kiểm tra và nói vào mic để nghe lại âm thanh.");
+        testMicDesc.setFont(DiscordTheme.font(11f));
+        testMicDesc.setForeground(DiscordTheme.TEXT_MUTED);
+        testMicDesc.setAlignmentX(LEFT_ALIGNMENT);
+        body.add(testMicDesc);
         body.add(Box.createVerticalStrut(8));
 
-        testMicBtn = new JButton("Thử mic (nghe lại âm thanh)", IconFactory.phosphor("microphone.svg", 14, Color.WHITE));
-        testMicBtn.setIconTextGap(8);
-        testMicBtn.setFont(DiscordTheme.semibold(12f));
+        JPanel micTestRow = new JPanel(new BorderLayout(10, 0));
+        micTestRow.setOpaque(false);
+        micTestRow.setMaximumSize(new Dimension(Short.MAX_VALUE, 32));
+        micTestRow.setAlignmentX(LEFT_ALIGNMENT);
+
+        testMicBtn = new JButton("Hãy kiểm tra");
+        testMicBtn.setFont(DiscordTheme.bold(12f));
         testMicBtn.setForeground(Color.WHITE);
-        testMicBtn.setBackground(new Color(0x3B, 0x3D, 0x44));
+        testMicBtn.setBackground(DiscordTheme.ACCENT);
         testMicBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        testMicBtn.setBorder(BorderFactory.createEmptyBorder(7, 14, 7, 14));
+        testMicBtn.setFocusPainted(false);
+        testMicBtn.setBorder(BorderFactory.createEmptyBorder(6, 16, 6, 16));
+        testMicBtn.setPreferredSize(new Dimension(125, 32));
         testMicBtn.addActionListener(e -> toggleMicLoopback());
-        JPanel micBtnHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        micBtnHolder.setOpaque(true);
-        micBtnHolder.setBackground(DiscordTheme.SIDEBAR);
-        micBtnHolder.add(testMicBtn);
-        body.add(micBtnHolder);
+
+        micLevelBar.setPreferredSize(new Dimension(220, 32));
+        micLevelBar.setOpaque(false);
+        micLevelBar.setBorder(BorderFactory.createEmptyBorder());
+
+        micTestRow.add(testMicBtn, BorderLayout.WEST);
+        micTestRow.add(micLevelBar, BorderLayout.CENTER);
+        body.add(micTestRow);
         body.add(Box.createVerticalStrut(14));
 
         // 2. Speaker section
@@ -172,7 +205,7 @@ public final class VoiceSettingsDialog extends JDialog {
                     CompletableFuture.runAsync(() -> voiceEngine.switchSpeakerDevice(id));
                 }
                 if (isTestingLoopback) {
-                    stopMicLoopback();
+                    startMicLoopback();
                 }
             }
         });
@@ -241,26 +274,20 @@ public final class VoiceSettingsDialog extends JDialog {
 
         addWindowListener(new WindowAdapter() {
             @Override
-            public void windowOpened(WindowEvent e) {
-                VoiceAudioEngine.AudioDevice sel = (VoiceAudioEngine.AudioDevice) micCombo.getSelectedItem();
-                startMicLevelMonitor(sel != null ? sel.id() : "default");
-            }
-
-            @Override
             public void windowClosing(WindowEvent e) {
-                stopMicLevelMonitor();
+                stopMicLoopback();
             }
 
             @Override
             public void windowClosed(WindowEvent e) {
-                stopMicLevelMonitor();
+                stopMicLoopback();
             }
         });
     }
 
     @Override
     public void dispose() {
-        stopMicLevelMonitor();
+        stopMicLoopback();
         super.dispose();
     }
 
@@ -370,7 +397,13 @@ public final class VoiceSettingsDialog extends JDialog {
                 }
 
                 TargetDataLine line = VoiceAudioEngine.openMicLine(micId);
-                if (line == null) return;
+                if (line == null) {
+                    SwingUtilities.invokeLater(() -> {
+                        JOptionPane.showMessageDialog(this, "Không thể mở thiết bị microphone để kiểm tra.", "Lỗi microphone", JOptionPane.ERROR_MESSAGE);
+                        stopMicLoopback();
+                    });
+                    return;
+                }
                 this.testMicLine = line;
                 byte[] buf = new byte[VoiceAudioEngine.CHUNK_BYTES];
                 VoiceAudioEngine.NoiseSuppressor suppressor = new VoiceAudioEngine.NoiseSuppressor();
@@ -394,7 +427,9 @@ public final class VoiceSettingsDialog extends JDialog {
                 }
             } catch (Exception ignored) {
             } finally {
-                stopMicLevelMonitor();
+                if (testingMic) {
+                    stopMicLevelMonitor();
+                }
             }
         }, "mic-level-monitor");
         micMonitorThread.setDaemon(true);
@@ -420,25 +455,38 @@ public final class VoiceSettingsDialog extends JDialog {
         }
         testLoopbackLine = line;
         isTestingLoopback = true;
+
         if (voiceEngine != null && voiceEngine.isRunning()) {
+            wasMutedBeforeTest = voiceEngine.isMuted();
+            voiceEngine.setMuted(true);
             voiceEngine.setMicLoopback(buf -> {
                 SourceDataLine l = testLoopbackLine;
                 if (l != null && l.isOpen()) {
                     l.write(buf, 0, buf.length);
                 }
             });
+            startMicLevelMonitor(null);
+        } else {
+            VoiceAudioEngine.AudioDevice mic = (VoiceAudioEngine.AudioDevice) micCombo.getSelectedItem();
+            String micId = (mic != null) ? mic.id() : VoiceAudioEngine.getSelectedMicId();
+            startMicLevelMonitor(micId);
         }
+
         if (testMicBtn != null) {
-            testMicBtn.setText("Dừng thử mic");
-            testMicBtn.setIcon(IconFactory.phosphor("x.svg", 14, Color.WHITE));
-            testMicBtn.setBackground(DiscordTheme.DANGER);
+            testMicBtn.setText("Dừng kiểm tra");
+            testMicBtn.setBackground(new Color(0xDA, 0x37, 0x3C));
         }
     }
 
     private synchronized void stopMicLoopback() {
         isTestingLoopback = false;
+        stopMicLevelMonitor();
+
         if (voiceEngine != null) {
             voiceEngine.setMicLoopback(null);
+            if (voiceEngine.isRunning()) {
+                voiceEngine.setMuted(wasMutedBeforeTest);
+            }
         }
         if (testLoopbackLine != null) {
             try {
@@ -449,15 +497,14 @@ public final class VoiceSettingsDialog extends JDialog {
             }
             testLoopbackLine = null;
         }
+        updateLevelBarSafe(0);
         if (testMicBtn != null) {
-            testMicBtn.setText("Thử mic (nghe lại âm thanh)");
-            testMicBtn.setIcon(IconFactory.phosphor("microphone.svg", 14, Color.WHITE));
-            testMicBtn.setBackground(new Color(0x3B, 0x3D, 0x44));
+            testMicBtn.setText("Hãy kiểm tra");
+            testMicBtn.setBackground(DiscordTheme.ACCENT);
         }
     }
 
     private synchronized void stopMicLevelMonitor() {
-        stopMicLoopback();
         testingMic = false;
         if (testMicLine != null) {
             try {
@@ -467,12 +514,5 @@ public final class VoiceSettingsDialog extends JDialog {
             }
             testMicLine = null;
         }
-    }
-
-    private synchronized void restartMicLevelMonitor(String micId) {
-        stopMicLevelMonitor();
-        Timer t = new Timer(150, e -> startMicLevelMonitor(micId));
-        t.setRepeats(false);
-        t.start();
     }
 }
