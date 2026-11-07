@@ -193,6 +193,7 @@ public final class ScreenCaptureEngine {
         cmd.add(Integer.toString(maxH));
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
         try {
             Process proc = pb.start();
             this.portalProcess = proc;
@@ -231,7 +232,7 @@ public final class ScreenCaptureEngine {
     }
 
     private void runRobotCapture(int fps, int maxW, int maxH, float qual,
-                                 Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
+                                Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
         Robot robot;
         try {
             robot = new Robot();
@@ -349,14 +350,22 @@ public final class ScreenCaptureEngine {
             max_w = int(sys.argv[4]) if len(sys.argv) > 4 else 1280
             max_h = int(sys.argv[5]) if len(sys.argv) > 5 else 720
 
-            def watch_stdin():
-                try:
-                    sys.stdin.read()
-                except Exception:
-                    pass
-                os._exit(0)
+            import signal, time
+            try:
+                import ctypes
+                libc = ctypes.CDLL('libc.so.6')
+                libc.prctl(1, signal.SIGTERM, 0, 0, 0)
+            except Exception:
+                pass
 
-            threading.Thread(target=watch_stdin, daemon=True).start()
+            ppid = os.getppid()
+            def watch_parent():
+                while True:
+                    time.sleep(1)
+                    if os.getppid() != ppid:
+                        os._exit(0)
+
+            threading.Thread(target=watch_parent, daemon=True).start()
 
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             sender = bus.get_unique_name().lstrip(':').replace('.', '_')
@@ -467,10 +476,16 @@ public final class ScreenCaptureEngine {
                 return Gst.FlowReturn.OK
 
             sink.connect('new-sample', on_new_sample)
+            def on_bus_error(bus, msg):
+                err, dbg = msg.parse_error()
+                sys.stderr.write(f'[WAYLAND_PORTAL_PY] Error: {err}, debug: {dbg}\\n')
+                sys.stderr.flush()
+                main_loop.quit()
+
             gst_bus = pipeline.get_bus()
             gst_bus.add_signal_watch()
             gst_bus.connect('message::eos', lambda b, m: main_loop.quit())
-            gst_bus.connect('message::error', lambda b, m: main_loop.quit())
+            gst_bus.connect('message::error', on_bus_error)
 
             pipeline.set_state(Gst.State.PLAYING)
             try:
