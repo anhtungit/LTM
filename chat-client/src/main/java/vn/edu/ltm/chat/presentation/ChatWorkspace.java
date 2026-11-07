@@ -2,6 +2,7 @@ package vn.edu.ltm.chat.presentation;
 
 import vn.edu.ltm.chat.media.VoiceAudioEngine;
 import vn.edu.ltm.chat.media.VideoCaptureEngine;
+import vn.edu.ltm.chat.media.ScreenCaptureEngine;
 import vn.edu.ltm.chat.media.WatchTogether;
 import vn.edu.ltm.chat.application.CallState;
 import vn.edu.ltm.chat.application.ChatGateway;
@@ -130,6 +131,7 @@ public final class ChatWorkspace extends JPanel {
 
     private final VoiceAudioEngine voiceEngine = new VoiceAudioEngine();
     private final VideoCaptureEngine videoEngine = new VideoCaptureEngine();
+    private final ScreenCaptureEngine screenEngine = new ScreenCaptureEngine();
     private final MeetLobbyPanel meetLobbyPanel = new MeetLobbyPanel(this::startActiveCall, this::showChatView);
     private final MeetRoomPanel meetRoomPanel = new MeetRoomPanel(this::endActiveCall);
     private final CallState call = new CallState();
@@ -137,6 +139,7 @@ public final class ChatWorkspace extends JPanel {
     private javax.swing.JDialog incomingCallDialog;
     private final Map<String, javax.swing.Timer> peerSpeakingTimers = new ConcurrentHashMap<>();
     private final Map<String, javax.swing.Timer> peerVideoTimers = new ConcurrentHashMap<>();
+    private final Map<String, javax.swing.Timer> peerScreenTimers = new ConcurrentHashMap<>();
 
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
@@ -260,6 +263,8 @@ public final class ChatWorkspace extends JPanel {
         this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         this.meetRoomPanel.setOnOpenChat(this::showChatView);
         this.meetRoomPanel.setOnWatchTogether(this::openWatchTogether);
+        this.meetRoomPanel.setOnStartScreenShare(this::startScreenShare);
+        this.meetRoomPanel.setOnStopScreenShare(this::stopScreenShare);
         this.meetLobbyPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
         if (isConnected) {
             handleServerBroadcast();
@@ -513,7 +518,19 @@ public final class ChatWorkspace extends JPanel {
         WatchTogether w = watchSession();
         if (w == null) return;
         if (!w.isActive()) w.requestState();
-        w.openBrowser();
+        javax.swing.JComponent playerComp = w.createInAppPlayerComponent();
+        if (playerComp != null) {
+            meetRoomPanel.showWatchTogetherStage(playerComp, () -> {
+                w.stop();
+                String cid = call.conversationId();
+                String chan = call.channel();
+                if (cid != null) {
+                    chatService.sendCallSignal(cid, chan, WatchTogether.ACTION_STOP, "");
+                }
+            });
+        } else {
+            w.openBrowser();
+        }
     }
 
     private void handleWatchSignal(ChatGateway.CallSignalEvent ev, String action) {
@@ -522,15 +539,20 @@ public final class ChatWorkspace extends JPanel {
         if (w == null) return;
         switch (action) {
             case WatchTogether.ACTION_REQ -> w.onRequest();
-            case WatchTogether.ACTION_STOP -> w.onRemoteStop();
+            case WatchTogether.ACTION_STOP -> {
+                w.onRemoteStop();
+                SwingUtilities.invokeLater(meetRoomPanel::hideWatchTogetherStage);
+            }
             case WatchTogether.ACTION_STATE -> {
                 boolean first = !w.isActive();
                 if (w.onRemoteState(ev.senderId(), ev.data()) && first) {
                     SwingUtilities.invokeLater(() -> {
                         int ans = javax.swing.JOptionPane.showConfirmDialog(this,
-                                ev.senderName() + " đang xem YouTube cùng nhau. Tham gia xem?",
+                                ev.senderName() + " đang xem YouTube cùng nhau. Tham gia xem trực tiếp?",
                                 "Xem YouTube cùng nhau", javax.swing.JOptionPane.YES_NO_OPTION);
-                        if (ans == javax.swing.JOptionPane.YES_OPTION) w.openBrowser();
+                        if (ans == javax.swing.JOptionPane.YES_OPTION) {
+                            openWatchTogether();
+                        }
                     });
                 }
             }
@@ -538,7 +560,35 @@ public final class ChatWorkspace extends JPanel {
         }
     }
 
+    private void startScreenShare() {
+        if (!call.isActive()) return;
+        String cid = call.conversationId();
+        String chan = call.channel();
+        if (cid == null) return;
+        screenEngine.start(jpegBytes -> {
+            String base64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
+            chatService.sendCallSignal(cid, chan, "SCREEN", base64);
+        }, rawImg -> {
+            SwingUtilities.invokeLater(() -> meetRoomPanel.updateScreenShare(user.id(), user.displayName(), rawImg));
+        });
+        meetRoomPanel.setScreenSharingActive(true);
+    }
+
+    private void stopScreenShare() {
+        screenEngine.stop();
+        meetRoomPanel.setScreenSharingActive(false);
+        String cid = call.conversationId();
+        String chan = call.channel();
+        if (cid != null) {
+            chatService.sendCallSignal(cid, chan, "SCREEN_OFF", "");
+        }
+        meetRoomPanel.updateScreenShare(user.id(), user.displayName(), null);
+    }
+
     private void endActiveCall() {
+        stopScreenShare();
+        peerScreenTimers.values().forEach(javax.swing.Timer::stop);
+        peerScreenTimers.clear();
         if (watchTogether != null) {
             watchTogether.stop();
             watchTogether = null;
@@ -665,6 +715,39 @@ public final class ChatWorkspace extends JPanel {
             return;
         }
 
+        if ("SCREEN".equals(action)) {
+            if (inActiveCall(ev) && ev.data() != null && !ev.data().isEmpty()) {
+                try {
+                    byte[] jpeg = java.util.Base64.getDecoder().decode(ev.data());
+                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(jpeg));
+                    if (img != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            if (inActiveCall(ev)) {
+                                meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), img);
+                                javax.swing.Timer sTimer = peerScreenTimers.computeIfAbsent(ev.senderId(), id -> {
+                                    javax.swing.Timer t = new javax.swing.Timer(2500, e -> meetRoomPanel.updateScreenShare(id, ev.senderName(), null));
+                                    t.setRepeats(false);
+                                    return t;
+                                });
+                                sTimer.restart();
+                            }
+                        });
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            return;
+        }
+
+        if ("SCREEN_OFF".equals(action)) {
+            if (inActiveCall(ev)) {
+                javax.swing.Timer sTimer = peerScreenTimers.remove(ev.senderId());
+                if (sTimer != null) sTimer.stop();
+                SwingUtilities.invokeLater(() -> meetRoomPanel.updateScreenShare(ev.senderId(), ev.senderName(), null));
+            }
+            return;
+        }
+
         if ("MUTE".equals(action)) {
             if (inActiveCall(ev)) {
                 boolean peerMuted = "true".equalsIgnoreCase(ev.data());
@@ -717,7 +800,16 @@ public final class ChatWorkspace extends JPanel {
                 if (t != null) t.stop();
                 javax.swing.Timer vt = peerVideoTimers.remove(ev.senderId());
                 if (vt != null) vt.stop();
+                javax.swing.Timer st = peerScreenTimers.remove(ev.senderId());
+                if (st != null) st.stop();
                 if (!groupCall && meetRoomPanel.getParticipantCount() <= 1) {
+                    stopScreenShare();
+                    peerScreenTimers.values().forEach(javax.swing.Timer::stop);
+                    peerScreenTimers.clear();
+                    if (watchTogether != null) {
+                        watchTogether.stop();
+                        watchTogether = null;
+                    }
                     voiceEngine.stop();
                     stopLocalCamera(false);
                     call.mutedPeers().clear();

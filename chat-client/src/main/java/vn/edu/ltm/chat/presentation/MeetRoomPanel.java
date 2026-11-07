@@ -15,6 +15,7 @@ import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
@@ -39,11 +40,14 @@ public final class MeetRoomPanel extends JPanel {
     private Runnable onOpenVoiceSettings;
     private Runnable onOpenChat;
     private Runnable onWatchTogether;
+    private Runnable onStartScreenShare;
+    private Runnable onStopScreenShare;
     private Consumer<Boolean> onMuteToggle;
     private Consumer<Boolean> onCamToggle;
     private boolean micMuted = false;
     private boolean micAvailable = true;
     private boolean camMuted = true;
+    private boolean screenSharingActive = false;
     private boolean speakerLayoutMode = false;
     private String selfParticipantId;
     private String pinnedParticipantId;
@@ -52,8 +56,13 @@ public final class MeetRoomPanel extends JPanel {
     private final JLabel titleLabel = new JLabel("Cuộc gọi thoại");
     private final JLabel statusLabel = new JLabel("· 00:00 · Đang kết nối âm thanh...");
     private final JPanel grid = new JPanel(new GridLayout(1, 2, 12, 12));
+    private final CardLayout centerLayout = new CardLayout();
+    private final JPanel centerHost = new JPanel(centerLayout);
+    private final JPanel watchStageContainer = new JPanel(new BorderLayout());
+    private final JPanel watchStrip = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 8));
     private JButton micBtn;
     private JButton camBtn;
+    private JButton shareBtn;
     private JButton layoutModeBtn;
 
     private final Map<String, ParticipantEntry> participants = new LinkedHashMap<>();
@@ -75,8 +84,12 @@ public final class MeetRoomPanel extends JPanel {
             updateHeaderStatus();
         });
 
+        centerHost.setOpaque(false);
+        centerHost.add(buildVideoGrid(), "grid");
+        centerHost.add(watchStageContainer, "watch");
+
         add(buildHeader(), BorderLayout.NORTH);
-        add(buildVideoGrid(), BorderLayout.CENTER);
+        add(centerHost, BorderLayout.CENTER);
         add(buildBottomControls(), BorderLayout.SOUTH);
     }
 
@@ -86,6 +99,22 @@ public final class MeetRoomPanel extends JPanel {
 
     public void setOnCamToggle(Consumer<Boolean> onCamToggle) {
         this.onCamToggle = onCamToggle;
+    }
+
+    public void setOnStartScreenShare(Runnable onStartScreenShare) {
+        this.onStartScreenShare = onStartScreenShare;
+    }
+
+    public void setOnStopScreenShare(Runnable onStopScreenShare) {
+        this.onStopScreenShare = onStopScreenShare;
+    }
+
+    public void setScreenSharingActive(boolean active) {
+        this.screenSharingActive = active;
+        if (shareBtn != null) {
+            shareBtn.setText(active ? "Dừng chia sẻ" : "Chia sẻ màn hình");
+            shareBtn.setBackground(active ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
+        }
     }
 
     public void setOnOpenVoiceSettings(Runnable onOpenVoiceSettings) {
@@ -198,21 +227,122 @@ public final class MeetRoomPanel extends JPanel {
         }
     }
 
+    public void updateScreenShare(String id, String name, BufferedImage img) {
+        if (id == null || id.isBlank()) return;
+        String screenId = id + ":screen";
+        boolean had = videoFrames.containsKey(screenId);
+        if (img != null) {
+            videoFrames.put(screenId, img);
+            if (!had) {
+                String title = (name != null && !name.isBlank()) ? "Màn hình: " + name : "Màn hình chia sẻ";
+                participants.put(screenId, new ParticipantEntry(screenId, "🖥", title, "Trực tiếp", false));
+                pinnedParticipantId = screenId;
+                speakerLayoutMode = true;
+                if (layoutModeBtn != null) {
+                    layoutModeBtn.setText("Bố cục: Tiêu điểm");
+                }
+                rebuildGrid();
+            } else {
+                JPanel tile = tileViews.get(screenId);
+                if (tile != null) {
+                    tile.repaint();
+                }
+            }
+        } else {
+            if (had) {
+                removeParticipant(screenId);
+            }
+        }
+    }
+
     public void removeParticipant(String id) {
         if (id != null) {
-            videoFrames.remove(id);
-            tileViews.remove(id);
-            if (id.equals(pinnedParticipantId)) {
-                pinnedParticipantId = null;
-            }
-            if (id.equals(lastSpeakingParticipantId)) {
-                lastSpeakingParticipantId = null;
-            }
-            if (participants.remove(id) != null) {
+            boolean removed = removeParticipantInternal(id);
+            boolean removedScreen = removeParticipantInternal(id + ":screen");
+            if (removed || removedScreen) {
                 rebuildGrid();
                 updateHeaderStatus();
             }
         }
+    }
+
+    private boolean removeParticipantInternal(String id) {
+        videoFrames.remove(id);
+        tileViews.remove(id);
+        if (id.equals(pinnedParticipantId)) {
+            pinnedParticipantId = null;
+        }
+        if (id.equals(lastSpeakingParticipantId)) {
+            lastSpeakingParticipantId = null;
+        }
+        return participants.remove(id) != null;
+    }
+
+    public void showWatchTogetherStage(javax.swing.JComponent playerComponent, Runnable onStop) {
+        watchStageContainer.removeAll();
+
+        JPanel topBar = new JPanel(new BorderLayout());
+        topBar.setOpaque(false);
+        topBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, DiscordTheme.HAIRLINE),
+                BorderFactory.createEmptyBorder(10, 16, 10, 16)
+        ));
+
+        JLabel titleLbl = new JLabel("Xem YouTube cùng nhau", IconFactory.phosphor("video-camera.svg", 18, DiscordTheme.ACCENT), JLabel.LEFT);
+        titleLbl.setFont(DiscordTheme.bold(14f));
+        titleLbl.setForeground(Color.WHITE);
+        topBar.add(titleLbl, BorderLayout.WEST);
+
+        JButton stopBtn = new JButton("Dừng xem chung");
+        stopBtn.setFont(DiscordTheme.bold(12f));
+        stopBtn.setForeground(Color.WHITE);
+        stopBtn.setBackground(DiscordTheme.DANGER);
+        stopBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        stopBtn.setBorder(BorderFactory.createEmptyBorder(6, 14, 6, 14));
+        stopBtn.addActionListener(e -> {
+            hideWatchTogetherStage();
+            if (onStop != null) onStop.run();
+        });
+        topBar.add(stopBtn, BorderLayout.EAST);
+
+        watchStageContainer.add(topBar, BorderLayout.NORTH);
+        watchStageContainer.add(playerComponent, BorderLayout.CENTER);
+
+        refreshWatchStrip();
+        JScrollPane scrollStrip = new JScrollPane(watchStrip, JScrollPane.VERTICAL_SCROLLBAR_NEVER, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollStrip.setOpaque(false);
+        scrollStrip.getViewport().setOpaque(false);
+        scrollStrip.setBorder(BorderFactory.createEmptyBorder());
+        scrollStrip.setPreferredSize(new Dimension(0, 105));
+        watchStageContainer.add(scrollStrip, BorderLayout.SOUTH);
+
+        centerLayout.show(centerHost, "watch");
+        revalidate();
+        repaint();
+    }
+
+    public void hideWatchTogetherStage() {
+        watchStageContainer.removeAll();
+        centerLayout.show(centerHost, "grid");
+        revalidate();
+        repaint();
+    }
+
+    public boolean isWatchingTogether() {
+        return watchStageContainer.getComponentCount() > 0;
+    }
+
+    private void refreshWatchStrip() {
+        watchStrip.removeAll();
+        watchStrip.setOpaque(false);
+        for (ParticipantEntry p : participants.values()) {
+            JPanel smallTile = buildParticipantTile(p.id(), p.initials(), p.name(), p.sub(), p.speaking(), true);
+            smallTile.setPreferredSize(new Dimension(140, 90));
+            tileViews.put(p.id(), smallTile);
+            watchStrip.add(smallTile);
+        }
+        watchStrip.revalidate();
+        watchStrip.repaint();
     }
 
     public int getParticipantCount() {
@@ -221,6 +351,8 @@ public final class MeetRoomPanel extends JPanel {
 
     public String stopSessionAndFormatDuration() {
         callTimer.stop();
+        setScreenSharingActive(false);
+        hideWatchTogetherStage();
         videoFrames.clear();
         tileViews.clear();
         participants.clear();
@@ -395,6 +527,9 @@ public final class MeetRoomPanel extends JPanel {
         }
         grid.revalidate();
         grid.repaint();
+        if (isWatchingTogether()) {
+            refreshWatchStrip();
+        }
     }
 
     private JPanel buildParticipantTile(String id, String initials, String name, String sub, boolean speaking, boolean compact) {
@@ -409,7 +544,14 @@ public final class MeetRoomPanel extends JPanel {
                     g2.setClip(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 10, 10));
                     int w = getWidth();
                     int h = getHeight();
-                    double scale = Math.max((double) w / frame.getWidth(), (double) h / frame.getHeight());
+                    boolean isScreen = id.endsWith(":screen");
+                    if (isScreen) {
+                        g2.setColor(Color.BLACK);
+                        g2.fillRect(0, 0, w, h);
+                    }
+                    double scale = isScreen
+                            ? Math.min((double) w / frame.getWidth(), (double) h / frame.getHeight())
+                            : Math.max((double) w / frame.getWidth(), (double) h / frame.getHeight());
                     int dw = (int) Math.round(frame.getWidth() * scale);
                     int dh = (int) Math.round(frame.getHeight() * scale);
                     int dx = (w - dw) / 2;
@@ -538,10 +680,19 @@ public final class MeetRoomPanel extends JPanel {
         });
         bar.add(camBtn);
 
-        JButton shareBtn = new JButton("Chia sẻ màn hình", IconFactory.phosphor("monitor.svg", 18, Color.WHITE));
+        shareBtn = new JButton("Chia sẻ màn hình", IconFactory.phosphor("monitor.svg", 18, Color.WHITE));
         styleControlBtn(shareBtn, new Color(0x3B, 0x3D, 0x44));
         shareBtn.setFont(DiscordTheme.semibold(12f));
-        shareBtn.addActionListener(e -> showShareScreenDialog());
+        shareBtn.setToolTipText("Bật/Tắt chia sẻ màn hình");
+        shareBtn.addActionListener(e -> {
+            if (screenSharingActive) {
+                if (onStopScreenShare != null) {
+                    onStopScreenShare.run();
+                }
+            } else {
+                showShareScreenDialog();
+            }
+        });
         bar.add(shareBtn);
 
         JButton ytBtn = new JButton("Xem YouTube", IconFactory.phosphor("video-camera.svg", 18, Color.WHITE));
@@ -620,7 +771,12 @@ public final class MeetRoomPanel extends JPanel {
         share.setForeground(Color.WHITE);
         share.setBackground(DiscordTheme.ACCENT);
         share.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        share.addActionListener(e -> dialog.dispose());
+        share.addActionListener(e -> {
+            dialog.dispose();
+            if (onStartScreenShare != null) {
+                onStartScreenShare.run();
+            }
+        });
         actions.add(share);
         p.add(actions, BorderLayout.SOUTH);
 

@@ -67,22 +67,61 @@ public final class WatchTogether {
         return m.group(1) != null ? m.group(1) : m.group(2);
     }
 
-    /** Mở trang xem chung trong trình duyệt (khởi động server cục bộ nếu cần). */
-    public synchronized void openBrowser() {
-        try {
-            if (server == null) {
+    public synchronized String ensureServerRunning() {
+        if (server == null) {
+            try {
                 server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
                 server.createContext("/" + token + "/", this::handle);
                 server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
                 server.start();
+            } catch (IOException e) {
+                System.err.println("[WatchTogether] Không khởi tạo được server: " + e.getMessage());
             }
-            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/" + token + "/");
+        }
+        return getLocalUrl();
+    }
+
+    public synchronized String getLocalUrl() {
+        if (server == null) return null;
+        return "http://127.0.0.1:" + server.getAddress().getPort() + "/" + token + "/";
+    }
+
+    /** Tạo component trình phát YouTube trực tiếp trong ứng dụng (sử dụng JavaFX WebView). */
+    public synchronized javax.swing.JComponent createInAppPlayerComponent() {
+        String url = ensureServerRunning();
+        if (url == null) return null;
+        try {
+            javafx.embed.swing.JFXPanel fxPanel = new javafx.embed.swing.JFXPanel();
+            javafx.application.Platform.runLater(() -> {
+                try {
+                    javafx.scene.web.WebView webView = new javafx.scene.web.WebView();
+                    webView.getEngine().setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    webView.getEngine().load(url);
+                    javafx.scene.Scene scene = new javafx.scene.Scene(webView);
+                    fxPanel.setScene(scene);
+                } catch (Throwable t) {
+                    System.err.println("[WatchTogether] Lỗi nạp WebView JavaFX: " + t.getMessage());
+                }
+            });
+            return fxPanel;
+        } catch (Throwable t) {
+            System.err.println("[WatchTogether] JFXPanel không khả dụng trên môi trường này: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /** Mở trang xem chung trong trình duyệt (khởi động server cục bộ nếu cần). */
+    public synchronized void openBrowser() {
+        String url = ensureServerRunning();
+        if (url == null) return;
+        try {
+            URI uri = URI.create(url);
             try {
                 Desktop.getDesktop().browse(uri);
             } catch (Exception e) {
                 new ProcessBuilder("xdg-open", uri.toString()).start();
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.err.println("[WatchTogether] Không mở được trình duyệt: " + e.getMessage());
         }
     }
