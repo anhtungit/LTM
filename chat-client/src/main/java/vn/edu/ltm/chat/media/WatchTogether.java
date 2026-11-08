@@ -925,6 +925,8 @@ public final class WatchTogether {
             };
             const isFx=/JavaFX/i.test(navigator.userAgent);
             if(!isFx){
+              const eb=$('expandBtn');if(eb)eb.remove();
+              const cb=$('collapseBtn');if(cb)cb.remove();
               const b=$('errBrowserBtn');if(b)b.style.display='none';
               const d=$('errDesc');if(d)d.textContent='Chủ sở hữu hoặc YouTube đã tắt tính năng nhúng đối với video này. Bạn có thể mở trực tiếp trên YouTube.';
             }
@@ -935,8 +937,8 @@ public final class WatchTogether {
                 if(!isFx){window.open(u,'_blank');}else{call('openUrl',{url:u});}
               }
             };
-            $('expandBtn').onclick=()=>{expanded=true;render();};
-            $('collapseBtn').onclick=()=>{expanded=false;render();};
+            if($('expandBtn')) $('expandBtn').onclick=()=>{expanded=true;render();};
+            if($('collapseBtn')) $('collapseBtn').onclick=()=>{expanded=false;render();};
             $('errBackBtn').onclick=()=>{expanded=false;render();};
             window.addEventListener('keydown',e=>{if((e.key==='Escape'||e.key==='Esc')&&expanded){expanded=false;render();}});
             doSearch('');
