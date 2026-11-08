@@ -30,6 +30,12 @@ final class ChatHeaderPanel extends JPanel {
 
     ChatHeaderPanel(Runnable onVoiceCall,
                     Runnable onVideoCall,
+                    Runnable onInbox) {
+        this(onVoiceCall, onVideoCall, onInbox, null);
+    }
+
+    ChatHeaderPanel(Runnable onVoiceCall,
+                    Runnable onVideoCall,
                     Runnable onInbox,
                     Runnable onToggleInfoPane) {
         super(new BorderLayout(12, 0));
@@ -107,11 +113,11 @@ final class ChatHeaderPanel extends JPanel {
         });
         actions.add(headerInbox);
 
-        JButton memberToggle = iconButton("users.svg", "Ẩn/hiện thông tin chi tiết");
-        memberToggle.addActionListener(e -> {
-            if (onToggleInfoPane != null) onToggleInfoPane.run();
-        });
-        actions.add(memberToggle);
+        if (onToggleInfoPane != null) {
+            JButton memberToggle = iconButton("users.svg", "Ẩn/hiện thông tin chi tiết");
+            memberToggle.addActionListener(e -> onToggleInfoPane.run());
+            actions.add(memberToggle);
+        }
 
         actions.add(Box.createHorizontalStrut(6));
 

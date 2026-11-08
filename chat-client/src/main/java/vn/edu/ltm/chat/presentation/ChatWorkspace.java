@@ -112,12 +112,6 @@ public final class ChatWorkspace extends JPanel {
     private final javax.swing.Timer typingTimeoutTimer = new javax.swing.Timer(4000, e -> typingBubble.hideTyping());
     private final ChatInputBar inputBar = new ChatInputBar();
     private final ChatHeaderPanel headerPanel;
-    private final ChatInfoPanel infoPane = new ChatInfoPanel(
-            this::resolveMemberDisplayName,
-            this::resolveMemberOnline,
-            this::handleViewUserProfile
-    );
-
     private final JPanel accountFooterDm = new JPanel(new BorderLayout());
     private final JPanel accountFooterGroup = new JPanel(new BorderLayout());
     private final Map<String, UserProfile> userProfileCache = new ConcurrentHashMap<>();
@@ -127,7 +121,6 @@ public final class ChatWorkspace extends JPanel {
     private String filter = "";
 
     private boolean loadingConversations = false;
-    private boolean userManuallyToggledPane = false;
 
     private final VoiceAudioEngine voiceEngine = new VoiceAudioEngine();
     private final VideoCaptureEngine videoEngine = new VideoCaptureEngine();
@@ -188,8 +181,7 @@ public final class ChatWorkspace extends JPanel {
         this.headerPanel = new ChatHeaderPanel(
                 this::showMeetLobby,
                 this::showMeetRoom,
-                this::openInboxDialog,
-                this::toggleInfoPane
+                this::openInboxDialog
         );
 
         this.inputBar.setListener(new ChatInputBar.ChatInputListener() {
@@ -234,7 +226,7 @@ public final class ChatWorkspace extends JPanel {
         add(railPanel, BorderLayout.WEST);
         add(body, BorderLayout.CENTER);
 
-        setMinimumSize(new Dimension(780, 520));
+        setMinimumSize(new Dimension(640, 500));
         installSearchShortcut();
 
         if (!conversations.isEmpty()) {
@@ -1656,33 +1648,7 @@ public final class ChatWorkspace extends JPanel {
         messageColumn.add(inputBar, BorderLayout.SOUTH);
 
         chatArea.add(messageColumn, BorderLayout.CENTER);
-        infoPane.setVisible(true);
-        chatArea.add(infoPane, BorderLayout.EAST);
-
-        chatArea.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentResized(java.awt.event.ComponentEvent e) {
-                int w = chatArea.getWidth();
-                if (!userManuallyToggledPane) {
-                    boolean shouldShow = w >= 360;
-                    if (infoPane.isVisible() != shouldShow) {
-                        infoPane.setVisible(shouldShow);
-                        chatArea.revalidate();
-                    }
-                } else if (w < 260 && infoPane.isVisible()) {
-                    infoPane.setVisible(false);
-                    chatArea.revalidate();
-                }
-            }
-        });
         return chatArea;
-    }
-
-    private void toggleInfoPane() {
-        userManuallyToggledPane = true;
-        infoPane.setVisible(!infoPane.isVisible());
-        chatArea.revalidate();
-        chatArea.repaint();
     }
 
     private JComponent buildTranscriptArea() {
@@ -1729,7 +1695,7 @@ public final class ChatWorkspace extends JPanel {
     // ---------------------------------------------------------- info pane
 
     private void rebuildInfoPane(Conversation conversation) {
-        infoPane.update(conversation, selectedChannel);
+        // Right info pane removed per user request
     }
 
     private void handleViewUserProfile(String targetUserId) {
@@ -2076,7 +2042,6 @@ public final class ChatWorkspace extends JPanel {
             headerPanel.setTitle("Đang tải dữ liệu...");
             headerPanel.setSubtitle("Đang kết nối và đồng bộ dữ liệu từ máy chủ TCP.");
             headerPanel.clearAvatar();
-            clearPanel(infoPane);
 
             transcript.removeAll();
             JPanel loadingBox = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 40));
@@ -2095,7 +2060,6 @@ public final class ChatWorkspace extends JPanel {
         headerPanel.setTitle("Chào mừng, " + user.displayName() + "!");
         headerPanel.setSubtitle("Bấm dấu (+) ở mục Tin nhắn trực tiếp hoặc Tạo nhóm để bắt đầu trò chuyện.");
         headerPanel.clearAvatar();
-        clearPanel(infoPane);
 
         transcript.removeAll();
         JLabel welcome = new JLabel("Tài khoản của bạn hiện chưa có cuộc trò chuyện nào.");
