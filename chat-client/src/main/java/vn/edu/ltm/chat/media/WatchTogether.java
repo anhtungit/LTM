@@ -135,6 +135,14 @@ public final class WatchTogether {
     public synchronized void startSession() {
         if (hostId == null) {
             hostId = selfId;
+            if (queue.isEmpty() && !DEFAULT_TRENDING.isEmpty()) {
+                VideoCard first = DEFAULT_TRENDING.get(0);
+                queue.add(first.id());
+                titles.put(first.id(), first.title());
+                index = 0;
+                pos = 0;
+                playing = true;
+            }
             stampMs = System.currentTimeMillis();
             seq++;
             broadcastLocked();
@@ -596,16 +604,13 @@ public final class WatchTogether {
             #topbar{display:flex;align-items:center;gap:12px;padding:10px 18px;background:#111214;border-bottom:1px solid #232428}
             .host-pill{display:inline-flex;align-items:center;gap:6px;background:#1e1f22;color:#23a55a;border:1px solid #2b2d31;border-radius:16px;padding:5px 12px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
             .host-pill:hover{background:#2b2d31}
-            .search-wrap{flex:1;max-width:480px;margin:0 auto;display:flex;align-items:center;background:#1e1f22;border:1px solid #2b2d31;border-radius:6px;padding:0 10px}
+            .search-wrap{flex:1;max-width:540px;margin:0 auto;display:flex;align-items:center;background:#1e1f22;border:1px solid #2b2d31;border-radius:6px;padding:0 10px}
             .search-wrap:focus-within{border-color:#5865f2}
             .search-wrap input{flex:1;background:transparent;border:0;color:#fff;padding:8px 6px;font-size:13px;outline:none}
             .search-wrap button{background:transparent;border:0;color:#b5bac1;cursor:pointer;font-size:14px;padding:4px 6px}
             .search-wrap button:hover{color:#fff}
-            .browser-btn{display:inline-flex;align-items:center;gap:6px;background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:6px 12px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
-            .browser-btn:hover{background:#35373c;border-color:#5865f2}
             #stage{flex:1;display:flex;min-height:0;position:relative}
-            #leftCol{width:46%;display:flex;flex-direction:column;border-right:1px solid #232428;background:#111214;min-width:0}
-            body.empty #leftCol{display:none}
+            #leftCol{width:48%;display:flex;flex-direction:column;border-right:1px solid #232428;background:#111214;min-width:320px}
             body.expanded #leftCol{width:100%;border-right:0}
             body.expanded #playlistSection,body.expanded #rightCol{display:none}
             #playerWrap{position:relative;width:100%;aspect-ratio:16/9;background:#000;flex-shrink:0}
@@ -631,24 +636,23 @@ public final class WatchTogether {
             #rightCol{flex:1;display:flex;flex-direction:column;min-width:0;padding:14px 18px;overflow-y:auto}
             .sec-title{display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;color:#f2f3f5;margin-bottom:12px}
             #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:14px}
-            .card{display:flex;flex-direction:column;cursor:pointer;border-radius:8px;overflow:hidden;background:#1e1f22;border:1px solid #232428;transition:transform .12s,border-color .12s}
+            .card{display:flex;flex-direction:column;cursor:pointer;border-radius:8px;overflow:hidden;background:#1e1f22;border:1px solid #2b2d31;transition:transform .12s,border-color .12s}
             .card:hover{transform:translateY(-2px);border-color:#5865f2}
-            .thumb{position:relative;width:100%;aspect-ratio:16/9;background:#000;overflow:hidden}
-            .thumb img{width:100%;height:100%;object-fit:cover}
+            .thumb{position:relative;width:100%;aspect-ratio:16/9;background:#18191c;overflow:hidden}
+            .thumb img{width:100%;height:100%;object-fit:cover;display:block}
             .dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.82);color:#fff;font-size:11px;font-weight:600;padding:2px 5px;border-radius:4px}
             .ov{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;opacity:0;transition:opacity .15s}
             .card:hover .ov{opacity:1}
             .plus{width:38px;height:38px;border-radius:50%;background:#23a55a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700}
             .ov span{font-size:11px;font-weight:600;color:#fff}
             .ctitle{padding:8px 10px;font-size:12px;font-weight:600;color:#f2f3f5;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-            </style></head><body class="empty">
+            </style></head><body>
             <div id="topbar">
               <button class="host-pill" id="everyone" title="Chuyển quyền điều khiển danh sách phát">● Đang chia sẻ ⌄</button>
               <div class="search-wrap">
                 <input id="qInput" placeholder="Tìm kiếm video YouTube hoặc dán đường dẫn URL...">
                 <button id="qBtn" title="Tìm kiếm">🔍</button>
               </div>
-              <button id="topBrowserBtn" class="browser-btn" title="Mở trong trình duyệt để xem mượt mà, hỗ trợ mọi codec và không lo lỗi bản quyền">🌐 Mở Trình duyệt</button>
             </div>
             <div id="stage">
               <button id="collapseBtn">Danh sách phát &gt;</button>
@@ -656,6 +660,11 @@ public final class WatchTogether {
                 <div id="playerWrap">
                   <div id="player"></div>
                   <button id="expandBtn">⤢ Phóng to video</button>
+                  <div id="emptyPlaceholder" style="display:none;position:absolute;inset:0;background:#0d0e10;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#949ba4;z-index:15;">
+                    <div style="font-size:36px;color:#5865f2;">▶</div>
+                    <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Chưa có video nào trong hàng đợi</div>
+                    <div style="font-size:12px;color:#949ba4;">Bấm vào một video ở danh sách bên phải để phát ngay!</div>
+                  </div>
                   <div id="errOverlay" style="display:none;position:absolute;inset:0;background:rgba(17,18,20,0.94);flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;z-index:20;">
                     <div style="font-size:32px;">⚠️</div>
                     <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Video bị giới hạn bản quyền hoặc không hỗ trợ nhúng</div>
@@ -742,7 +751,8 @@ public final class WatchTogether {
             function render(){
               if(!st)return;
               const hasQ=st.q&&st.q.length>0;
-              document.body.className=hasQ?(expanded?'expanded':''):'empty';
+              document.body.className=expanded?'expanded':'';
+              $('emptyPlaceholder').style.display=hasQ?'none':'flex';
               $('everyone').textContent=st.e?'● Mọi người cùng điều khiển':'● Chỉ chủ phòng điều khiển';
               $('msg').textContent=st.can?'':('Chỉ xem (Chủ phòng khóa điều khiển)');
               const l=$('list');l.innerHTML='';
@@ -770,7 +780,7 @@ public final class WatchTogether {
                 const p=c.querySelector('.plus');
                 const txt=c.querySelector('.ov span');
                 if(p)p.textContent=inQ?'✓':'+';
-                if(txt)txt.textContent=inQ?'Phát ngay':'Thêm vào danh sách';
+                if(txt)txt.textContent=inQ?'Phát lại':'Phát ngay';
               });
             }
             function appendCards(items){
@@ -781,15 +791,14 @@ public final class WatchTogether {
                 const c=document.createElement('div');
                 c.className='card';
                 c.dataset.vid=v.id;
-                c.innerHTML='<div class="thumb"><img src="https://i.ytimg.com/vi/'+v.id+'/hqdefault.jpg" onerror="this.src=\\'https://i.ytimg.com/vi/'+v.id+'/mqdefault.jpg\\'">'
+                c.innerHTML='<div class="thumb"><img src="https://i.ytimg.com/vi/'+v.id+'/hqdefault.jpg" onerror="this.onerror=null;this.src=\\'https://i.ytimg.com/vi/'+v.id+'/mqdefault.jpg\\'">'
                   +'<span class="dur"></span>'
-                  +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Phát ngay':'Thêm vào danh sách')+'</span></div></div>'
+                  +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Phát lại':'Phát ngay')+'</span></div></div>'
                   +'<div class="ctitle"></div>';
                 c.querySelector('.dur').textContent=v.dur||'';
                 c.querySelector('.ctitle').textContent=v.title;
                 c.onclick=()=>{
-                  const isNowInQ=(st&&st.q&&st.q.includes(v.id));
-                  call('add',{url:v.id,title:v.title,playNow:isNowInQ?1:0});
+                  call('add',{url:v.id,title:v.title,playNow:1});
                 };
                 g.appendChild(c);
               });
@@ -836,7 +845,6 @@ public final class WatchTogether {
             $('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value);});
             $('qBtn').onclick=()=>doSearch($('qInput').value);
             $('everyone').onclick=()=>call('everyone');
-            $('topBrowserBtn').onclick=()=>call('browser');
             $('errBrowserBtn').onclick=()=>call('browser');
             $('expandBtn').onclick=()=>{expanded=true;render();};
             $('collapseBtn').onclick=()=>{expanded=false;render();};
