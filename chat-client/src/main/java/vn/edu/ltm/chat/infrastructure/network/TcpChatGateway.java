@@ -47,6 +47,7 @@ public final class TcpChatGateway implements ChatGateway {
     private DatagramSocket udpVoiceSocket;
     private volatile boolean udpVoiceVerified = false;
     private PrintWriter out;
+    private final Object sendLock = new Object();
     private volatile boolean connected = false;
     private volatile boolean closed = false;
     private String currentUserId;
@@ -309,7 +310,7 @@ public final class TcpChatGateway implements ChatGateway {
         }
         CompletableFuture<TcpPacket> future = new CompletableFuture<>();
         pendingRequests.put(req.getRequestId(), future);
-        synchronized (this) {
+        synchronized (sendLock) {
             out.println(req.toJsonLine());
             out.flush();
         }
@@ -457,7 +458,7 @@ public final class TcpChatGateway implements ChatGateway {
                     .put("channel", channel != null ? channel : "")
                     .put("senderName", currentUserName != null ? currentUserName : "Người dùng")
                     .put("typing", typing);
-            synchronized (this) {
+            synchronized (sendLock) {
                 if (out != null) {
                     out.println(req.toJsonLine());
                 }
@@ -506,7 +507,7 @@ public final class TcpChatGateway implements ChatGateway {
                     .put("senderName", currentUserName != null ? currentUserName : "Người dùng")
                     .put("action", action != null ? action : "")
                     .put("data", data != null ? data : "");
-            synchronized (this) {
+            synchronized (sendLock) {
                 if (out != null) {
                     out.println(req.toJsonLine());
                 }
