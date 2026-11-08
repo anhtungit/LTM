@@ -6,7 +6,6 @@ import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GradientPaint;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -17,8 +16,6 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -306,7 +303,12 @@ public final class VideoCaptureEngine {
         BufferedImage dest = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = dest.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(src, 0, 0, WIDTH, HEIGHT, null);
+        double scale = Math.max((double) WIDTH / src.getWidth(), (double) HEIGHT / src.getHeight());
+        int dw = (int) Math.round(src.getWidth() * scale);
+        int dh = (int) Math.round(src.getHeight() * scale);
+        int dx = (WIDTH - dw) / 2;
+        int dy = (HEIGHT - dh) / 2;
+        g.drawImage(src, dx, dy, dw, dh, null);
         g.dispose();
         return dest;
     }
@@ -409,10 +411,24 @@ public final class VideoCaptureEngine {
             if (os.contains("linux")) {
                 String dev = resolveLinuxDevice();
                 if (dev == null) return null;
+                // Try native MJPEG first (preserves 16:9 HD 1280x720 without driver 4:3 fallback)
+                try {
+                    Process proc = new ProcessBuilder(
+                            "ffmpeg", "-nostdin", "-loglevel", "quiet",
+                            "-f", "v4l2", "-input_format", "mjpeg", "-video_size", WIDTH + "x" + HEIGHT, "-i", dev,
+                            "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT + ":force_original_aspect_ratio=increase,crop=" + WIDTH + ":" + HEIGHT,
+                            "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-"
+                    ).redirectErrorStream(false).start();
+                    if (proc.isAlive()) {
+                        return proc;
+                    }
+                } catch (Exception ignored) {
+                }
+                // Fallback without -input_format mjpeg, preserving 1:1 aspect ratio via crop
                 return new ProcessBuilder(
                         "ffmpeg", "-nostdin", "-loglevel", "quiet",
                         "-f", "v4l2", "-video_size", WIDTH + "x" + HEIGHT, "-i", dev,
-                        "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT,
+                        "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT + ":force_original_aspect_ratio=increase,crop=" + WIDTH + ":" + HEIGHT,
                         "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-"
                 ).redirectErrorStream(false).start();
             }
