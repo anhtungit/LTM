@@ -45,7 +45,15 @@ public final class ScreenCaptureEngine {
         return running;
     }
 
+    public static boolean isWindowCaptureSupported() {
+        return isWaylandSession();
+    }
+
     public synchronized void setSourceType(int sourceType) {
+        if (!isWindowCaptureSupported()) {
+            this.sourceType = SOURCE_SCREEN;
+            return;
+        }
         this.sourceType = (sourceType == SOURCE_WINDOW) ? SOURCE_WINDOW : SOURCE_SCREEN;
     }
 
