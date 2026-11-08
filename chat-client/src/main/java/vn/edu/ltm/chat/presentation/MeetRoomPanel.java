@@ -230,6 +230,16 @@ public final class MeetRoomPanel extends JPanel {
         return camMuted;
     }
 
+    public void setCamMuted(boolean camMuted) {
+        this.camMuted = camMuted;
+        if (camBtn != null) {
+            camBtn.setBackground(camMuted ? new Color(0x3B, 0x3D, 0x44) : DiscordTheme.SUCCESS);
+        }
+        if (camMuted && selfParticipantId != null) {
+            updateParticipantVideo(selfParticipantId, null);
+        }
+    }
+
     public void updateParticipantVideo(String id, BufferedImage frame) {
         if (id == null || id.isBlank()) return;
         if (id.equals(selfParticipantId) && camMuted && frame != null) {
@@ -659,12 +669,7 @@ public final class MeetRoomPanel extends JPanel {
                     int dh = (int) Math.round(frame.getHeight() * scale);
                     int dx = (w - dw) / 2;
                     int dy = (h - dh) / 2;
-                    boolean mirrorSelfCam = id.equals(selfParticipantId) && !isScreen;
-                    if (mirrorSelfCam) {
-                        g2.drawImage(frame, dx + dw, dy, -dw, dh, null);
-                    } else {
-                        g2.drawImage(frame, dx, dy, dw, dh, null);
-                    }
+                    g2.drawImage(frame, dx, dy, dw, dh, null);
                     g2.dispose();
                 }
             }

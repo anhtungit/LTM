@@ -415,9 +415,13 @@ public final class ChatWorkspace extends JPanel {
         Conversation conv = currentConversation();
         if (conv != null && conv.id().equals(call.conversationId())) {
             centerLayout.show(centerHost, "meet-room");
+            if (meetRoomPanel.isCamMuted()) {
+                meetRoomPanel.setCamMuted(false);
+                startLocalCamera();
+            }
             return;
         }
-        startActiveCall();
+        startActiveCall(true);
     }
 
     private void startLocalCamera() {
@@ -456,8 +460,11 @@ public final class ChatWorkspace extends JPanel {
 
     /** Bật mic/âm thanh và mở phòng họp cho cuộc gọi vừa bắt đầu; trả về trạng thái tắt mic ban đầu. */
     private boolean startCallMedia(String roomTitle) {
+        return startCallMedia(roomTitle, meetLobbyPanel.isCamEnabled());
+    }
+
+    private boolean startCallMedia(String roomTitle, boolean initialCamOn) {
         boolean initialMuted = !meetLobbyPanel.isMicEnabled();
-        boolean initialCamOn = meetLobbyPanel.isCamEnabled();
         voiceEngine.setMuted(initialMuted);
         voiceEngine.start(base64 -> {
             String cid = call.conversationId();
@@ -494,6 +501,10 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void startActiveCall() {
+        startActiveCall(meetLobbyPanel.isCamEnabled());
+    }
+
+    private void startActiveCall(boolean videoCall) {
         cleanupFloatingPopups();
         meetLobbyPanel.stopLobbyPreview();
         Conversation conv = currentConversation();
@@ -509,8 +520,8 @@ public final class ChatWorkspace extends JPanel {
         peerVideoTimers.clear();
 
         String roomTitle = conv.isGroup() ? ("Kênh thoại · " + conv.displayName()) : ("Cuộc gọi với " + conv.displayName());
-        boolean initialMuted = startCallMedia(roomTitle);
-        boolean initialCamOn = meetLobbyPanel.isCamEnabled();
+        boolean initialCamOn = videoCall || meetLobbyPanel.isCamEnabled();
+        boolean initialMuted = startCallMedia(roomTitle, initialCamOn);
         if (!conv.isGroup()) {
             meetRoomPanel.addOrUpdateParticipant(conv.id(), conv.initials(), conv.displayName(), "Đang đổ chuông...", false);
         }
@@ -519,7 +530,7 @@ public final class ChatWorkspace extends JPanel {
         } else {
             stopLocalCamera(false);
         }
-        chatService.sendCallSignal(conv.id(), call.channel(), "INVITE", "");
+        chatService.sendCallSignal(conv.id(), call.channel(), "INVITE", videoCall ? "video" : "");
         if (initialMuted) {
             chatService.sendCallSignal(conv.id(), call.channel(), "MUTE", "true");
         }
@@ -941,10 +952,12 @@ public final class ChatWorkspace extends JPanel {
         ));
         card.setLayout(new BorderLayout(0, 12));
 
-        JLabel title = new JLabel(ev.senderName() + " đang gọi thoại cho bạn...");
+        boolean isVideoCall = "video".equalsIgnoreCase(ev.data());
+        String callType = isVideoCall ? "video" : "thoại";
+        JLabel title = new JLabel(ev.senderName() + " đang gọi " + callType + " cho bạn...");
         title.setFont(DiscordTheme.bold(15f));
         title.setForeground(Color.WHITE);
-        title.setIcon(IconFactory.phosphor("phone.svg", 20, DiscordTheme.SUCCESS));
+        title.setIcon(IconFactory.phosphor(isVideoCall ? "video-camera.svg" : "phone.svg", 20, DiscordTheme.SUCCESS));
         title.setIconTextGap(10);
         card.add(title, BorderLayout.NORTH);
 
@@ -980,8 +993,8 @@ public final class ChatWorkspace extends JPanel {
                     .ifPresent(this::selectConversation);
             call.begin(ev.conversationId(), ev.channel(), selectedChannel);
             meetLobbyPanel.stopLobbyPreview();
-            boolean initialMuted = startCallMedia("Cuộc gọi với " + ev.senderName());
-            boolean initialCamOn = meetLobbyPanel.isCamEnabled();
+            boolean initialCamOn = isVideoCall || meetLobbyPanel.isCamEnabled();
+            boolean initialMuted = startCallMedia("Cuộc gọi với " + ev.senderName(), initialCamOn);
             meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "", false);
             if (initialCamOn) {
                 startLocalCamera();
