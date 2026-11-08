@@ -592,9 +592,9 @@ public final class ChatWorkspace extends JPanel {
         if (cid == null) return;
         screenEngine.setSourceType(sourceType);
         if (hd) {
-            screenEngine.setConfig(30, 1920, 1080);
+            screenEngine.setConfig(15, 1280, 720);
         } else {
-            screenEngine.setConfig(30, 1280, 720);
+            screenEngine.setConfig(10, 960, 540);
         }
         meetRoomPanel.setScreenSharingActive(true);
         screenEngine.start(jpegBytes -> {

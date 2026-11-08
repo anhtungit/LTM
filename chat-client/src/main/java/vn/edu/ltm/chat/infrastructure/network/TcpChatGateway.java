@@ -130,6 +130,21 @@ public final class TcpChatGateway implements ChatGateway {
             udpListener.setDaemon(true);
             udpListener.setPriority(Thread.MAX_PRIORITY);
             udpListener.start();
+
+            Thread keepalive = new Thread(() -> {
+                while (!closed && !ds.isClosed()) {
+                    try {
+                        Thread.sleep(5000);
+                        sendUdpVoiceReg();
+                    } catch (InterruptedException e) {
+                        break;
+                    } catch (Exception ignored) {
+                    }
+                }
+            }, "udp-voice-keepalive");
+            keepalive.setDaemon(true);
+            keepalive.start();
+
             sendUdpVoiceReg();
         } catch (Exception ignored) {
         }
@@ -461,7 +476,7 @@ public final class TcpChatGateway implements ChatGateway {
         if (!connected || out == null || conversationId == null || conversationId.isBlank()) {
             return;
         }
-        if ("AUDIO".equals(action) || "VIDEO".equals(action)) {
+        if ("AUDIO".equals(action)) {
             DatagramSocket ds = this.udpVoiceSocket;
             Socket s = this.socket;
             String uid = this.currentUserId;
@@ -470,7 +485,7 @@ public final class TcpChatGateway implements ChatGateway {
                     byte[] rawBytes = Base64.getDecoder().decode(data);
                     String safeName = (currentUserName != null ? currentUserName : "Người dùng").replace('|', ' ');
                     String safeChan = (channel != null ? channel : "").replace('|', ' ');
-                    String prefix = "AUDIO".equals(action) ? "LTM_VOICE|" : "LTM_VIDEO|";
+                    String prefix = "LTM_VOICE|";
                     byte[] hdr = (prefix + uid + "|" + safeName + "|" + conversationId + "|" + safeChan + "\n")
                             .getBytes(StandardCharsets.UTF_8);
                     byte[] packetBytes = new byte[hdr.length + rawBytes.length];
