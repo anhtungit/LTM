@@ -629,8 +629,9 @@ public final class WatchTogether {
             #expandBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.92);color:#111214;border:0;border-radius:20px;padding:8px 16px;font-weight:700;font-size:12px;cursor:pointer;opacity:0;transition:opacity .15s;box-shadow:0 4px 14px rgba(0,0,0,.5);z-index:5}
             #playerWrap:hover #expandBtn{opacity:1}
             body.expanded #expandBtn{display:none}
-            #collapseBtn{display:none;position:absolute;left:12px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.92);color:#111214;border:0;border-radius:16px;padding:6px 14px;font-weight:700;font-size:12px;cursor:pointer;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.5)}
-            body.expanded #collapseBtn{display:inline-flex;align-items:center;gap:4px}
+            #collapseBtn{display:none;position:absolute;left:14px;top:14px;background:#1e1f22;color:#f2f3f5;border:1px solid #3b3d44;border-radius:18px;padding:7px 15px;font-weight:700;font-size:12px;cursor:pointer;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.6);transition:background .15s}
+            #collapseBtn:hover{background:#2b2d31;color:#fff}
+            body.expanded #collapseBtn{display:inline-flex;align-items:center;gap:6px}
             #playlistSection{flex:1;display:flex;flex-direction:column;min-height:0;padding:12px 14px}
             .pl-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
             .pl-head h4{margin:0;font-size:13px;color:#f2f3f5}
@@ -665,7 +666,7 @@ public final class WatchTogether {
               </div>
             </div>
             <div id="stage">
-              <button id="collapseBtn">Danh sách phát &gt;</button>
+              <button id="collapseBtn">⤡ Thu nhỏ / Hiện danh sách</button>
               <div id="leftCol">
                 <div id="playerWrap">
                   <div id="player"></div>
@@ -682,6 +683,7 @@ public final class WatchTogether {
                     <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center;">
                       <button id="errBrowserBtn" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🌐 Xem cùng nhau trên Trình duyệt</button>
                       <button id="errDirectBtn" style="background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🔗 Mở trên YouTube</button>
+                      <button id="errBackBtn" style="background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">⤡ Thu nhỏ</button>
                     </div>
                   </div>
                 </div>
@@ -885,6 +887,8 @@ public final class WatchTogether {
             };
             $('expandBtn').onclick=()=>{expanded=true;render();};
             $('collapseBtn').onclick=()=>{expanded=false;render();};
+            $('errBackBtn').onclick=()=>{expanded=false;render();};
+            window.addEventListener('keydown',e=>{if((e.key==='Escape'||e.key==='Esc')&&expanded){expanded=false;render();}});
             doSearch('');
             setInterval(async()=>{const s=await call('state');if(!s)return;st=s;if(s.seq!==seq){seq=s.seq;render();apply();}},500);
             </script></body></html>
