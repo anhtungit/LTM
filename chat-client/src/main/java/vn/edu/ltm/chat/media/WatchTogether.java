@@ -71,15 +71,25 @@ public final class WatchTogether {
     private record VideoCard(String id, String title, String duration) {}
 
     private static final List<VideoCard> DEFAULT_TRENDING = List.of(
-            new VideoCard("jfKfPfyJRdk", "lofi hip hop radio - beats to relax/study to", "LIVE"),
-            new VideoCard("4xDzrJKXOOY", "synthwave radio - chill synth / retro beats", "LIVE"),
-            new VideoCard("5yx6BWlEVcY", "Chillhop Radio - jazzy & lofi hip hop beats", "LIVE"),
-            new VideoCard("DWcJFNfaw9c", "Ambient Study Music To Concentrate - 4 Hours", "3:58:12"),
-            new VideoCard("hHW1oY26kxQ", "Coding Session Lofi Beats - Deep Focus Mix", "1:45:20"),
+            new VideoCard("kJQP7kiw5Fk", "Luis Fonsi - Despacito ft. Daddy Yankee", "4:42"),
+            new VideoCard("JGwWNGJdvx8", "Ed Sheeran - Shape of You", "4:24"),
+            new VideoCard("3AtDnEC4zak", "Charlie Puth - We Don't Talk Anymore (feat. Selena Gomez)", "3:50"),
+            new VideoCard("fJ9rUzIMcZQ", "Queen – Bohemian Rhapsody (Official Video Remastered)", "5:59"),
+            new VideoCard("dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up (Official Music Video)", "3:32"),
             new VideoCard("lTRiuFIWV54", "1 A.M Study Session - [lofi hip hop/chill beats]", "1:01:14"),
             new VideoCard("n61ULEU7CO0", "Best of Lofi Hip Hop - Chill Beats Mix", "2:12:30"),
-            new VideoCard("bM7SZ5SBzyY", "Alan Walker - Fade [NCS Release]", "4:20")
+            new VideoCard("DWcJFNfaw9c", "Ambient Study Music To Concentrate - 4 Hours", "3:58:12")
     );
+
+    private static final String[] TRENDING_TOPICS = {
+            "trending vietnam",
+            "nhac tre remix hot tiktok",
+            "lofi hip hop chill beats study",
+            "top hits nhac viet moi nhat",
+            "edm ncs gaming music",
+            "acoustic viet nam cover",
+            "nhac chill ballad hay nhat"
+    };
 
     public WatchTogether(String selfId, BiConsumer<String, String> sendSignal) {
         this.selfId = selfId;
@@ -263,7 +273,11 @@ public final class WatchTogether {
                 out = PAGE;
             }
             case "state" -> out = stateJson();
-            case "search" -> out = searchJson(q.get("q"));
+            case "search" -> out = searchJson(q.get("q"), parseInt(q.get("page"), 1));
+            case "browser" -> {
+                openBrowser();
+                out = "{\"status\":\"ok\"}";
+            }
             case "event" -> localEvent("1".equals(q.get("p")), parseDouble(q.get("t")), parseInt(q.get("i"), -2));
             case "ended" -> ended(parseInt(q.get("i"), -2));
             case "add" -> add(q.get("url"), q.get("title"), "1".equals(q.get("playNow")));
@@ -369,25 +383,51 @@ public final class WatchTogether {
         });
     }
 
-    private String searchJson(String rawQuery) {
-        if (rawQuery == null || rawQuery.isBlank()) {
-            return toJsonArray(DEFAULT_TRENDING);
-        }
+    private String searchJson(String rawQuery, int page) {
         List<VideoCard> cards = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
-        String q = rawQuery.trim();
+        int p = Math.max(1, page);
+
+        if (rawQuery == null || rawQuery.isBlank()) {
+            if (p == 1) {
+                cards.addAll(DEFAULT_TRENDING);
+                for (VideoCard c : DEFAULT_TRENDING) seen.add(c.id());
+            }
+            String topic = TRENDING_TOPICS[(p - 1) % TRENDING_TOPICS.length];
+            fetchYoutubeQuery(topic, cards, seen, 24);
+            return toJsonArray(cards);
+        }
+
+        String base = rawQuery.trim();
+        String query;
+        switch ((p - 1) % 6) {
+            case 0 -> query = base;
+            case 1 -> query = base + " mv";
+            case 2 -> query = base + " live";
+            case 3 -> query = base + " remix";
+            case 4 -> query = base + " acoustic";
+            default -> query = base + " official";
+        }
+        fetchYoutubeQuery(query, cards, seen, 24);
+        if (cards.isEmpty() && p == 1) {
+            cards.addAll(DEFAULT_TRENDING);
+        }
+        return toJsonArray(cards);
+    }
+
+    private void fetchYoutubeQuery(String query, List<VideoCard> cards, Set<String> seen, int limit) {
         try {
             String url = "https://www.youtube.com/results?search_query="
-                    + URLEncoder.encode(q, StandardCharsets.UTF_8);
+                    + URLEncoder.encode(query, StandardCharsets.UTF_8);
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofSeconds(4))
-                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                     .header("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8")
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (resp.statusCode() == 200 && resp.body() != null) {
                 Matcher m = YT_SEARCH_ITEM.matcher(resp.body());
-                while (m.find() && cards.size() < 16) {
+                while (m.find() && cards.size() < limit) {
                     String vid = m.group(1);
                     if (seen.add(vid)) {
                         String title = unescapeJson(m.group(2));
@@ -399,10 +439,6 @@ public final class WatchTogether {
             }
         } catch (Exception ignored) {
         }
-        if (cards.isEmpty()) {
-            cards.addAll(DEFAULT_TRENDING);
-        }
-        return toJsonArray(cards);
     }
 
     private String toJsonArray(List<VideoCard> cards) {
@@ -565,6 +601,8 @@ public final class WatchTogether {
             .search-wrap input{flex:1;background:transparent;border:0;color:#fff;padding:8px 6px;font-size:13px;outline:none}
             .search-wrap button{background:transparent;border:0;color:#b5bac1;cursor:pointer;font-size:14px;padding:4px 6px}
             .search-wrap button:hover{color:#fff}
+            .browser-btn{display:inline-flex;align-items:center;gap:6px;background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:6px 12px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+            .browser-btn:hover{background:#35373c;border-color:#5865f2}
             #stage{flex:1;display:flex;min-height:0;position:relative}
             #leftCol{width:46%;display:flex;flex-direction:column;border-right:1px solid #232428;background:#111214;min-width:0}
             body.empty #leftCol{display:none}
@@ -610,6 +648,7 @@ public final class WatchTogether {
                 <input id="qInput" placeholder="Tìm kiếm video YouTube hoặc dán đường dẫn URL...">
                 <button id="qBtn" title="Tìm kiếm">🔍</button>
               </div>
+              <button id="topBrowserBtn" class="browser-btn" title="Mở trong trình duyệt để xem mượt mà, hỗ trợ mọi codec và không lo lỗi bản quyền">🌐 Mở Trình duyệt</button>
             </div>
             <div id="stage">
               <button id="collapseBtn">Danh sách phát &gt;</button>
@@ -617,6 +656,12 @@ public final class WatchTogether {
                 <div id="playerWrap">
                   <div id="player"></div>
                   <button id="expandBtn">⤢ Phóng to video</button>
+                  <div id="errOverlay" style="display:none;position:absolute;inset:0;background:rgba(17,18,20,0.94);flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;z-index:20;">
+                    <div style="font-size:32px;">⚠️</div>
+                    <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Video bị giới hạn bản quyền hoặc không hỗ trợ nhúng</div>
+                    <div style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">YouTube hoặc hệ điều hành hạn chế phát video này bên trong ứng dụng. Mở ngay bằng Trình duyệt để xem chất lượng cao và vẫn đồng bộ cùng phòng.</div>
+                    <button id="errBrowserBtn" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 18px;font-weight:600;font-size:13px;cursor:pointer;margin-top:6px;">🌐 Mở bằng Trình duyệt để xem &amp; đồng bộ</button>
+                  </div>
                 </div>
                 <div id="playlistSection">
                   <div class="pl-head">
@@ -627,18 +672,29 @@ public final class WatchTogether {
                 </div>
               </div>
               <div id="rightCol">
-                <div class="sec-title" id="gridTitle">🔥 Video Thịnh hành &amp; Đề xuất</div>
+                <div class="sec-title" id="gridTitle">🔥 Video Thịnh hành &amp; Đề xuất (Lướt xem không giới hạn)</div>
                 <div id="grid"></div>
+                <div id="loader" style="display:none;align-items:center;justify-content:center;padding:16px 0;color:#949ba4;font-size:12px;gap:8px;">
+                  <span>⌛ Đang tải thêm video đề xuất...</span>
+                </div>
               </div>
             </div>
             <script src="https://www.youtube.com/iframe_api"></script>
             <script>
-            let player=null,ready=false,st=null,seq=0,cur=-1,applying=0,lastT=0,lastWall=Date.now(),expanded=false,results=[],lastGridKey='';
+            let player=null,ready=false,st=null,seq=0,cur=-1,applying=0,lastT=0,lastWall=Date.now(),expanded=false;
+            let results=[],curQ='',curPage=1,loadingMore=false,hasMore=true;
             const $=id=>document.getElementById(id);
             const call=(p,q)=>fetch(p+(q?'?'+new URLSearchParams(q):'')).then(r=>r.json()).catch(()=>null);
             function onYouTubeIframeAPIReady(){
-              player=new YT.Player('player',{width:'100%',height:'100%',playerVars:{playsinline:1,rel:0,modestbranding:1},
-                events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:()=>{if(st&&st.q.length>1)call('ended',{i:cur});}}});
+              player=new YT.Player('player',{
+                width:'100%',height:'100%',
+                host:'https://www.youtube-nocookie.com',
+                playerVars:{playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:window.location.origin},
+                events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:onPlayerError}
+              });
+            }
+            function onPlayerError(e){
+              $('errOverlay').style.display='flex';
             }
             function guard(){applying=Date.now()+4000;}
             function apply(){
@@ -646,6 +702,7 @@ public final class WatchTogether {
               if(st.i<0||st.i>=st.q.length){try{player.pauseVideo();}catch(e){}return;}
               if(cur!==st.i){
                 cur=st.i;guard();
+                $('errOverlay').style.display='none';
                 lastT=st.t;lastWall=Date.now();
                 player.loadVideoById(st.q[cur],st.t);
                 if(!st.p)setTimeout(()=>{try{player.pauseVideo();}catch(e){}},500);
@@ -665,6 +722,7 @@ public final class WatchTogether {
               if(Date.now()<applying)return;
               if(e.data===0){call('ended',{i:cur});return;}
               if(e.data===1||e.data===2){
+                $('errOverlay').style.display='none';
                 const t=player.getCurrentTime?player.getCurrentTime():0;
                 lastT=t;lastWall=Date.now();
                 call('event',{p:e.data===1?1:0,t:t,i:cur});
@@ -702,25 +760,37 @@ public final class WatchTogether {
                 d.onclick=()=>call('play',{i});
                 d.appendChild(x);l.appendChild(d);
               });
-              renderGrid();
+              updateBadges();
             }
-            function renderGrid(){
+            function updateBadges(){
+              const qSet=new Set(st&&st.q?st.q:[]);
+              document.querySelectorAll('.card').forEach(c=>{
+                const vid=c.dataset.vid;
+                const inQ=qSet.has(vid);
+                const p=c.querySelector('.plus');
+                const txt=c.querySelector('.ov span');
+                if(p)p.textContent=inQ?'✓':'+';
+                if(txt)txt.textContent=inQ?'Phát ngay':'Thêm vào danh sách';
+              });
+            }
+            function appendCards(items){
               const g=$('grid');
               const qSet=new Set(st&&st.q?st.q:[]);
-              const key=results.map(v=>v.id).join(',')+'|'+(st&&st.q?st.q.join(','):'');
-              if(key===lastGridKey)return;
-              lastGridKey=key;
-              g.innerHTML='';
-              results.forEach(v=>{
+              items.forEach(v=>{
                 const inQ=qSet.has(v.id);
-                const c=document.createElement('div');c.className='card';
-                c.innerHTML='<div class="thumb"><img src="https://i.ytimg.com/vi/'+v.id+'/hqdefault.jpg">'
+                const c=document.createElement('div');
+                c.className='card';
+                c.dataset.vid=v.id;
+                c.innerHTML='<div class="thumb"><img src="https://i.ytimg.com/vi/'+v.id+'/hqdefault.jpg" onerror="this.src=\\'https://i.ytimg.com/vi/'+v.id+'/mqdefault.jpg\\'">'
                   +'<span class="dur"></span>'
                   +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Phát ngay':'Thêm vào danh sách')+'</span></div></div>'
                   +'<div class="ctitle"></div>';
                 c.querySelector('.dur').textContent=v.dur||'';
                 c.querySelector('.ctitle').textContent=v.title;
-                c.onclick=()=>call('add',{url:v.id,title:v.title,playNow:inQ?1:0});
+                c.onclick=()=>{
+                  const isNowInQ=(st&&st.q&&st.q.includes(v.id));
+                  call('add',{url:v.id,title:v.title,playNow:isNowInQ?1:0});
+                };
                 g.appendChild(c);
               });
             }
@@ -731,13 +801,43 @@ public final class WatchTogether {
                 $('qInput').value='';
                 return;
               }
-              $('gridTitle').textContent=val?('🔎 Kết quả cho: "'+val+'"'):'🔥 Video Thịnh hành & Đề xuất';
-              const r=await call('search',{q:val});
-              if(Array.isArray(r)){results=r;lastGridKey='';renderGrid();}
+              curQ=val;
+              curPage=1;
+              hasMore=true;
+              $('gridTitle').textContent=val?('🔎 Kết quả cho: "'+val+'"'):'🔥 Video Thịnh hành & Đề xuất (Lướt xem không giới hạn)';
+              $('grid').innerHTML='';
+              results=[];
+              await loadPage(val,1);
             }
+            async function loadPage(q,p){
+              if(loadingMore)return;
+              loadingMore=true;
+              $('loader').style.display='flex';
+              const r=await call('search',{q:q,page:p});
+              loadingMore=false;
+              $('loader').style.display='none';
+              if(Array.isArray(r)&&r.length>0){
+                const seen=new Set(results.map(v=>v.id));
+                const newItems=r.filter(v=>!seen.has(v.id));
+                if(newItems.length===0){hasMore=false;return;}
+                results=results.concat(newItems);
+                appendCards(newItems);
+              }else{
+                hasMore=false;
+              }
+            }
+            $('rightCol').addEventListener('scroll',()=>{
+              const col=$('rightCol');
+              if(!loadingMore&&hasMore&&(col.scrollTop+col.clientHeight>=col.scrollHeight-300)){
+                curPage++;
+                loadPage(curQ,curPage);
+              }
+            });
             $('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value);});
             $('qBtn').onclick=()=>doSearch($('qInput').value);
             $('everyone').onclick=()=>call('everyone');
+            $('topBrowserBtn').onclick=()=>call('browser');
+            $('errBrowserBtn').onclick=()=>call('browser');
             $('expandBtn').onclick=()=>{expanded=true;render();};
             $('collapseBtn').onclick=()=>{expanded=false;render();};
             doSearch('');
