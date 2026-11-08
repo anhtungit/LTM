@@ -704,19 +704,30 @@ public final class WatchTogether {
             <script src="https://www.youtube.com/iframe_api"></script>
             <script>
             let player=null,ready=false,st=null,seq=0,cur=-1,applying=0,lastT=0,lastWall=Date.now(),expanded=false;
-            let results=[],curQ='',curPage=1,loadingMore=false,hasMore=true;
+            let results=[],curQ='',curPage=1,loadingMore=false,hasMore=true,playCheckTimer=null;
             const $=id=>document.getElementById(id);
             const call=(p,q)=>fetch(p+(q?'?'+new URLSearchParams(q):'')).then(r=>r.json()).catch(()=>null);
             function onYouTubeIframeAPIReady(){
               player=new YT.Player('player',{
                 width:'100%',height:'100%',
                 host:'https://www.youtube-nocookie.com',
-                playerVars:{playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:window.location.origin},
+                playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:window.location.origin},
                 events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:onPlayerError}
               });
             }
             function onPlayerError(e){
               $('errOverlay').style.display='flex';
+            }
+            function checkPlayHealth(){
+              if(playCheckTimer)clearTimeout(playCheckTimer);
+              playCheckTimer=setTimeout(()=>{
+                if(ready&&player&&player.getPlayerState&&st&&st.p&&cur>=0){
+                  const s=player.getPlayerState();
+                  if(s===-1||s===5){
+                    $('errOverlay').style.display='flex';
+                  }
+                }
+              },3500);
             }
             function guard(){applying=Date.now()+4000;}
             function apply(){
@@ -727,7 +738,11 @@ public final class WatchTogether {
                 $('errOverlay').style.display='none';
                 lastT=st.t;lastWall=Date.now();
                 player.loadVideoById(st.q[cur],st.t);
-                if(!st.p)setTimeout(()=>{try{player.pauseVideo();}catch(e){}},500);
+                if(st.p){
+                  checkPlayHealth();
+                }else{
+                  setTimeout(()=>{try{player.pauseVideo();}catch(e){}},500);
+                }
                 return;
               }
               const t=player.getCurrentTime?player.getCurrentTime():0;
@@ -737,10 +752,14 @@ public final class WatchTogether {
                 player.seekTo(st.t,true);
               }
               const s=player.getPlayerState?player.getPlayerState():-1;
-              if(st.p&&s!==1&&s!==3){guard();player.playVideo();}
+              if(st.p&&s!==1&&s!==3){guard();player.playVideo();checkPlayHealth();}
               if(!st.p&&s===1){guard();player.pauseVideo();}
             }
             function onState(e){
+              if(e.data===1||e.data===3){
+                if(playCheckTimer)clearTimeout(playCheckTimer);
+                $('errOverlay').style.display='none';
+              }
               if(Date.now()<applying)return;
               if(e.data===0){call('ended',{i:cur});return;}
               if(e.data===1||e.data===2){
