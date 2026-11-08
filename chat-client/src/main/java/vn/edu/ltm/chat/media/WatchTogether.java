@@ -297,7 +297,10 @@ public final class WatchTogether {
                 openExternalUrl(q.get("url"));
                 out = "{\"status\":\"ok\"}";
             }
-            case "event" -> localEvent("1".equals(q.get("p")), parseDouble(q.get("t")), parseInt(q.get("i"), -2));
+            case "event" -> {
+                localEvent("1".equals(q.get("p")), parseDouble(q.get("t")), parseInt(q.get("i"), -2));
+                out = stateJson();
+            }
             case "ended" -> ended(parseInt(q.get("i"), -2));
             case "add" -> {
                 add(q.get("url"), q.get("title"), "1".equals(q.get("playNow")));
@@ -348,7 +351,7 @@ public final class WatchTogether {
 
     private void localEvent(boolean p, double t, int i) {
         mutate(() -> {
-            if (i != index) return;
+            if (i >= 0 && i != index) return;
             playing = p;
             pos = t;
         });
@@ -745,7 +748,7 @@ public final class WatchTogether {
                 }
               },3500);
             }
-            function guard(){applying=Date.now()+4000;}
+            function guard(){applying=Date.now()+1200;}
             function apply(){
               if(!ready||!st)return;
               if(st.i<0||st.i>=st.q.length){try{player.pauseVideo();}catch(e){}return;}
@@ -757,42 +760,49 @@ public final class WatchTogether {
                 if(st.p){
                   checkPlayHealth();
                 }else{
-                  setTimeout(()=>{try{player.pauseVideo();}catch(e){}},500);
+                  setTimeout(()=>{try{player.pauseVideo();}catch(e){}},400);
                 }
                 return;
               }
               const t=player.getCurrentTime?player.getCurrentTime():0;
-              if(Math.abs(t-st.t)>4.5){
+              if(Math.abs(t-st.t)>3.5){
                 guard();
                 lastT=st.t;lastWall=Date.now();
                 player.seekTo(st.t,true);
               }
               const s=player.getPlayerState?player.getPlayerState():-1;
-              if(st.p&&s!==1&&s!==3){guard();player.playVideo();checkPlayHealth();}
-              if(!st.p&&s===1){guard();player.pauseVideo();}
+              if(st.p){
+                if(s!==1&&s!==3){guard();try{player.playVideo();}catch(e){}checkPlayHealth();}
+              }else{
+                if(s!==2){guard();try{player.pauseVideo();}catch(e){}}
+              }
             }
             function onState(e){
               if(e.data===1||e.data===3){
                 if(playCheckTimer)clearTimeout(playCheckTimer);
                 $('errOverlay').style.display='none';
               }
-              if(Date.now()<applying)return;
               if(e.data===0){call('ended',{i:cur});return;}
               if(e.data===1||e.data===2){
                 $('errOverlay').style.display='none';
-                const t=player.getCurrentTime?player.getCurrentTime():0;
-                lastT=t;lastWall=Date.now();
-                call('event',{p:e.data===1?1:0,t:t,i:cur});
+                const isPlaying=(e.data===1);
+                const userToggled=st&&(isPlaying!==!!st.p);
+                if(userToggled||Date.now()>=applying){
+                  const t=player.getCurrentTime?player.getCurrentTime():0;
+                  lastT=t;lastWall=Date.now();
+                  if(st)st.p=isPlaying;
+                  call('event',{p:isPlaying?1:0,t:t,i:cur});
+                }
               }
             }
             setInterval(()=>{
-              if(!ready||!st||Date.now()<applying||!player.getCurrentTime)return;
+              if(!ready||!st||!player.getCurrentTime)return;
               const t=player.getCurrentTime(),now=Date.now(),ps=player.getPlayerState();
               const expect=lastT+(ps===1?(now-lastWall)/1000:0);
-              if(Math.abs(t-expect)>4.5){
+              if(Date.now()>=applying&&Math.abs(t-expect)>3.5){
                 lastT=t;lastWall=now;
                 call('event',{p:ps===1?1:0,t:t,i:cur});
-              }else{
+              }else if(Date.now()>=applying){
                 lastT=t;lastWall=now;
               }
             },1000);
@@ -824,7 +834,16 @@ public final class WatchTogether {
                 const x=document.createElement('button');
                 x.className='del';x.textContent='Xóa';
                 x.onclick=ev=>{ev.stopPropagation();call('remove',{i});};
-                d.onclick=()=>call('play',{i});
+                d.onclick=()=>{
+                  if(i===st.i){
+                    const pNow=!st.p;
+                    if(st)st.p=pNow;
+                    call('event',{p:pNow?1:0,t:player.getCurrentTime?player.getCurrentTime():0,i:cur});
+                    if(pNow){try{player.playVideo();}catch(e){}}else{try{player.pauseVideo();}catch(e){}}
+                  }else{
+                    call('play',{i});
+                  }
+                };
                 d.appendChild(x);l.appendChild(d);
               });
               updateBadges();
