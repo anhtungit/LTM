@@ -898,14 +898,17 @@ public final class VoiceAudioEngine {
                     this.currentMicRms = rms;
 
                     if (!muted) {
-                        boolean isSound = rms > 40.0; // Sensitive AC-RMS threshold so quiet speech is never gated out
+                        double speechThreshold = noiseSuppressionEnabled
+                                ? Math.max(65.0, suppressor.getNoiseFloor() * 1.7 + 25.0)
+                                : 45.0;
+                        boolean isSound = rms > speechThreshold;
                         long now = System.currentTimeMillis();
 
                         if (isSound) {
                             lastSoundTime = now;
                         }
 
-                        boolean speaking = (now - lastSoundTime) < 1000; // 1000ms hangover keeps full sentences continuous
+                        boolean speaking = (now - lastSoundTime) < 350; // 350ms hangover keeps speech continuous without trailing noise
                         boolean justStartedSpeaking = speaking && !wasSpeaking;
                         if (speaking != wasSpeaking) {
                             wasSpeaking = speaking;
@@ -1179,82 +1182,94 @@ public final class VoiceAudioEngine {
     }
 
     /**
-     * Real-time lightweight noise suppressor (spectral subtraction with Wiener filter gain & voice energy preservation).
-     * Filters out continuous stationary background noises (fans, air conditioning, AC hum, computer hum)
-     * while preserving natural human voice formant frequencies.
+     * Real-time clean voice noise suppressor & acoustic conditioner.
+     * 1. 2nd-order Butterworth High-Pass Filter (85 Hz) to eliminate laptop fan chassis rumble and 50/60 Hz hum.
+     * 2. Adaptive noise floor tracking (tracks continuous fan/ambient noise).
+     * 3. Downward expander with smooth sample-accurate envelope (suppresses background noise by ~26dB when silent, passes voice 100% untouched).
      */
     public static final class NoiseSuppressor {
-        private static final int BANDS = 16;
-        private final double[] noiseFloor = new double[BANDS];
+        // 2nd order Butterworth HPF coefficients at 85 Hz, 16 kHz sample rate (Q = 0.7071)
+        private static final double B0 = 0.976673;
+        private static final double B1 = -1.953347;
+        private static final double B2 = 0.976673;
+        private static final double A1 = -1.952802;
+        private static final double A2 = 0.953891;
+
+        private double x1 = 0, x2 = 0;
+        private double y1 = 0, y2 = 0;
+
+        private double noiseFloor = 45.0;
         private boolean initialized = false;
+        private double currentGain = 1.0;
 
         public NoiseSuppressor() {
-            java.util.Arrays.fill(noiseFloor, 45.0);
+        }
+
+        public double getNoiseFloor() {
+            return noiseFloor;
         }
 
         public byte[] process(byte[] input) {
             int samples = input.length / 2;
-            short[] inPcm = new short[samples];
+            short[] filtered = new short[samples];
+            double sumSq = 0.0;
+
+            // 1. High-Pass Filter (85 Hz cutoff) to strip fan vibration & 50/60Hz hum
             for (int i = 0; i < samples; i++) {
                 int low = input[i * 2] & 0xFF;
                 int high = input[i * 2 + 1];
-                inPcm[i] = (short) ((high << 8) | low);
+                double in = (short) ((high << 8) | low);
+
+                double out = B0 * in + B1 * x1 + B2 * x2 - A1 * y1 - A2 * y2;
+                x2 = x1;
+                x1 = in;
+                y2 = y1;
+                y1 = out;
+
+                int s = (int) Math.round(out);
+                if (s > 32767) s = 32767;
+                else if (s < -32768) s = -32768;
+                filtered[i] = (short) s;
+                sumSq += s * (double) s;
             }
 
-            // Group into 16 sub-bands across 640 samples (40 samples per sub-band)
-            int bandSize = samples / BANDS;
-            double[] bandRms = new double[BANDS];
-            for (int b = 0; b < BANDS; b++) {
-                double sumSq = 0.0;
-                int start = b * bandSize;
-                int end = (b == BANDS - 1) ? samples : start + bandSize;
-                for (int i = start; i < end; i++) {
-                    sumSq += inPcm[i] * inPcm[i];
-                }
-                bandRms[b] = Math.sqrt(sumSq / (end - start));
-            }
+            double frameRms = Math.sqrt(sumSq / samples);
 
+            // 2. Adaptive noise floor estimation
             if (!initialized) {
-                System.arraycopy(bandRms, 0, noiseFloor, 0, BANDS);
+                noiseFloor = Math.max(25.0, Math.min(300.0, frameRms));
                 initialized = true;
             } else {
-                // Track stationary background noise floor slowly during low-energy windows
-                for (int b = 0; b < BANDS; b++) {
-                    if (bandRms[b] < noiseFloor[b] * 1.5) {
-                        noiseFloor[b] = 0.95 * noiseFloor[b] + 0.05 * bandRms[b];
-                    } else {
-                        noiseFloor[b] = 0.998 * noiseFloor[b] + 0.002 * bandRms[b];
-                    }
-                    if (noiseFloor[b] < 20.0) noiseFloor[b] = 20.0;
-                }
-            }
-
-            // Calculate per-band Wiener attenuation gain
-            double[] gains = new double[BANDS];
-            for (int b = 0; b < BANDS; b++) {
-                double snr = bandRms[b] / (noiseFloor[b] + 1e-4);
-                if (snr < 1.1) {
-                    gains[b] = 0.08; // heavy suppression for background noise
-                } else if (snr < 2.0) {
-                    double t = (snr - 1.1) / 0.9;
-                    gains[b] = 0.08 + t * 0.72; // smooth knee
+                if (frameRms < noiseFloor * 1.4) {
+                    noiseFloor = 0.90 * noiseFloor + 0.10 * frameRms;
                 } else {
-                    gains[b] = 1.0; // full voice pass-through
+                    noiseFloor = 0.998 * noiseFloor + 0.002 * frameRms;
                 }
+                if (noiseFloor < 20.0) noiseFloor = 20.0;
             }
 
-            // Apply gain per band
+            // 3. Target attenuation gain based on SNR
+            double snr = frameRms / (noiseFloor + 1e-4);
+            double targetGain;
+            if (snr < 1.35) {
+                targetGain = 0.05; // -26 dB attenuation during background fan/room noise
+            } else if (snr < 2.5) {
+                double t = (snr - 1.35) / 1.15;
+                targetGain = 0.05 + t * 0.95; // smooth soft knee
+            } else {
+                targetGain = 1.0; // full natural speech pass-through
+            }
+
+            // 4. Sample-accurate gain smoothing (prevents clicks, pops, and harmonic buzz)
             byte[] output = new byte[input.length];
-            for (int b = 0; b < BANDS; b++) {
-                int start = b * bandSize;
-                int end = (b == BANDS - 1) ? samples : start + bandSize;
-                double g = gains[b];
-                for (int i = start; i < end; i++) {
-                    int val = (int) Math.round(inPcm[i] * g);
-                    val = Math.max(-32768, Math.min(32767, val));
-                    output[i * 2] = (byte) (val & 0xFF);
-                    output[i * 2 + 1] = (byte) ((val >> 8) & 0xFF);
-                }
+            double gainStep = (targetGain - currentGain) / samples;
+            for (int i = 0; i < samples; i++) {
+                currentGain += gainStep;
+                int val = (int) Math.round(filtered[i] * currentGain);
+                if (val > 32767) val = 32767;
+                else if (val < -32768) val = -32768;
+                output[i * 2] = (byte) (val & 0xFF);
+                output[i * 2 + 1] = (byte) ((val >> 8) & 0xFF);
             }
             return output;
         }

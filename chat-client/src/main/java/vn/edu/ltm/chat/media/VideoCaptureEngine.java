@@ -54,21 +54,6 @@ public final class VideoCaptureEngine {
         List<CameraDevice> list = new ArrayList<>();
         list.add(new CameraDevice("default", "Mặc định hệ thống"));
 
-        try {
-            List<Webcam> webcams = Webcam.getWebcams();
-            if (webcams != null && !webcams.isEmpty()) {
-                Set<String> seen = new LinkedHashSet<>();
-                for (Webcam w : webcams) {
-                    String name = w.getName();
-                    if (name != null && seen.add(name)) {
-                        list.add(new CameraDevice(name, name));
-                    }
-                }
-                return list;
-            }
-        } catch (Throwable ignored) {
-        }
-
         String os = System.getProperty("os.name", "").toLowerCase();
         if (os.contains("linux")) {
             File sysClass = new File("/sys/class/video4linux");
@@ -105,6 +90,22 @@ public final class VideoCaptureEngine {
                     }
                 }
             }
+            return list;
+        }
+
+        try {
+            List<Webcam> webcams = Webcam.getWebcams();
+            if (webcams != null && !webcams.isEmpty()) {
+                Set<String> seen = new LinkedHashSet<>();
+                for (Webcam w : webcams) {
+                    String name = w.getName();
+                    if (name != null && seen.add(name)) {
+                        list.add(new CameraDevice(name, name));
+                    }
+                }
+                return list;
+            }
+        } catch (Throwable ignored) {
         }
         return list;
     }
@@ -166,17 +167,25 @@ public final class VideoCaptureEngine {
     }
 
     private void captureLoop(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
-        // 1. Try native webcam capture via Sarxos (direct DirectShow/V4L2 native bridge, zero external deps)
-        if (captureViaSarxos(onJpegFrame, onLocalPreview)) {
-            return;
+        String os = System.getProperty("os.name", "").toLowerCase();
+        boolean isLinux = os.contains("linux");
+
+        if (isLinux) {
+            // On Linux, use FFmpeg direct V4L2 capture (avoids BridJ native hangs & /dev/video lock issues)
+            if (captureViaFfmpeg(onJpegFrame, onLocalPreview)) {
+                return;
+            }
+        } else {
+            // On Windows / macOS, use native Sarxos (DirectShow)
+            if (captureViaSarxos(onJpegFrame, onLocalPreview)) {
+                return;
+            }
+            if (captureViaFfmpeg(onJpegFrame, onLocalPreview)) {
+                return;
+            }
         }
 
-        // 2. Fallback to FFmpeg if available
-        if (captureViaFfmpeg(onJpegFrame, onLocalPreview)) {
-            return;
-        }
-
-        // 3. Fallback when 2nd client runs on same machine (/dev/video0 busy) or no hardware webcam
+        // Fallback when camera device is busy or when 2nd client runs on same machine
         if (running) {
             fallbackLoop(onJpegFrame, onLocalPreview);
         }
@@ -277,7 +286,7 @@ public final class VideoCaptureEngine {
                                 capturedAnyHardwareFrame = true;
                                 publishSharedFrame(jpeg);
                                 dispatchFrame(jpeg, onJpegFrame, onLocalPreview);
-                            } else if (frameBuf.size() > 60000) {
+                            } else if (frameBuf.size() > 500_000) {
                                 inFrame = false;
                                 frameBuf.reset();
                             }
@@ -402,9 +411,9 @@ public final class VideoCaptureEngine {
                 if (dev == null) return null;
                 return new ProcessBuilder(
                         "ffmpeg", "-nostdin", "-loglevel", "quiet",
-                        "-f", "v4l2", "-input_format", "mjpeg", "-video_size", WIDTH + "x" + HEIGHT, "-i", dev,
+                        "-f", "v4l2", "-video_size", WIDTH + "x" + HEIGHT, "-i", dev,
                         "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT + ",hflip",
-                        "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "8", "-"
+                        "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-"
                 ).redirectErrorStream(false).start();
             }
         } catch (Exception ignored) {
