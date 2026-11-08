@@ -66,7 +66,6 @@ public final class MeetRoomPanel extends JPanel {
     private final JPanel watchStageContainer = new JPanel(new BorderLayout());
     private final JPanel watchStrip = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 8));
     private final JPanel callBody = new JPanel(new BorderLayout());
-    private final JPanel chatDrawerHost = new JPanel(new BorderLayout());
     private JButton micBtn;
     private JButton camBtn;
     private JButton shareBtn;
@@ -101,13 +100,7 @@ public final class MeetRoomPanel extends JPanel {
         callBody.add(centerHost, BorderLayout.CENTER);
         callBody.add(buildBottomControls(), BorderLayout.SOUTH);
 
-        chatDrawerHost.setOpaque(true);
-        chatDrawerHost.setBackground(DiscordTheme.TRANSCRIPT);
-        chatDrawerHost.setVisible(false);
-        chatDrawerHost.setBorder(BorderFactory.createMatteBorder(2, 0, 0, 0, DiscordTheme.HAIRLINE));
-
         add(callBody, BorderLayout.CENTER);
-        add(chatDrawerHost, BorderLayout.SOUTH);
     }
 
     public void setOnMuteToggle(Consumer<Boolean> onMuteToggle) {
@@ -155,38 +148,6 @@ public final class MeetRoomPanel extends JPanel {
 
     public void setOnOpenChat(Runnable onOpenChat) {
         this.onOpenChat = onOpenChat;
-    }
-
-    public boolean isChatDrawerOpen() {
-        return chatDrawerHost.isVisible() && chatDrawerHost.getComponentCount() > 0;
-    }
-
-    public void openChatDrawer(JComponent chatComponent) {
-        chatDrawerHost.removeAll();
-        int h = Math.max(240, getHeight() > 0 ? (getHeight() * 44 / 100) : 280);
-        chatDrawerHost.setPreferredSize(new Dimension(0, h));
-        chatComponent.setVisible(true);
-        chatDrawerHost.add(chatComponent, BorderLayout.CENTER);
-        chatDrawerHost.setVisible(true);
-        if (chatBtn != null) {
-            chatBtn.setText("Ẩn đoạn chat");
-            chatBtn.setBackground(DiscordTheme.ACCENT);
-        }
-        chatDrawerHost.revalidate();
-        chatDrawerHost.repaint();
-        revalidate();
-        repaint();
-    }
-
-    public void closeChatDrawer() {
-        chatDrawerHost.removeAll();
-        chatDrawerHost.setVisible(false);
-        if (chatBtn != null) {
-            chatBtn.setText("Mở đoạn chat");
-            chatBtn.setBackground(new Color(0x2B, 0x2D, 0x31));
-        }
-        revalidate();
-        repaint();
     }
 
     public void startSession(String roomTitle, String selfId, String selfInitials, String selfName, boolean micReady) {
@@ -564,7 +525,7 @@ public final class MeetRoomPanel extends JPanel {
         ));
         chatBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         chatBtn.setFocusPainted(false);
-        chatBtn.setToolTipText("Bật/Tắt khung tin nhắn văn bản ngay bên dưới cuộc gọi (giống Discord)");
+        chatBtn.setToolTipText("Mở khung chat (có thanh màu xanh quay lại cuộc gọi bất cứ lúc nào)");
         chatBtn.addActionListener(e -> {
             if (onOpenChat != null) {
                 onOpenChat.run();

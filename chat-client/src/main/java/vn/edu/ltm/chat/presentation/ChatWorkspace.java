@@ -263,7 +263,7 @@ public final class ChatWorkspace extends JPanel {
             }
         });
         this.meetRoomPanel.setOnOpenVoiceSettings(this::openVoiceSettingsDialog);
-        this.meetRoomPanel.setOnOpenChat(this::toggleInCallChat);
+        this.meetRoomPanel.setOnOpenChat(this::showChatView);
         this.meetRoomPanel.setOnWatchTogether(this::openWatchTogether);
         this.meetRoomPanel.setOnStartScreenShare(() -> startScreenShare(ScreenCaptureEngine.SOURCE_SCREEN, false));
         this.meetRoomPanel.setOnStartScreenShareConfig(this::startScreenShare);
@@ -373,53 +373,14 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void showChatView() {
-        restoreChatAreaToHost();
-        chatArea.setVisible(true);
+        String activeCid = call.conversationId();
+        if (activeCid != null && (selectedConversationId == null || !selectedConversationId.equals(activeCid))) {
+            conversations.stream()
+                    .filter(c -> c.id().equals(activeCid))
+                    .findFirst()
+                    .ifPresent(this::selectConversation);
+        }
         centerLayout.show(centerHost, "chat");
-        chatArea.revalidate();
-        chatArea.repaint();
-    }
-
-    private void toggleInCallChat() {
-        if (meetRoomPanel.isChatDrawerOpen()) {
-            restoreChatAreaToHost();
-        } else {
-            String activeCid = call.conversationId();
-            if (activeCid != null && (selectedConversationId == null || !selectedConversationId.equals(activeCid))) {
-                conversations.stream()
-                        .filter(c -> c.id().equals(activeCid))
-                        .findFirst()
-                        .ifPresent(this::selectConversation);
-            }
-            headerPanel.setVisible(false);
-            infoPane.setVisible(false);
-            chatArea.setVisible(true);
-            meetRoomPanel.openChatDrawer(chatArea);
-            rebuildTranscript();
-            SwingUtilities.invokeLater(() -> {
-                chatArea.revalidate();
-                chatArea.repaint();
-                scrollTranscriptToEnd();
-            });
-        }
-    }
-
-    private void restoreChatAreaToHost() {
-        if (meetRoomPanel.isChatDrawerOpen()) {
-            meetRoomPanel.closeChatDrawer();
-        }
-        headerPanel.setVisible(true);
-        if (!userManuallyToggledPane) {
-            infoPane.setVisible(chatArea.getWidth() >= 360);
-        }
-        if (chatArea.getParent() != centerHost) {
-            centerHost.add(chatArea, "chat");
-            if (call.isActive()) {
-                chatArea.setVisible(false);
-            }
-        }
-        centerHost.revalidate();
-        centerHost.repaint();
     }
 
     private void showMeetLobby() {
@@ -1029,8 +990,10 @@ public final class ChatWorkspace extends JPanel {
                     .ifPresent(this::selectConversation);
             call.begin(ev.conversationId(), ev.channel(), selectedChannel);
             meetLobbyPanel.stopLobbyPreview();
+            String roomTitle = "Cuộc gọi với " + ev.senderName();
             boolean initialCamOn = isVideoCall || meetLobbyPanel.isCamEnabled();
-            boolean initialMuted = startCallMedia("Cuộc gọi với " + ev.senderName(), initialCamOn);
+            boolean initialMuted = startCallMedia(roomTitle, initialCamOn);
+            meetRoomPanel.startSession(roomTitle, user.id(), user.initials(), user.displayName(), voiceEngine.isMicAvailable(), initialMuted, initialCamOn);
             meetRoomPanel.addOrUpdateParticipant(ev.senderId(), null, ev.senderName(), "", false);
             if (initialCamOn) {
                 startLocalCamera();
@@ -1699,13 +1662,6 @@ public final class ChatWorkspace extends JPanel {
         chatArea.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
             public void componentResized(java.awt.event.ComponentEvent e) {
-                if (meetRoomPanel.isChatDrawerOpen()) {
-                    if (infoPane.isVisible()) {
-                        infoPane.setVisible(false);
-                        chatArea.revalidate();
-                    }
-                    return;
-                }
                 int w = chatArea.getWidth();
                 if (!userManuallyToggledPane) {
                     boolean shouldShow = w >= 360;
