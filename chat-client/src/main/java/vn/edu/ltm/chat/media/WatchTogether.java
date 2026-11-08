@@ -196,6 +196,12 @@ public final class WatchTogether {
     public synchronized void openBrowser() {
         String url = ensureServerRunning();
         if (url == null) return;
+        openExternalUrl(url);
+    }
+
+    /** Mở một đường dẫn URL bất kỳ bằng trình duyệt mặc định của hệ thống. */
+    public synchronized void openExternalUrl(String url) {
+        if (url == null || url.isBlank()) return;
         try {
             URI uri = URI.create(url);
             try {
@@ -284,6 +290,10 @@ public final class WatchTogether {
             case "search" -> out = searchJson(q.get("q"), parseInt(q.get("page"), 1));
             case "browser" -> {
                 openBrowser();
+                out = "{\"status\":\"ok\"}";
+            }
+            case "openUrl" -> {
+                openExternalUrl(q.get("url"));
                 out = "{\"status\":\"ok\"}";
             }
             case "event" -> localEvent("1".equals(q.get("p")), parseDouble(q.get("t")), parseInt(q.get("i"), -2));
@@ -668,8 +678,11 @@ public final class WatchTogether {
                   <div id="errOverlay" style="display:none;position:absolute;inset:0;background:rgba(17,18,20,0.94);flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;z-index:20;">
                     <div style="font-size:32px;">⚠️</div>
                     <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Video bị giới hạn bản quyền hoặc không hỗ trợ nhúng</div>
-                    <div style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">YouTube hoặc hệ điều hành hạn chế phát video này bên trong ứng dụng. Mở ngay bằng Trình duyệt để xem chất lượng cao và vẫn đồng bộ cùng phòng.</div>
-                    <button id="errBrowserBtn" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 18px;font-weight:600;font-size:13px;cursor:pointer;margin-top:6px;">🌐 Mở bằng Trình duyệt để xem &amp; đồng bộ</button>
+                    <div style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">Chủ sở hữu hoặc YouTube không cho phép phát video này trên trình phát nhúng. Bạn có thể mở xem cùng nhau trên Trình duyệt hoặc mở trực tiếp trên YouTube.</div>
+                    <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center;">
+                      <button id="errBrowserBtn" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🌐 Xem cùng nhau trên Trình duyệt</button>
+                      <button id="errDirectBtn" style="background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🔗 Mở trên YouTube</button>
+                    </div>
                   </div>
                 </div>
                 <div id="playlistSection">
@@ -846,6 +859,11 @@ public final class WatchTogether {
             $('qBtn').onclick=()=>doSearch($('qInput').value);
             $('everyone').onclick=()=>call('everyone');
             $('errBrowserBtn').onclick=()=>call('browser');
+            $('errDirectBtn').onclick=()=>{
+              if(cur>=0&&st&&st.q&&st.q[cur]){
+                call('openUrl',{url:'https://www.youtube.com/watch?v='+st.q[cur]});
+              }
+            };
             $('expandBtn').onclick=()=>{expanded=true;render();};
             $('collapseBtn').onclick=()=>{expanded=false;render();};
             doSearch('');
