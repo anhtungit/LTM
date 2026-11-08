@@ -322,14 +322,16 @@ public final class VideoCaptureEngine {
     }
 
     private void fallbackLoop(Consumer<byte[]> onJpegFrame, Consumer<BufferedImage> onLocalPreview) {
-        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("HH:mm:ss");
-        int tick = 0;
+        String os = System.getProperty("os.name", "").toLowerCase();
+        boolean isLinux = os.contains("linux");
+        long lastHardwareRetry = System.currentTimeMillis();
+
         while (running) {
             try {
                 // 1. If another local client instance is actively writing /tmp/ltm_shared_webcam.jpg, mirror it
                 if (Files.isRegularFile(SHARED_FRAME_PATH)) {
                     long ageMs = System.currentTimeMillis() - Files.getLastModifiedTime(SHARED_FRAME_PATH).toMillis();
-                    if (ageMs >= 0 && ageMs < 2000) {
+                    if (ageMs >= 0 && ageMs < 1500) {
                         byte[] sharedJpeg = Files.readAllBytes(SHARED_FRAME_PATH);
                         if (sharedJpeg.length > 100) {
                             dispatchFrame(sharedJpeg, onJpegFrame, onLocalPreview);
@@ -339,37 +341,35 @@ public final class VideoCaptureEngine {
                     }
                 }
 
-                // 2. Synthetic camera preview card when no physical camera is available
+                // 2. If shared frame stopped, attempt to take over hardware camera
+                long now = System.currentTimeMillis();
+                if (now - lastHardwareRetry > 1200) {
+                    lastHardwareRetry = now;
+                    boolean acquired = isLinux ? captureViaFfmpeg(onJpegFrame, onLocalPreview) : captureViaSarxos(onJpegFrame, onLocalPreview);
+                    if (acquired) {
+                        return; // Seamlessly transitioned to real hardware camera
+                    }
+                }
+
+                // 3. Waiting / standby screen (clean Discord-style dark backdrop)
                 BufferedImage img = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
                 Graphics2D g = img.createGraphics();
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g.setPaint(new GradientPaint(0, 0, new Color(0x1E, 0x22, 0x2D), WIDTH, HEIGHT, new Color(0x2B, 0x31, 0x42)));
+                g.setColor(new Color(0x1E, 0x1F, 0x23));
                 g.fillRect(0, 0, WIDTH, HEIGHT);
-
-                int pulse = (int) (Math.sin(tick * 0.35) * 16);
-                g.setColor(new Color(0x58, 0x65, 0xF2));
-                g.fillOval(WIDTH / 2 - 72 - pulse / 2, HEIGHT / 2 - 96 - pulse / 2, 144 + pulse, 144 + pulse);
-
-                g.setColor(Color.WHITE);
-                g.setFont(new Font("SansSerif", Font.BOLD, 26));
-                g.drawString("LTM HD 720p LIVE CAMERA", WIDTH / 2 - 180, HEIGHT / 2 + 80);
-                g.setFont(new Font("Monospaced", Font.PLAIN, 18));
-                g.setColor(new Color(0x57, 0xF2, 0x87));
-                g.drawString("● REC 30FPS " + LocalTime.now().format(fmt), WIDTH / 2 - 120, HEIGHT / 2 + 115);
+                g.setColor(new Color(0x94, 0x9B, 0xA4));
+                g.setFont(new Font("SansSerif", Font.PLAIN, 20));
+                String msg = "Đang kết nối camera...";
+                java.awt.FontMetrics fm = g.getFontMetrics();
+                g.drawString(msg, (WIDTH - fm.stringWidth(msg)) / 2, HEIGHT / 2);
                 g.dispose();
 
-                ByteArrayOutputStream baos = new ByteArrayOutputStream(32768);
-                ImageIO.write(img, "jpg", baos);
+                byte[] jpeg = encodeToJpeg(img);
                 if (!running) break;
-                byte[] jpeg = baos.toByteArray();
-                if (onLocalPreview != null) {
-                    onLocalPreview.accept(img);
+                if (jpeg != null) {
+                    dispatchFrame(jpeg, onJpegFrame, onLocalPreview);
                 }
-                if (onJpegFrame != null) {
-                    onJpegFrame.accept(jpeg);
-                }
-                tick++;
-                Thread.sleep(FRAME_INTERVAL_MS);
+                Thread.sleep(250);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -412,7 +412,7 @@ public final class VideoCaptureEngine {
                 return new ProcessBuilder(
                         "ffmpeg", "-nostdin", "-loglevel", "quiet",
                         "-f", "v4l2", "-video_size", WIDTH + "x" + HEIGHT, "-i", dev,
-                        "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT + ",hflip",
+                        "-vf", "fps=" + FPS + ",scale=" + WIDTH + ":" + HEIGHT,
                         "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "6", "-"
                 ).redirectErrorStream(false).start();
             }

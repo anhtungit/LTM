@@ -41,11 +41,12 @@ public final class VoiceAudioEngine {
         }
     }
 
+    private static final java.util.prefs.Preferences PREFS = java.util.prefs.Preferences.userNodeForPackage(VoiceAudioEngine.class);
     private static volatile String selectedMicId = "default";
     private static volatile String selectedSpeakerId = "default";
     private volatile Consumer<byte[]> micLoopbackConsumer;
-    private static volatile boolean noiseSuppressionEnabled = true;
-    private static volatile double micVolume = 1.0;
+    private static volatile boolean noiseSuppressionEnabled = PREFS.getBoolean("noise_suppression", true);
+    private static volatile double micVolume = PREFS.getDouble("mic_volume", 1.0);
 
     public static double getMicVolume() {
         return micVolume;
@@ -53,6 +54,10 @@ public final class VoiceAudioEngine {
 
     public static void setMicVolume(double volume) {
         micVolume = Math.max(0.0, Math.min(1.5, volume));
+        try {
+            PREFS.putDouble("mic_volume", micVolume);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static void applyGain(byte[] pcmData, int length, double gain) {
@@ -88,6 +93,10 @@ public final class VoiceAudioEngine {
 
     public static void setNoiseSuppressionEnabled(boolean enabled) {
         noiseSuppressionEnabled = enabled;
+        try {
+            PREFS.putBoolean("noise_suppression", enabled);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static List<AudioDevice> getAvailableInputDevices() {
@@ -882,8 +891,8 @@ public final class VoiceAudioEngine {
                 }
                 if (read > 0) {
                     byte[] processed = buffer;
-                    if (noiseSuppressionEnabled && read == CHUNK_BYTES) {
-                        processed = suppressor.process(buffer);
+                    if (read == CHUNK_BYTES) {
+                        processed = noiseSuppressionEnabled ? suppressor.process(buffer) : suppressor.filterOnly(buffer);
                     }
                     if (micVolume != 1.0) {
                         applyGain(processed, read, micVolume);
@@ -1207,6 +1216,29 @@ public final class VoiceAudioEngine {
 
         public double getNoiseFloor() {
             return noiseFloor;
+        }
+
+        public byte[] filterOnly(byte[] input) {
+            int samples = input.length / 2;
+            byte[] output = new byte[input.length];
+            for (int i = 0; i < samples; i++) {
+                int low = input[i * 2] & 0xFF;
+                int high = input[i * 2 + 1];
+                double in = (short) ((high << 8) | low);
+
+                double out = B0 * in + B1 * x1 + B2 * x2 - A1 * y1 - A2 * y2;
+                x2 = x1;
+                x1 = in;
+                y2 = y1;
+                y1 = out;
+
+                int s = (int) Math.round(out);
+                if (s > 32767) s = 32767;
+                else if (s < -32768) s = -32768;
+                output[i * 2] = (byte) (s & 0xFF);
+                output[i * 2 + 1] = (byte) ((s >> 8) & 0xFF);
+            }
+            return output;
         }
 
         public byte[] process(byte[] input) {

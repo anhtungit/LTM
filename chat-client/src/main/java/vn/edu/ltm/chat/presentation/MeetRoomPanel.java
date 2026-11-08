@@ -659,7 +659,12 @@ public final class MeetRoomPanel extends JPanel {
                     int dh = (int) Math.round(frame.getHeight() * scale);
                     int dx = (w - dw) / 2;
                     int dy = (h - dh) / 2;
-                    g2.drawImage(frame, dx, dy, dw, dh, null);
+                    boolean mirrorSelfCam = id.equals(selfParticipantId) && !isScreen;
+                    if (mirrorSelfCam) {
+                        g2.drawImage(frame, dx + dw, dy, -dw, dh, null);
+                    } else {
+                        g2.drawImage(frame, dx, dy, dw, dh, null);
+                    }
                     g2.dispose();
                 }
             }
