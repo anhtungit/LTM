@@ -139,7 +139,7 @@ public final class WatchTogether {
             String os = System.getProperty("os.name", "").toLowerCase();
             if (os.contains("linux")) {
                 if (System.getProperty("prism.order") == null) {
-                    System.setProperty("prism.order", "sw,es2");
+                    System.setProperty("prism.order", "es2,sw");
                 }
             }
             javafx.application.Platform.setImplicitExit(false);
@@ -633,20 +633,30 @@ public final class WatchTogether {
             </div>
             <script src="https://www.youtube.com/iframe_api"></script>
             <script>
-            let player=null,ready=false,st=null,seq=0,cur=-1,applying=0,lastT=0,lastWall=Date.now(),expanded=false,results=[];
+            let player=null,ready=false,st=null,seq=0,cur=-1,applying=0,lastT=0,lastWall=Date.now(),expanded=false,results=[],lastGridKey='';
             const $=id=>document.getElementById(id);
             const call=(p,q)=>fetch(p+(q?'?'+new URLSearchParams(q):'')).then(r=>r.json()).catch(()=>null);
             function onYouTubeIframeAPIReady(){
               player=new YT.Player('player',{width:'100%',height:'100%',playerVars:{playsinline:1,rel:0,modestbranding:1},
                 events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:()=>{if(st&&st.q.length>1)call('ended',{i:cur});}}});
             }
-            function guard(){applying=Date.now()+1500;}
+            function guard(){applying=Date.now()+4000;}
             function apply(){
               if(!ready||!st)return;
               if(st.i<0||st.i>=st.q.length){try{player.pauseVideo();}catch(e){}return;}
-              if(cur!==st.i){cur=st.i;guard();player.loadVideoById(st.q[cur],st.t);if(!st.p)setTimeout(()=>player.pauseVideo(),400);return;}
+              if(cur!==st.i){
+                cur=st.i;guard();
+                lastT=st.t;lastWall=Date.now();
+                player.loadVideoById(st.q[cur],st.t);
+                if(!st.p)setTimeout(()=>{try{player.pauseVideo();}catch(e){}},500);
+                return;
+              }
               const t=player.getCurrentTime?player.getCurrentTime():0;
-              if(Math.abs(t-st.t)>2.2){guard();player.seekTo(st.t,true);}
+              if(Math.abs(t-st.t)>4.5){
+                guard();
+                lastT=st.t;lastWall=Date.now();
+                player.seekTo(st.t,true);
+              }
               const s=player.getPlayerState?player.getPlayerState():-1;
               if(st.p&&s!==1&&s!==3){guard();player.playVideo();}
               if(!st.p&&s===1){guard();player.pauseVideo();}
@@ -654,14 +664,22 @@ public final class WatchTogether {
             function onState(e){
               if(Date.now()<applying)return;
               if(e.data===0){call('ended',{i:cur});return;}
-              if(e.data===1||e.data===2)call('event',{p:e.data===1?1:0,t:player.getCurrentTime(),i:cur});
+              if(e.data===1||e.data===2){
+                const t=player.getCurrentTime?player.getCurrentTime():0;
+                lastT=t;lastWall=Date.now();
+                call('event',{p:e.data===1?1:0,t:t,i:cur});
+              }
             }
             setInterval(()=>{
               if(!ready||!st||Date.now()<applying||!player.getCurrentTime)return;
               const t=player.getCurrentTime(),now=Date.now(),ps=player.getPlayerState();
               const expect=lastT+(ps===1?(now-lastWall)/1000:0);
-              if(Math.abs(t-expect)>2.2)call('event',{p:ps===1?1:0,t:t,i:cur});
-              lastT=t;lastWall=now;
+              if(Math.abs(t-expect)>4.5){
+                lastT=t;lastWall=now;
+                call('event',{p:ps===1?1:0,t:t,i:cur});
+              }else{
+                lastT=t;lastWall=now;
+              }
             },1000);
             function render(){
               if(!st)return;
@@ -687,8 +705,12 @@ public final class WatchTogether {
               renderGrid();
             }
             function renderGrid(){
-              const g=$('grid');g.innerHTML='';
+              const g=$('grid');
               const qSet=new Set(st&&st.q?st.q:[]);
+              const key=results.map(v=>v.id).join(',')+'|'+(st&&st.q?st.q.join(','):'');
+              if(key===lastGridKey)return;
+              lastGridKey=key;
+              g.innerHTML='';
               results.forEach(v=>{
                 const inQ=qSet.has(v.id);
                 const c=document.createElement('div');c.className='card';
@@ -711,7 +733,7 @@ public final class WatchTogether {
               }
               $('gridTitle').textContent=val?('🔎 Kết quả cho: "'+val+'"'):'🔥 Video Thịnh hành & Đề xuất';
               const r=await call('search',{q:val});
-              if(Array.isArray(r)){results=r;renderGrid();}
+              if(Array.isArray(r)){results=r;lastGridKey='';renderGrid();}
             }
             $('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value);});
             $('qBtn').onclick=()=>doSearch($('qInput').value);

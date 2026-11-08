@@ -101,7 +101,8 @@ public final class MeetRoomPanel extends JPanel {
         callBody.add(centerHost, BorderLayout.CENTER);
         callBody.add(buildBottomControls(), BorderLayout.SOUTH);
 
-        chatDrawerHost.setOpaque(false);
+        chatDrawerHost.setOpaque(true);
+        chatDrawerHost.setBackground(DiscordTheme.TRANSCRIPT);
         chatDrawerHost.setVisible(false);
         chatDrawerHost.setBorder(BorderFactory.createMatteBorder(2, 0, 0, 0, DiscordTheme.HAIRLINE));
 
@@ -164,12 +165,15 @@ public final class MeetRoomPanel extends JPanel {
         chatDrawerHost.removeAll();
         int h = Math.max(240, getHeight() > 0 ? (getHeight() * 44 / 100) : 280);
         chatDrawerHost.setPreferredSize(new Dimension(0, h));
+        chatComponent.setVisible(true);
         chatDrawerHost.add(chatComponent, BorderLayout.CENTER);
         chatDrawerHost.setVisible(true);
         if (chatBtn != null) {
             chatBtn.setText("Ẩn đoạn chat");
             chatBtn.setBackground(DiscordTheme.ACCENT);
         }
+        chatDrawerHost.revalidate();
+        chatDrawerHost.repaint();
         revalidate();
         repaint();
     }
