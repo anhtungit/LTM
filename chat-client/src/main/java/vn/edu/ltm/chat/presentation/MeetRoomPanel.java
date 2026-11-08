@@ -879,18 +879,18 @@ public final class MeetRoomPanel extends JPanel {
         JFrame parent = (JFrame) SwingUtilities.getWindowAncestor(this);
         JDialog dialog = new JDialog(parent, "Chia sẻ màn hình", true);
         dialog.setUndecorated(true);
-        dialog.setBackground(new Color(0, 0, 0, 0));
+        dialog.setBackground(DiscordTheme.SIDEBAR);
 
         final int[] selectedSource = {1}; // 1 = Toàn màn hình, 2 = Cửa sổ ứng dụng
         final boolean[] hdQuality = {false};
 
-        RoundedPanel p = new RoundedPanel(12);
+        JPanel p = new JPanel(new BorderLayout(0, 16));
+        p.setOpaque(true);
         p.setBackground(DiscordTheme.SIDEBAR);
         p.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0x3B, 0x3D, 0x44), 1),
                 BorderFactory.createEmptyBorder(20, 22, 18, 22)
         ));
-        p.setLayout(new BorderLayout(0, 16));
 
         JLabel title = new JLabel("Chia sẻ màn hình, cửa sổ hoặc ứng dụng", JLabel.CENTER);
         title.setFont(DiscordTheme.bold(16f));
@@ -898,10 +898,11 @@ public final class MeetRoomPanel extends JPanel {
         p.add(title, BorderLayout.NORTH);
 
         JPanel sources = new JPanel(new GridLayout(1, 2, 14, 0));
-        sources.setOpaque(false);
+        sources.setOpaque(true);
+        sources.setBackground(DiscordTheme.SIDEBAR);
 
-        RoundedPanel screenOpt = buildSourceOption("Chia sẻ toàn màn hình", "Hiển thị toàn bộ màn hình máy tính");
-        RoundedPanel windowOpt = buildSourceOption("Chia sẻ cửa sổ", "Chọn một ứng dụng hoặc trò chơi đang mở");
+        JPanel screenOpt = buildSourceOption("Chia sẻ toàn màn hình", "Hiển thị toàn bộ màn hình máy tính");
+        JPanel windowOpt = buildSourceOption("Chia sẻ cửa sổ", "Chọn một ứng dụng hoặc trò chơi đang mở");
 
         Runnable updateSelection = () -> {
             styleSourceCard(screenOpt, selectedSource[0] == 1);
@@ -943,7 +944,8 @@ public final class MeetRoomPanel extends JPanel {
         p.add(sources, BorderLayout.CENTER);
 
         JPanel bottomBar = new JPanel(new BorderLayout());
-        bottomBar.setOpaque(false);
+        bottomBar.setOpaque(true);
+        bottomBar.setBackground(DiscordTheme.SIDEBAR);
 
         JButton qualityBtn = new JButton("Chất lượng: 720p · 30 FPS");
         qualityBtn.setFont(DiscordTheme.semibold(11f));
@@ -961,7 +963,8 @@ public final class MeetRoomPanel extends JPanel {
         bottomBar.add(qualityBtn, BorderLayout.WEST);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        actions.setOpaque(false);
+        actions.setOpaque(true);
+        actions.setBackground(DiscordTheme.SIDEBAR);
         JButton cancel = new JButton("Hủy");
         cancel.setFont(DiscordTheme.semibold(12f));
         cancel.setForeground(DiscordTheme.TEXT_SECONDARY);
@@ -988,7 +991,7 @@ public final class MeetRoomPanel extends JPanel {
         dialog.setVisible(true);
     }
 
-    private void styleSourceCard(RoundedPanel card, boolean selected) {
+    private void styleSourceCard(JPanel card, boolean selected) {
         card.setBackground(selected ? new Color(0x35, 0x37, 0x3C) : new Color(0x2B, 0x2D, 0x31));
         card.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(selected ? DiscordTheme.ACCENT : new Color(0x3B, 0x3D, 0x44), selected ? 2 : 1),
@@ -997,8 +1000,10 @@ public final class MeetRoomPanel extends JPanel {
         card.repaint();
     }
 
-    private RoundedPanel buildSourceOption(String name, String sub) {
-        RoundedPanel opt = new RoundedPanel(8);
+    private JPanel buildSourceOption(String name, String sub) {
+        JPanel opt = new JPanel();
+        opt.setOpaque(true);
+        opt.setBackground(new Color(0x2B, 0x2D, 0x31));
         opt.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         opt.setLayout(new BoxLayout(opt, BoxLayout.Y_AXIS));
 
