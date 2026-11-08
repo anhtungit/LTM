@@ -551,9 +551,15 @@ public final class ChatWorkspace extends JPanel {
         return watchTogether;
     }
 
+    private volatile long userManuallyStoppedWatchAt = 0L;
+
     private void openWatchTogether() {
         WatchTogether w = watchSession();
         if (w == null) return;
+        if (meetRoomPanel.isWatchingTogether()) {
+            w.openBrowser();
+            return;
+        }
         if (!w.isActive()) {
             w.startSession();
             w.requestState();
@@ -561,12 +567,15 @@ public final class ChatWorkspace extends JPanel {
         javax.swing.JComponent playerComp = w.createInAppPlayerComponent();
         if (playerComp != null) {
             meetRoomPanel.showWatchTogetherStage(playerComp, () -> {
+                userManuallyStoppedWatchAt = System.currentTimeMillis();
                 w.stop();
                 String cid = call.conversationId();
                 String chan = call.channel();
                 if (cid != null) {
                     chatService.sendCallSignal(cid, chan, WatchTogether.ACTION_STOP, "");
                 }
+            }, () -> {
+                w.openBrowser();
             });
         } else {
             w.openBrowser();
@@ -580,10 +589,14 @@ public final class ChatWorkspace extends JPanel {
         switch (action) {
             case WatchTogether.ACTION_REQ -> w.onRequest();
             case WatchTogether.ACTION_STOP -> {
+                userManuallyStoppedWatchAt = System.currentTimeMillis();
                 w.onRemoteStop();
                 SwingUtilities.invokeLater(meetRoomPanel::hideWatchTogetherStage);
             }
             case WatchTogether.ACTION_STATE -> {
+                if (System.currentTimeMillis() - userManuallyStoppedWatchAt < 3000L) {
+                    return;
+                }
                 if (w.onRemoteState(ev.senderId(), ev.data())) {
                     SwingUtilities.invokeLater(() -> {
                         if (inActiveCall(ev) && !meetRoomPanel.isWatchingTogether()) {

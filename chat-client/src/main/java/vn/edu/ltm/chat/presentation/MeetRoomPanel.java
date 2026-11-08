@@ -221,6 +221,7 @@ public final class MeetRoomPanel extends JPanel {
                 : (this.micMuted ? "Đã tắt mic" : "");
         String selfDisplayName = (selfName != null && selfName.endsWith("(Bạn)")) ? selfName : (selfName + " (Bạn)");
         participants.put(selfId, new ParticipantEntry(selfId, selfInitials, selfDisplayName, micSub, false));
+        hideWatchTogetherStage();
         rebuildGrid();
         updateHeaderStatus();
         callTimer.restart();
@@ -366,6 +367,10 @@ public final class MeetRoomPanel extends JPanel {
     }
 
     public void showWatchTogetherStage(JComponent playerComponent, Runnable onStop) {
+        showWatchTogetherStage(playerComponent, onStop, null);
+    }
+
+    public void showWatchTogetherStage(JComponent playerComponent, Runnable onStop, Runnable onOpenBrowser) {
         watchStageContainer.removeAll();
 
         JPanel topBar = new JPanel(new BorderLayout());
@@ -389,6 +394,17 @@ public final class MeetRoomPanel extends JPanel {
 
         JPanel rightBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         rightBtns.setOpaque(false);
+
+        if (onOpenBrowser != null) {
+            JButton openBrowserBtn = new JButton("Mở trình duyệt", IconFactory.phosphor("compass.svg", 14, Color.WHITE));
+            openBrowserBtn.setFont(DiscordTheme.semibold(12f));
+            openBrowserBtn.setForeground(DiscordTheme.TEXT_PRIMARY);
+            openBrowserBtn.setBackground(new Color(0x2B, 0x2D, 0x31));
+            openBrowserBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            openBrowserBtn.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
+            openBrowserBtn.addActionListener(e -> onOpenBrowser.run());
+            rightBtns.add(openBrowserBtn);
+        }
 
         JButton toggleMembersBtn = new JButton("Ẩn thành viên");
         toggleMembersBtn.setFont(DiscordTheme.semibold(12f));

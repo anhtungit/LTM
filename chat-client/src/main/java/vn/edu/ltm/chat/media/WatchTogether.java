@@ -136,7 +136,18 @@ public final class WatchTogether {
         String url = ensureServerRunning();
         if (url == null) return null;
         try {
+            String os = System.getProperty("os.name", "").toLowerCase();
+            if (os.contains("linux")) {
+                if (System.getProperty("prism.order") == null) {
+                    System.setProperty("prism.order", "sw,es2");
+                }
+            }
+            javafx.application.Platform.setImplicitExit(false);
             javafx.embed.swing.JFXPanel fxPanel = new javafx.embed.swing.JFXPanel();
+            fxPanel.setPreferredSize(new java.awt.Dimension(800, 500));
+            fxPanel.setOpaque(true);
+            fxPanel.setBackground(new java.awt.Color(0x11, 0x12, 0x14));
+
             javafx.application.Platform.runLater(() -> {
                 try {
                     javafx.scene.web.WebView webView = new javafx.scene.web.WebView();
@@ -144,6 +155,14 @@ public final class WatchTogether {
                     webView.getEngine().load(url);
                     javafx.scene.Scene scene = new javafx.scene.Scene(webView);
                     fxPanel.setScene(scene);
+                    javax.swing.SwingUtilities.invokeLater(() -> {
+                        fxPanel.revalidate();
+                        fxPanel.repaint();
+                        if (fxPanel.getParent() != null) {
+                            fxPanel.getParent().revalidate();
+                            fxPanel.getParent().repaint();
+                        }
+                    });
                 } catch (Throwable t) {
                     System.err.println("[WatchTogether] Lỗi nạp WebView JavaFX: " + t.getMessage());
                 }
@@ -351,11 +370,12 @@ public final class WatchTogether {
     }
 
     private String searchJson(String rawQuery) {
+        if (rawQuery == null || rawQuery.isBlank()) {
+            return toJsonArray(DEFAULT_TRENDING);
+        }
         List<VideoCard> cards = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
-        String q = (rawQuery == null || rawQuery.isBlank())
-                ? "nhạc chill lofi hip hop trending 2026"
-                : rawQuery.trim();
+        String q = rawQuery.trim();
         try {
             String url = "https://www.youtube.com/results?search_query="
                     + URLEncoder.encode(q, StandardCharsets.UTF_8);
@@ -382,6 +402,10 @@ public final class WatchTogether {
         if (cards.isEmpty()) {
             cards.addAll(DEFAULT_TRENDING);
         }
+        return toJsonArray(cards);
+    }
+
+    private String toJsonArray(List<VideoCard> cards) {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < cards.size(); i++) {
             if (i > 0) sb.append(',');
@@ -613,7 +637,7 @@ public final class WatchTogether {
             const $=id=>document.getElementById(id);
             const call=(p,q)=>fetch(p+(q?'?'+new URLSearchParams(q):'')).then(r=>r.json()).catch(()=>null);
             function onYouTubeIframeAPIReady(){
-              player=new YT.Player('player',{width:'100%',height:'100%',playerVars:{origin:location.origin,playsinline:1,rel:0},
+              player=new YT.Player('player',{width:'100%',height:'100%',playerVars:{playsinline:1,rel:0,modestbranding:1},
                 events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:()=>{if(st&&st.q.length>1)call('ended',{i:cur});}}});
             }
             function guard(){applying=Date.now()+1500;}
