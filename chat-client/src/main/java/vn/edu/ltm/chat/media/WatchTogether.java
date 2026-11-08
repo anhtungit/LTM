@@ -171,8 +171,9 @@ public final class WatchTogether {
             javafx.application.Platform.runLater(() -> {
                 try {
                     javafx.scene.web.WebView webView = new javafx.scene.web.WebView();
-                    webView.getEngine().setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-                    webView.getEngine().load(url);
+                    webView.getEngine().setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 LTMApp/1.0");
+                    String appUrl = url + (url.contains("?") ? "&env=app" : "?env=app");
+                    webView.getEngine().load(appUrl);
                     javafx.scene.Scene scene = new javafx.scene.Scene(webView);
                     fxPanel.setScene(scene);
                     javax.swing.SwingUtilities.invokeLater(() -> {
@@ -937,8 +938,8 @@ public final class WatchTogether {
               const s=await call('everyone');
               if(s&&s.seq){st=s;seq=s.seq;render();}
             };
-            const isFx=/JavaFX/i.test(navigator.userAgent);
-            if(!isFx){
+            const isApp=new URLSearchParams(window.location.search).get('env')==='app'||/LTMApp/i.test(navigator.userAgent);
+            if(!isApp){
               const eb=$('expandBtn');if(eb)eb.remove();
               const cb=$('collapseBtn');if(cb)cb.remove();
               const b=$('errBrowserBtn');if(b)b.style.display='none';
@@ -948,7 +949,7 @@ public final class WatchTogether {
             $('errDirectBtn').onclick=()=>{
               if(cur>=0&&st&&st.q&&st.q[cur]){
                 const u='https://www.youtube.com/watch?v='+st.q[cur];
-                if(!isFx){window.open(u,'_blank');}else{call('openUrl',{url:u});}
+                if(isApp){call('openUrl',{url:u});}else{window.open(u,'_blank');}
               }
             };
             if($('expandBtn')) $('expandBtn').onclick=()=>{expanded=true;render();};
