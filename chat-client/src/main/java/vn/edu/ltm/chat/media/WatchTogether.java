@@ -67,6 +67,7 @@ public final class WatchTogether {
     private boolean everyoneControls = true;
     private String hostId;
     private long seq = 1;
+    private volatile boolean stopped = false;
 
     private record VideoCard(String id, String title, String duration) {}
 
@@ -113,6 +114,7 @@ public final class WatchTogether {
     }
 
     public synchronized String ensureServerRunning() {
+        this.stopped = false;
         if (server == null) {
             try {
                 server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -215,15 +217,26 @@ public final class WatchTogether {
     }
 
     public synchronized void stop() {
-        if (server != null) {
-            server.stop(0);
-            server = null;
+        this.stopped = true;
+        this.playing = false;
+        this.queue.clear();
+        this.index = -1;
+        this.hostId = null;
+        this.seq++;
+        final HttpServer s = this.server;
+        this.server = null;
+        if (s != null) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    Thread.sleep(800);
+                } catch (InterruptedException ignored) {
+                }
+                try {
+                    s.stop(0);
+                } catch (Throwable ignored) {
+                }
+            });
         }
-        queue.clear();
-        index = -1;
-        playing = false;
-        hostId = null;
-        seq++;
     }
 
     public synchronized boolean isActive() {
@@ -556,6 +569,7 @@ public final class WatchTogether {
 
     private synchronized String stateJson() {
         StringBuilder sb = new StringBuilder("{\"seq\":").append(seq)
+                .append(",\"stopped\":").append(stopped)
                 .append(",\"i\":").append(index)
                 .append(",\"p\":").append(playing)
                 .append(",\"t\":").append(String.format(java.util.Locale.ROOT, "%.2f", effectivePos()))
@@ -941,8 +955,48 @@ public final class WatchTogether {
             if($('collapseBtn')) $('collapseBtn').onclick=()=>{expanded=false;render();};
             $('errBackBtn').onclick=()=>{expanded=false;render();};
             window.addEventListener('keydown',e=>{if((e.key==='Escape'||e.key==='Esc')&&expanded){expanded=false;render();}});
+            let sessionEnded=false;
+            function onSessionEnded(){
+              if(sessionEnded)return;
+              sessionEnded=true;
+              try{if(player&&player.stopVideo)player.stopVideo();}catch(e){}
+              try{if(player&&player.pauseVideo)player.pauseVideo();}catch(e){}
+              const p=$('player');if(p)p.innerHTML='';
+              document.body.innerHTML=`
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#111214;color:#f2f3f5;font-family:sans-serif;text-align:center;gap:14px;padding:24px;">
+                  <div style="font-size:42px;">⏹️</div>
+                  <div style="font-size:18px;font-weight:700;">Cuộc gọi hoặc phiên xem chung đã kết thúc</div>
+                  <div style="font-size:13px;color:#949ba4;">Trình phát đã dừng và ngắt kết nối. Bạn có thể đóng tab này.</div>
+                  <button onclick="window.close()" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;margin-top:6px;">Đóng tab</button>
+                </div>
+              `;
+              try{window.close();}catch(e){}
+            }
+
             doSearch('');
-            setInterval(async()=>{const s=await call('state');if(!s)return;st=s;if(s.seq!==seq){seq=s.seq;render();apply();}},500);
+            let failCount=0;
+            setInterval(async()=>{
+              if(sessionEnded)return;
+              const s=await call('state');
+              if(!s){
+                failCount++;
+                if(failCount>=3){
+                  onSessionEnded();
+                }
+                return;
+              }
+              failCount=0;
+              if(s.stopped){
+                onSessionEnded();
+                return;
+              }
+              st=s;
+              if(s.seq!==seq){
+                seq=s.seq;
+                render();
+                apply();
+              }
+            },500);
             </script></body></html>
             """;
 }
