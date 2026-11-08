@@ -527,9 +527,16 @@ public final class WatchTogether {
         });
     }
 
+    public synchronized boolean canToggleControl() {
+        return everyoneControls || hostId == null || selfId.equals(hostId);
+    }
+
     private synchronized void toggleEveryone() {
+        if (!canToggleControl()) return;
         everyoneControls = !everyoneControls;
-        hostId = selfId;
+        if (!everyoneControls) {
+            hostId = selfId;
+        }
         stampMs = System.currentTimeMillis();
         seq++;
         broadcastLocked();
@@ -802,6 +809,7 @@ public final class WatchTogether {
                 const isPlaying=(e.data===1);
                 const userToggled=st&&(isPlaying!==!!st.p);
                 if(userToggled||Date.now()>=applying){
+                  if(st&&!st.can){apply();return;}
                   const t=player.getCurrentTime?player.getCurrentTime():0;
                   lastT=t;lastWall=Date.now();
                   if(st)st.p=isPlaying;
@@ -814,6 +822,7 @@ public final class WatchTogether {
               const t=player.getCurrentTime(),now=Date.now(),ps=player.getPlayerState();
               const expect=lastT+(ps===1?(now-lastWall)/1000:0);
               if(Date.now()>=applying&&Math.abs(t-expect)>3.5){
+                if(st&&!st.can){apply();return;}
                 lastT=t;lastWall=now;
                 call('event',{p:ps===1?1:0,t:t,i:cur});
               }else if(Date.now()>=applying){
@@ -830,10 +839,12 @@ public final class WatchTogether {
                 evBtn.className='host-pill';
                 evBtn.textContent='● Mọi người cùng điều khiển';
                 evBtn.title='Bấm để chuyển sang: Chỉ tôi điều khiển';
+                evBtn.style.cursor='pointer';
               }else{
                 evBtn.className='host-pill locked';
                 evBtn.textContent=st.host?'🔒 Chỉ bạn điều khiển':'🔒 Chỉ chủ phòng điều khiển';
-                evBtn.title='Bấm để mở lại quyền cho mọi người';
+                evBtn.title=st.host?'Bấm để mở lại quyền cho mọi người':'Chỉ chủ phòng mới có quyền thay đổi';
+                evBtn.style.cursor=st.host?'pointer':'not-allowed';
               }
               $('msg').textContent=st.can?'':('Chỉ xem (Chủ phòng khóa điều khiển)');
               const l=$('list');l.innerHTML='';
@@ -847,8 +858,10 @@ public final class WatchTogether {
                 d.querySelector('.t').textContent=t;
                 const x=document.createElement('button');
                 x.className='del';x.textContent='Xóa';
-                x.onclick=ev=>{ev.stopPropagation();call('remove',{i});};
+                if(!st.can) x.style.display='none';
+                x.onclick=ev=>{ev.stopPropagation();if(st&&st.can)call('remove',{i});};
                 d.onclick=()=>{
+                  if(!st||!st.can)return;
                   if(i===st.i){
                     const pNow=!st.p;
                     if(st)st.p=pNow;
@@ -888,6 +901,7 @@ public final class WatchTogether {
                 c.querySelector('.dur').textContent=v.dur||'';
                 c.querySelector('.ctitle').textContent=v.title;
                 c.onclick=()=>{
+                  if(st&&!st.can)return;
                   call('add',{url:v.id,title:v.title,playNow:1});
                 };
                 g.appendChild(c);
@@ -896,6 +910,7 @@ public final class WatchTogether {
             async function doSearch(raw){
               const val=(raw||'').trim();
               if(/(?:youtu\\.be\\/|youtube\\.com\\/|^[A-Za-z0-9_-]{11}$)/.test(val)){
+                if(st&&!st.can)return;
                 await call('add',{url:val,playNow:1});
                 $('qInput').value='';
                 return;
@@ -935,6 +950,7 @@ public final class WatchTogether {
             $('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value);});
             $('qBtn').onclick=()=>doSearch($('qInput').value);
             $('everyone').onclick=async()=>{
+              if(!st||(!st.e&&!st.host))return;
               const s=await call('everyone');
               if(s&&s.seq){st=s;seq=s.seq;render();}
             };
