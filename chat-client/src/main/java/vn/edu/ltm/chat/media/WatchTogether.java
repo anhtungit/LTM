@@ -72,7 +72,7 @@ public final class WatchTogether {
 
     private static final List<VideoCard> DEFAULT_TRENDING = List.of(
             new VideoCard("kJQP7kiw5Fk", "Luis Fonsi - Despacito ft. Daddy Yankee", "4:42"),
-            new VideoCard("JGwWNGJdvx8", "Ed Sheeran - Shape of You", "4:24"),
+            new VideoCard("bM7SZ5SBzyY", "Alan Walker - Fade [NCS Release]", "4:20"),
             new VideoCard("3AtDnEC4zak", "Charlie Puth - We Don't Talk Anymore (feat. Selena Gomez)", "3:50"),
             new VideoCard("fJ9rUzIMcZQ", "Queen – Bohemian Rhapsody (Official Video Remastered)", "5:59"),
             new VideoCard("dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up (Official Music Video)", "3:32"),
@@ -696,7 +696,7 @@ public final class WatchTogether {
                   <div id="errOverlay" style="display:none;position:absolute;inset:0;background:rgba(17,18,20,0.94);flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;z-index:20;">
                     <div style="font-size:32px;">⚠️</div>
                     <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Video bị giới hạn bản quyền hoặc không hỗ trợ nhúng</div>
-                    <div style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">Chủ sở hữu hoặc YouTube không cho phép phát video này trên trình phát nhúng. Bạn có thể mở xem cùng nhau trên Trình duyệt hoặc mở trực tiếp trên YouTube.</div>
+                    <div id="errDesc" style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">Chủ sở hữu hoặc YouTube không cho phép phát video này trên trình phát nhúng. Bạn có thể mở xem cùng nhau trên Trình duyệt hoặc mở trực tiếp trên YouTube.</div>
                     <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center;">
                       <button id="errBrowserBtn" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🌐 Xem cùng nhau trên Trình duyệt</button>
                       <button id="errDirectBtn" style="background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🔗 Mở trên YouTube</button>
@@ -729,7 +729,6 @@ public final class WatchTogether {
             function onYouTubeIframeAPIReady(){
               player=new YT.Player('player',{
                 width:'100%',height:'100%',
-                host:'https://www.youtube-nocookie.com',
                 playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:window.location.origin},
                 events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:onPlayerError}
               });
@@ -924,10 +923,16 @@ public final class WatchTogether {
               const s=await call('everyone');
               if(s&&s.seq){st=s;seq=s.seq;render();}
             };
+            const isFx=/JavaFX/i.test(navigator.userAgent);
+            if(!isFx){
+              const b=$('errBrowserBtn');if(b)b.style.display='none';
+              const d=$('errDesc');if(d)d.textContent='Chủ sở hữu hoặc YouTube đã tắt tính năng nhúng đối với video này. Bạn có thể mở trực tiếp trên YouTube.';
+            }
             $('errBrowserBtn').onclick=()=>call('browser');
             $('errDirectBtn').onclick=()=>{
               if(cur>=0&&st&&st.q&&st.q[cur]){
-                call('openUrl',{url:'https://www.youtube.com/watch?v='+st.q[cur]});
+                const u='https://www.youtube.com/watch?v='+st.q[cur];
+                if(!isFx){window.open(u,'_blank');}else{call('openUrl',{url:u});}
               }
             };
             $('expandBtn').onclick=()=>{expanded=true;render();};
