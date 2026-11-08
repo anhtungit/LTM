@@ -260,13 +260,15 @@ public final class WatchTogether {
     }
 
     public synchronized boolean canControl() {
-        return everyoneControls || selfId.equals(hostId) || hostId == null;
+        if (everyoneControls) return true;
+        return hostId != null && selfId.equals(hostId);
     }
 
     /** Áp dụng trạng thái do người khác gửi; bỏ qua nếu họ không có quyền điều khiển. */
     public synchronized boolean onRemoteState(String senderId, String data) {
         Map<String, String> m = decode(data);
-        boolean allowed = hostId == null || everyoneControls || senderId.equals(hostId);
+        String sId = senderId != null ? senderId.trim() : "";
+        boolean allowed = hostId == null || everyoneControls || sId.equals(hostId);
         if (!allowed) return false;
         queue.clear();
         String q = m.getOrDefault("q", "");
@@ -284,7 +286,7 @@ public final class WatchTogether {
         stampMs = System.currentTimeMillis();
         everyoneControls = !"0".equals(m.get("e"));
         String h = m.get("h");
-        hostId = (h != null && !h.isBlank()) ? h : null;
+        hostId = (h != null && !h.isBlank()) ? h.trim() : null;
         seq++;
         return true;
     }
@@ -532,7 +534,8 @@ public final class WatchTogether {
     }
 
     public synchronized boolean canToggleControl() {
-        return everyoneControls || hostId == null || selfId.equals(hostId);
+        if (everyoneControls) return true;
+        return hostId != null && selfId.equals(hostId);
     }
 
     private synchronized void toggleEveryone() {
@@ -580,13 +583,14 @@ public final class WatchTogether {
     }
 
     private synchronized String stateJson() {
+        boolean isHost = everyoneControls ? (hostId == null || selfId.equals(hostId)) : (hostId != null && selfId.equals(hostId));
         StringBuilder sb = new StringBuilder("{\"seq\":").append(seq)
                 .append(",\"stopped\":").append(stopped)
                 .append(",\"i\":").append(index)
                 .append(",\"p\":").append(playing)
                 .append(",\"t\":").append(String.format(java.util.Locale.ROOT, "%.2f", effectivePos()))
                 .append(",\"e\":").append(everyoneControls)
-                .append(",\"host\":").append(hostId == null || selfId.equals(hostId))
+                .append(",\"host\":").append(isHost)
                 .append(",\"can\":").append(canControl())
                 .append(",\"q\":[");
         for (int k = 0; k < queue.size(); k++) {
@@ -714,7 +718,16 @@ public final class WatchTogether {
                 <div id="playerWrap">
                   <div id="player"></div>
                   <button id="expandBtn">⤢ Phóng to video</button>
-                  <div id="emptyPlaceholder" style="display:none;position:absolute;inset:0;background:#0d0e10;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#949ba4;z-index:15;">
+                  <div id="controlShield" style="display:none;position:absolute;inset:0;z-index:12;cursor:not-allowed;"></div>
+                  <div id="shieldToast" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);background:rgba(20,20,24,0.92);color:#f0b232;border:1px solid #5c4314;padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:14;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+                    🔒 Chỉ chủ phòng mới có quyền điều khiển phát/dừng video
+                  </div>
+                  <div id="playPrompt" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.6);z-index:15;align-items:center;justify-content:center;cursor:pointer;">
+                    <div style="background:#5865f2;color:#fff;padding:12px 24px;border-radius:24px;font-weight:700;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.5);display:flex;align-items:center;gap:8px;">
+                      ▶ Bấm vào đây để phát video cùng phòng
+                    </div>
+                  </div>
+                  <div id="emptyPlaceholder" style="display:none;position:absolute;inset:0;background:#0d0e10;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#949ba4;z-index:16;">
                     <div style="font-size:36px;color:#5865f2;">▶</div>
                     <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Chưa có video nào trong hàng đợi</div>
                     <div style="font-size:12px;color:#949ba4;">Bấm vào một video ở danh sách bên phải để phát ngay!</div>
@@ -756,7 +769,14 @@ public final class WatchTogether {
               player=new YT.Player('player',{
                 width:'100%',height:'100%',
                 playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:window.location.origin},
-                events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:onPlayerError}
+                events:{
+                  onReady:()=>{
+                    ready=true;
+                    if(st){render();apply();}
+                  },
+                  onStateChange:onState,
+                  onError:onPlayerError
+                }
               });
             }
             function onPlayerError(e){
@@ -767,22 +787,24 @@ public final class WatchTogether {
               playCheckTimer=setTimeout(()=>{
                 if(ready&&player&&player.getPlayerState&&st&&st.p&&cur>=0){
                   const s=player.getPlayerState();
-                  if(s===-1||s===5){
-                    $('errOverlay').style.display='flex';
+                  if(s===-1||s===2||s===5){
+                    if($('playPrompt')) $('playPrompt').style.display='flex';
                   }
                 }
               },3500);
             }
-            function guard(){applying=Date.now()+1800;}
+            function guard(){applying=Date.now()+2000;}
             function apply(){
               if(!ready||!st)return;
               if(st.i<0||st.i>=st.q.length){try{player.pauseVideo();}catch(e){}return;}
               if(cur!==st.i){
                 cur=st.i;guard();
                 $('errOverlay').style.display='none';
-                lastT=st.t;lastWall=Date.now();
-                player.loadVideoById(st.q[cur],st.t);
+                if($('playPrompt')) $('playPrompt').style.display='none';
+                lastT=st.t||0;lastWall=Date.now();
+                player.loadVideoById(st.q[cur],st.t||0);
                 if(st.p){
+                  try{player.playVideo();}catch(e){}
                   checkPlayHealth();
                 }else{
                   setTimeout(()=>{try{player.pauseVideo();}catch(e){}},400);
@@ -798,23 +820,36 @@ public final class WatchTogether {
               }
               const s=player.getPlayerState?player.getPlayerState():-1;
               if(st.p){
-                if(s!==1&&s!==3){guard();try{player.playVideo();}catch(e){}checkPlayHealth();}
+                if(s!==1&&s!==3){
+                  guard();
+                  try{player.playVideo();}catch(e){}
+                  checkPlayHealth();
+                }
               }else{
-                if(s!==2){guard();try{player.pauseVideo();}catch(e){}}
+                if(s!==2){
+                  guard();
+                  try{player.pauseVideo();}catch(e){}
+                }
               }
             }
             function onState(e){
               if(e.data===1||e.data===3){
                 if(playCheckTimer)clearTimeout(playCheckTimer);
                 $('errOverlay').style.display='none';
+                if($('playPrompt')) $('playPrompt').style.display='none';
               }
               if(e.data===0){call('ended',{i:cur});return;}
               if(e.data===1||e.data===2){
                 $('errOverlay').style.display='none';
+                if(Date.now()<applying)return;
+                if(st&&!st.can){
+                  guard();
+                  apply();
+                  return;
+                }
                 const isPlaying=(e.data===1);
                 const userToggled=st&&(isPlaying!==!!st.p);
                 if(userToggled){
-                  if(st&&!st.can){apply();return;}
                   const t=player.getCurrentTime?player.getCurrentTime():0;
                   lastT=t;lastWall=Date.now();
                   if(st){st.p=isPlaying;st.t=t;}
@@ -831,7 +866,7 @@ public final class WatchTogether {
               const expect=lastT+(ps===1?(now-lastWall)/1000:0);
               const diff=Math.abs(t-expect);
               if(Date.now()>=applying&&diff>3.0){
-                if(st&&!st.can){apply();return;}
+                if(st&&!st.can){guard();apply();return;}
                 lastT=t;lastWall=now;
                 if(st)st.t=t;
                 guard();
@@ -858,6 +893,10 @@ public final class WatchTogether {
                 evBtn.style.cursor=st.host?'pointer':'not-allowed';
               }
               $('msg').textContent=st.can?'':('Chỉ xem (Chủ phòng khóa điều khiển)');
+              const shield=$('controlShield');
+              if(shield){
+                shield.style.display=(!st.can&&hasQ)?'block':'none';
+              }
               const l=$('list');l.innerHTML='';
               const titles=st.titles||{};
               (st.q||[]).forEach((id,i)=>{
@@ -1001,6 +1040,39 @@ public final class WatchTogether {
               try{window.close();}catch(e){}
             }
 
+            let toastTimer=null;
+            const cs=$('controlShield');
+            if(cs){
+              cs.onclick=()=>{
+                const t=$('shieldToast');
+                if(!t)return;
+                t.style.display='block';
+                if(toastTimer)clearTimeout(toastTimer);
+                toastTimer=setTimeout(()=>{t.style.display='none';},2000);
+              };
+            }
+            if($('playPrompt')){
+              $('playPrompt').onclick=()=>{
+                $('playPrompt').style.display='none';
+                if(player&&player.playVideo){
+                  try{player.playVideo();}catch(e){}
+                }
+              };
+            }
+            window.addEventListener('keydown',e=>{
+              if(!st||st.can)return;
+              if(e.key===' '||e.code==='Space'||e.key==='k'||e.key==='K'){
+                e.preventDefault();
+                e.stopPropagation();
+                const t=$('shieldToast');
+                if(t){
+                  t.style.display='block';
+                  if(toastTimer)clearTimeout(toastTimer);
+                  toastTimer=setTimeout(()=>{t.style.display='none';},2000);
+                }
+              }
+            },true);
+
             doSearch('');
             let failCount=0;
             setInterval(async()=>{
@@ -1023,6 +1095,15 @@ public final class WatchTogether {
                 seq=s.seq;
                 render();
                 apply();
+              }else if(ready&&st&&cur>=0&&Date.now()>=applying){
+                const ps=player.getPlayerState?player.getPlayerState():-1;
+                if(st.p && ps!==1 && ps!==3){
+                  guard();
+                  try{player.playVideo();}catch(e){}
+                }else if(!st.p && ps===1){
+                  guard();
+                  try{player.pauseVideo();}catch(e){}
+                }
               }
             },500);
             </script></body></html>
