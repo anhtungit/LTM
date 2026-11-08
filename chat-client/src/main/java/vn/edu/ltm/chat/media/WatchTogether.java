@@ -269,7 +269,8 @@ public final class WatchTogether {
         pos = parseDouble(m.get("t"));
         stampMs = System.currentTimeMillis();
         everyoneControls = !"0".equals(m.get("e"));
-        hostId = m.get("h");
+        String h = m.get("h");
+        hostId = (h != null && !h.isBlank()) ? h : null;
         seq++;
         return true;
     }
@@ -298,10 +299,22 @@ public final class WatchTogether {
             }
             case "event" -> localEvent("1".equals(q.get("p")), parseDouble(q.get("t")), parseInt(q.get("i"), -2));
             case "ended" -> ended(parseInt(q.get("i"), -2));
-            case "add" -> add(q.get("url"), q.get("title"), "1".equals(q.get("playNow")));
-            case "remove" -> remove(parseInt(q.get("i"), -1));
-            case "play" -> playIndex(parseInt(q.get("i"), -1));
-            case "everyone" -> toggleEveryone();
+            case "add" -> {
+                add(q.get("url"), q.get("title"), "1".equals(q.get("playNow")));
+                out = stateJson();
+            }
+            case "remove" -> {
+                remove(parseInt(q.get("i"), -1));
+                out = stateJson();
+            }
+            case "play" -> {
+                playIndex(parseInt(q.get("i"), -1));
+                out = stateJson();
+            }
+            case "everyone" -> {
+                toggleEveryone();
+                out = stateJson();
+            }
             case "stop" -> stopForAll();
             default -> {
                 ex.sendResponseHeaders(404, -1);
@@ -498,9 +511,8 @@ public final class WatchTogether {
     }
 
     private synchronized void toggleEveryone() {
-        if (hostId != null && !selfId.equals(hostId)) return;
         everyoneControls = !everyoneControls;
-        if (hostId == null) hostId = selfId;
+        hostId = selfId;
         stampMs = System.currentTimeMillis();
         seq++;
         broadcastLocked();
@@ -612,8 +624,10 @@ public final class WatchTogether {
             *{box-sizing:border-box}
             body{margin:0;background:#111214;color:#f2f3f5;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden;user-select:none}
             #topbar{display:flex;align-items:center;gap:12px;padding:10px 18px;background:#111214;border-bottom:1px solid #232428}
-            .host-pill{display:inline-flex;align-items:center;gap:6px;background:#1e1f22;color:#23a55a;border:1px solid #2b2d31;border-radius:16px;padding:5px 12px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+            .host-pill{display:inline-flex;align-items:center;gap:6px;background:#1e1f22;color:#23a55a;border:1px solid #2b2d31;border-radius:16px;padding:5px 12px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap;transition:all .15s}
             .host-pill:hover{background:#2b2d31}
+            .host-pill.locked{color:#f0b232;border-color:#5c4314;background:#261f12}
+            .host-pill.locked:hover{background:#382d17}
             .search-wrap{flex:1;max-width:540px;margin:0 auto;display:flex;align-items:center;background:#1e1f22;border:1px solid #2b2d31;border-radius:6px;padding:0 10px}
             .search-wrap:focus-within{border-color:#5865f2}
             .search-wrap input{flex:1;background:transparent;border:0;color:#fff;padding:8px 6px;font-size:13px;outline:none}
@@ -787,7 +801,16 @@ public final class WatchTogether {
               const hasQ=st.q&&st.q.length>0;
               document.body.className=expanded?'expanded':'';
               $('emptyPlaceholder').style.display=hasQ?'none':'flex';
-              $('everyone').textContent=st.e?'● Mọi người cùng điều khiển':'● Chỉ chủ phòng điều khiển';
+              const evBtn=$('everyone');
+              if(st.e){
+                evBtn.className='host-pill';
+                evBtn.textContent='● Mọi người cùng điều khiển';
+                evBtn.title='Bấm để chuyển sang: Chỉ tôi điều khiển';
+              }else{
+                evBtn.className='host-pill locked';
+                evBtn.textContent=st.host?'🔒 Chỉ bạn điều khiển':'🔒 Chỉ chủ phòng điều khiển';
+                evBtn.title='Bấm để mở lại quyền cho mọi người';
+              }
               $('msg').textContent=st.can?'':('Chỉ xem (Chủ phòng khóa điều khiển)');
               const l=$('list');l.innerHTML='';
               const titles=st.titles||{};
@@ -878,7 +901,10 @@ public final class WatchTogether {
             });
             $('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value);});
             $('qBtn').onclick=()=>doSearch($('qInput').value);
-            $('everyone').onclick=()=>call('everyone');
+            $('everyone').onclick=async()=>{
+              const s=await call('everyone');
+              if(s&&s.seq){st=s;seq=s.seq;render();}
+            };
             $('errBrowserBtn').onclick=()=>call('browser');
             $('errDirectBtn').onclick=()=>{
               if(cur>=0&&st&&st.q&&st.q[cur]){
