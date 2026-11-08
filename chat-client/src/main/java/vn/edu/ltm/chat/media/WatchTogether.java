@@ -398,7 +398,11 @@ public final class WatchTogether {
                 queue.add(id);
                 existing = queue.size() - 1;
             }
-            if (index < 0 || playNow) {
+            if (index < 0) {
+                index = existing;
+                pos = 0;
+                playing = true;
+            } else if (playNow && existing != index) {
                 index = existing;
                 pos = 0;
                 playing = true;
@@ -769,7 +773,7 @@ public final class WatchTogether {
                 }
               },3500);
             }
-            function guard(){applying=Date.now()+1200;}
+            function guard(){applying=Date.now()+1800;}
             function apply(){
               if(!ready||!st)return;
               if(st.i<0||st.i>=st.q.length){try{player.pauseVideo();}catch(e){}return;}
@@ -785,6 +789,7 @@ public final class WatchTogether {
                 }
                 return;
               }
+              if(Date.now()<applying)return;
               const t=player.getCurrentTime?player.getCurrentTime():0;
               if(Math.abs(t-st.t)>3.5){
                 guard();
@@ -808,27 +813,33 @@ public final class WatchTogether {
                 $('errOverlay').style.display='none';
                 const isPlaying=(e.data===1);
                 const userToggled=st&&(isPlaying!==!!st.p);
-                if(userToggled||Date.now()>=applying){
+                if(userToggled){
                   if(st&&!st.can){apply();return;}
                   const t=player.getCurrentTime?player.getCurrentTime():0;
                   lastT=t;lastWall=Date.now();
-                  if(st)st.p=isPlaying;
+                  if(st){st.p=isPlaying;st.t=t;}
+                  guard();
                   call('event',{p:isPlaying?1:0,t:t,i:cur});
                 }
               }
             }
             setInterval(()=>{
               if(!ready||!st||!player.getCurrentTime)return;
-              const t=player.getCurrentTime(),now=Date.now(),ps=player.getPlayerState();
+              const ps=player.getPlayerState?player.getPlayerState():-1;
+              if(ps!==1&&ps!==2)return;
+              const t=player.getCurrentTime(),now=Date.now();
               const expect=lastT+(ps===1?(now-lastWall)/1000:0);
-              if(Date.now()>=applying&&Math.abs(t-expect)>3.5){
+              const diff=Math.abs(t-expect);
+              if(Date.now()>=applying&&diff>3.0){
                 if(st&&!st.can){apply();return;}
                 lastT=t;lastWall=now;
+                if(st)st.t=t;
+                guard();
                 call('event',{p:ps===1?1:0,t:t,i:cur});
               }else if(Date.now()>=applying){
                 lastT=t;lastWall=now;
               }
-            },1000);
+            },600);
             function render(){
               if(!st)return;
               const hasQ=st.q&&st.q.length>0;
@@ -883,7 +894,7 @@ public final class WatchTogether {
                 const p=c.querySelector('.plus');
                 const txt=c.querySelector('.ov span');
                 if(p)p.textContent=inQ?'✓':'+';
-                if(txt)txt.textContent=inQ?'Phát lại':'Phát ngay';
+                if(txt)txt.textContent=inQ?'Đã thêm':'Thêm vào danh sách';
               });
             }
             function appendCards(items){
@@ -896,13 +907,13 @@ public final class WatchTogether {
                 c.dataset.vid=v.id;
                 c.innerHTML='<div class="thumb"><img src="https://i.ytimg.com/vi/'+v.id+'/hqdefault.jpg" onerror="this.onerror=null;this.src=\\'https://i.ytimg.com/vi/'+v.id+'/mqdefault.jpg\\'">'
                   +'<span class="dur"></span>'
-                  +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Phát lại':'Phát ngay')+'</span></div></div>'
+                  +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Đã thêm':'Thêm vào danh sách')+'</span></div></div>'
                   +'<div class="ctitle"></div>';
                 c.querySelector('.dur').textContent=v.dur||'';
                 c.querySelector('.ctitle').textContent=v.title;
                 c.onclick=()=>{
                   if(st&&!st.can)return;
-                  call('add',{url:v.id,title:v.title,playNow:1});
+                  call('add',{url:v.id,title:v.title,playNow:0});
                 };
                 g.appendChild(c);
               });
@@ -911,7 +922,7 @@ public final class WatchTogether {
               const val=(raw||'').trim();
               if(/(?:youtu\\.be\\/|youtube\\.com\\/|^[A-Za-z0-9_-]{11}$)/.test(val)){
                 if(st&&!st.can)return;
-                await call('add',{url:val,playNow:1});
+                await call('add',{url:val,playNow:0});
                 $('qInput').value='';
                 return;
               }
