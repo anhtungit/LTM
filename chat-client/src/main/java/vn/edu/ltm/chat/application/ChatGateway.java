@@ -31,6 +31,9 @@ public interface ChatGateway {
     default void setOnRealtimeUpdate(Runnable callback) {
     }
 
+    default void setOnNewMessage(java.util.function.Consumer<ChatMessage> callback) {
+    }
+
     default void setOnPresenceUpdate(Runnable callback) {
     }
 

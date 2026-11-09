@@ -40,6 +40,8 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Frame;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
@@ -241,6 +243,7 @@ public final class ChatWorkspace extends JPanel {
         this.chatService.setOnPresenceUpdate(this::handlePresenceUpdate);
         this.chatService.setOnTypingUpdate(this::handleTypingEvent);
         this.chatService.setOnCallSignal(this::handleCallSignal);
+        this.chatService.setOnNewMessage(this::handleIncomingMessage);
         this.meetRoomPanel.setOnMuteToggle(muted -> {
             voiceEngine.setMuted(muted);
             String cid = call.conversationId();
@@ -308,6 +311,112 @@ public final class ChatWorkspace extends JPanel {
             typingBubble.hideTyping();
             typingTimeoutTimer.stop();
         }
+    }
+
+    private void handleIncomingMessage(ChatMessage msg) {
+        if (msg == null) return;
+        if (user != null && user.id().equals(msg.senderId())) {
+            return;
+        }
+        String content = msg.content() != null ? msg.content().trim() : "";
+        if (content.startsWith("[call:") || content.startsWith("[call-end]")) {
+            return;
+        }
+
+        Window window = SwingUtilities.getWindowAncestor(this);
+        boolean isWindowFocused = window != null && window.isActive() && window.isFocused();
+
+        boolean isViewingThisConversation = chatArea.isShowing()
+                && selectedConversationId != null
+                && selectedConversationId.equals(msg.conversationId());
+
+        Conversation currentConv = currentConversation();
+        if (isViewingThisConversation && currentConv != null && currentConv.isGroup()) {
+            if (msg.channel() != null && !msg.channel().isBlank()) {
+                isViewingThisConversation = msg.channel().equalsIgnoreCase(selectedChannel);
+            }
+        }
+
+        // If the window is focused and user is looking at this exact chat conversation, suppress popup
+        if (isWindowFocused && isViewingThisConversation) {
+            return;
+        }
+
+        String senderTitle = msg.senderName();
+        if (currentConv != null && currentConv.isGroup() && msg.conversationId().equals(currentConv.id())) {
+            String ch = (msg.channel() != null && !msg.channel().isBlank()) ? msg.channel() : selectedChannel;
+            senderTitle = msg.senderName() + " · #" + ch;
+        } else {
+            Conversation match = conversations.stream()
+                    .filter(c -> c.id().equals(msg.conversationId()))
+                    .findFirst()
+                    .orElse(null);
+            if (match != null && match.isGroup()) {
+                String ch = (msg.channel() != null && !msg.channel().isBlank()) ? " #" + msg.channel() : "";
+                senderTitle = msg.senderName() + " (" + match.displayName() + ch + ")";
+            }
+        }
+
+        String displaySnippet;
+        if (msg.attachmentName() != null && !msg.attachmentName().isBlank()) {
+            displaySnippet = "📁 [Tệp đính kèm] " + msg.attachmentName();
+        } else {
+            displaySnippet = content.replace('\n', ' ');
+            if (displaySnippet.length() > 50) {
+                displaySnippet = displaySnippet.substring(0, 47) + "...";
+            }
+        }
+
+        final String targetConvId = msg.conversationId();
+        final String targetChannel = msg.channel();
+
+        MessageToastNotification.showToast(
+                window,
+                msg.senderInitials(),
+                msg.senderId(),
+                senderTitle,
+                displaySnippet,
+                () -> {
+                    if (window instanceof Frame frame) {
+                        if ((frame.getExtendedState() & Frame.ICONIFIED) != 0) {
+                            frame.setExtendedState(frame.getExtendedState() & ~Frame.ICONIFIED);
+                        }
+                    }
+                    if (window != null) {
+                        window.toFront();
+                        window.requestFocus();
+                    }
+                    Conversation target = conversations.stream()
+                            .filter(c -> c.id().equals(targetConvId))
+                            .findFirst()
+                            .orElse(null);
+                    if (target != null) {
+                        if (target.isGroup() && targetChannel != null && !targetChannel.isBlank()) {
+                            selectedChannel = targetChannel;
+                        }
+                        selectConversation(target);
+                        showChatView();
+                    } else {
+                        CompletableFuture.supplyAsync(chatService::conversations)
+                                .thenAccept(latest -> SwingUtilities.invokeLater(() -> {
+                                    conversations.clear();
+                                    conversations.addAll(latest);
+                                    rebuildConversationButtons();
+                                    railPanel.rebuild();
+                                    conversations.stream()
+                                            .filter(c -> c.id().equals(targetConvId))
+                                            .findFirst()
+                                            .ifPresent(c -> {
+                                                if (c.isGroup() && targetChannel != null && !targetChannel.isBlank()) {
+                                                    selectedChannel = targetChannel;
+                                                }
+                                                selectConversation(c);
+                                                showChatView();
+                                            });
+                                }));
+                    }
+                }
+        );
     }
 
     private void handleServerBroadcast() {

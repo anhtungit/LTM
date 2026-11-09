@@ -29,6 +29,10 @@ public final class ChatService {
         gateway.setOnRealtimeUpdate(callback);
     }
 
+    public void setOnNewMessage(java.util.function.Consumer<ChatMessage> callback) {
+        gateway.setOnNewMessage(callback);
+    }
+
     public void setOnPresenceUpdate(Runnable callback) {
         gateway.setOnPresenceUpdate(callback);
     }

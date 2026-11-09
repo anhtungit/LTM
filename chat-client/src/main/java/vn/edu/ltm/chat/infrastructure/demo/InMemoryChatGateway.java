@@ -17,6 +17,7 @@ public final class InMemoryChatGateway implements ChatGateway {
     private final Map<String, Conversation> conversations = new LinkedHashMap<>();
     private final Map<String, List<ChatMessage>> messages = new LinkedHashMap<>();
     private Runnable onRealtimeUpdate;
+    private java.util.function.Consumer<ChatMessage> onNewMessage;
 
     public InMemoryChatGateway() {
         // Direct messages
@@ -237,6 +238,11 @@ public final class InMemoryChatGateway implements ChatGateway {
     @Override
     public void setOnRealtimeUpdate(Runnable callback) {
         this.onRealtimeUpdate = callback;
+    }
+
+    @Override
+    public void setOnNewMessage(java.util.function.Consumer<ChatMessage> callback) {
+        this.onNewMessage = callback;
     }
 
     @Override

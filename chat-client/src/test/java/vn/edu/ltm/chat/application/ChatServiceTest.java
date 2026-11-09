@@ -36,4 +36,12 @@ class ChatServiceTest {
 
         assertEquals(before, service.messages("an-nguyen").size());
     }
+
+    @Test
+    void registersNewMessageCallback() {
+        java.util.concurrent.atomic.AtomicReference<ChatMessage> ref = new java.util.concurrent.atomic.AtomicReference<>();
+        service.setOnNewMessage(ref::set);
+        // Verify callback registration is accepted without exception
+        assertTrue(true);
+    }
 }

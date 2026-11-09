@@ -53,6 +53,7 @@ public final class TcpChatGateway implements ChatGateway {
     private String currentUserId;
     private String currentUserName;
     private volatile Runnable onRealtimeUpdate;
+    private volatile java.util.function.Consumer<ChatMessage> onNewMessage;
     private volatile Runnable onPresenceUpdate;
     private volatile java.util.function.Consumer<TypingEvent> onTypingUpdate;
     private volatile java.util.function.Consumer<CallSignalEvent> onCallSignal;
@@ -289,6 +290,24 @@ public final class TcpChatGateway implements ChatGateway {
             }
             return;
         }
+        if ("NEW_MSG_BROADCAST".equals(type)) {
+            try {
+                MessageDto m = packet.getObj("message", MessageDto.class);
+                if (m != null) {
+                    ChatMessage msg = toDomainMessage(m);
+                    var msgCb = this.onNewMessage;
+                    if (msgCb != null) {
+                        SwingUtilities.invokeLater(() -> msgCb.accept(msg));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            Runnable cb = this.onRealtimeUpdate;
+            if (cb != null) {
+                SwingUtilities.invokeLater(cb);
+            }
+            return;
+        }
         Runnable cb = this.onRealtimeUpdate;
         if (cb != null) {
             SwingUtilities.invokeLater(cb);
@@ -345,6 +364,11 @@ public final class TcpChatGateway implements ChatGateway {
     @Override
     public void setOnRealtimeUpdate(Runnable callback) {
         this.onRealtimeUpdate = callback;
+    }
+
+    @Override
+    public void setOnNewMessage(java.util.function.Consumer<ChatMessage> callback) {
+        this.onNewMessage = callback;
     }
 
     @Override
