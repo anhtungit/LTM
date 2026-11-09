@@ -2748,10 +2748,14 @@ public final class ChatWorkspace extends JPanel {
 
     private void openCreateGroupDialog() {
         WorkspaceDialogs.openCreateGroupDialog(this, chatService, createdGroup -> {
-            conversations.add(createdGroup);
-            railPanel.setActiveGroupId(createdGroup.id());
-            selectConversation(createdGroup);
-            showChatView();
+            if (createdGroup != null) {
+                conversations.add(createdGroup);
+                railPanel.setActiveGroupId(createdGroup.id());
+                railPanel.rebuild();
+                rebuildConversationButtons();
+                selectConversation(createdGroup);
+                showChatView();
+            }
         });
     }
 

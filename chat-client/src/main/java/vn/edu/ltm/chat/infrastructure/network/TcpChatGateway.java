@@ -703,14 +703,20 @@ public final class TcpChatGateway implements ChatGateway {
         if (!tryConnect()) {
             return fallback.createGroup(groupName, memberNames);
         }
-        TcpPacket req = new TcpPacket("CREATE_GROUP_REQ", UUID.randomUUID().toString())
-                .put("creatorId", currentUserId != null ? currentUserId : "")
-                .put("creatorName", currentUserName != null ? currentUserName : "")
-                .put("groupName", groupName)
-                .putObj("members", memberNames != null ? memberNames : List.of());
-        TcpPacket res = request(req);
-        ConversationDto c = res.getObj("conversation", ConversationDto.class);
-        return toDomainConversation(c);
+        try {
+            TcpPacket req = new TcpPacket("CREATE_GROUP_REQ", UUID.randomUUID().toString())
+                    .put("creatorId", currentUserId != null ? currentUserId : "")
+                    .put("creatorName", currentUserName != null ? currentUserName : "")
+                    .put("groupName", groupName)
+                    .putObj("members", memberNames != null ? memberNames : List.of());
+            TcpPacket res = request(req);
+            ConversationDto c = res.getObj("conversation", ConversationDto.class);
+            if (c != null) {
+                return toDomainConversation(c);
+            }
+        } catch (Exception ignored) {
+        }
+        return fallback.createGroup(groupName, memberNames);
     }
 
     @Override

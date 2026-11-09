@@ -558,10 +558,29 @@ public final class ClientHandler implements Runnable {
     }
 
     private void handleCreateGroup(Packet req, String reqId) {
-        String creatorId = req.getString("creatorId", currentUser != null ? currentUser.id() : null);
-        String creatorName = req.getString("creatorName", currentUser != null ? currentUser.displayName() : null);
+        String creatorId = req.getString("creatorId", null);
+        if (creatorId == null || creatorId.isBlank()) {
+            creatorId = currentUser != null ? currentUser.id() : null;
+        }
+        String creatorName = req.getString("creatorName", null);
+        if (creatorName == null || creatorName.isBlank()) {
+            creatorName = currentUser != null ? currentUser.displayName() : null;
+        }
         String groupName = req.getString("groupName", "Nhóm mới");
-        String[] membersArr = req.getObj("members", String[].class);
+        String[] membersArr = null;
+        try {
+            membersArr = req.getObj("members", String[].class);
+        } catch (Exception ignored) {
+        }
+        if (membersArr == null) {
+            String str = req.getString("members", null);
+            if (str != null && !str.isBlank()) {
+                try {
+                    membersArr = Packet.GSON.fromJson(str, String[].class);
+                } catch (Exception ignored) {
+                }
+            }
+        }
         List<String> members = membersArr != null ? Arrays.asList(membersArr) : List.of();
 
         ConversationDto created = db.createGroup(creatorId, creatorName, groupName, members);

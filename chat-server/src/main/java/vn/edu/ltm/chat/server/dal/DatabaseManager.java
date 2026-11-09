@@ -687,6 +687,14 @@ public final class DatabaseManager implements AutoCloseable {
                 return true;
             }
         }
+        UserDto u = findUser(userId);
+        if (u != null) {
+            for (String m : members) {
+                if (m != null && (m.equalsIgnoreCase(u.displayName()) || m.equalsIgnoreCase(u.username()) || m.equalsIgnoreCase(u.email()))) {
+                    return true;
+                }
+            }
+        }
         return false;
     }
 

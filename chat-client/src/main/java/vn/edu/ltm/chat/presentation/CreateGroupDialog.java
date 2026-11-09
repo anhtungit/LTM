@@ -23,6 +23,8 @@ import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -160,7 +162,7 @@ public final class CreateGroupDialog extends JDialog {
 
         searchField.setPreferredSize(new Dimension(420, 36));
         searchField.setMaximumSize(new Dimension(Short.MAX_VALUE, 36));
-        searchField.putClientProperty("JTextField.placeholderText", "Tìm hoặc lọc bạn bè...");
+        searchField.putClientProperty("JTextField.placeholderText", "Tìm bạn bè hoặc nhập tên/ID rồi nhấn Enter...");
         DiscordTheme.styleField(searchField);
         searchField.setAlignmentX(LEFT_ALIGNMENT);
         searchField.getDocument().addDocumentListener(new DocumentListener() {
@@ -168,6 +170,7 @@ public final class CreateGroupDialog extends JDialog {
             @Override public void removeUpdate(DocumentEvent e) { refreshCandidates(); }
             @Override public void changedUpdate(DocumentEvent e) { refreshCandidates(); }
         });
+        searchField.addActionListener(e -> addCustomCandidate(searchField.getText()));
         body.add(searchField);
         body.add(Box.createVerticalStrut(8));
 
@@ -194,16 +197,85 @@ public final class CreateGroupDialog extends JDialog {
         return body;
     }
 
+    private void addCustomCandidate(String rawName) {
+        if (rawName == null || rawName.isBlank()) return;
+        String name = rawName.trim();
+        FriendCandidate existing = null;
+        for (FriendCandidate c : candidates) {
+            if (c.id().equalsIgnoreCase(name) || c.name().equalsIgnoreCase(name)) {
+                existing = c;
+                break;
+            }
+        }
+        if (existing != null) {
+            selectedIds.add(existing.id());
+        } else {
+            FriendCandidate added = new FriendCandidate(name, name, computeInitials(name), "Thành viên mới");
+            candidates.add(added);
+            selectedIds.add(name);
+        }
+        searchField.setText("");
+        updateSummary();
+        refreshCandidates();
+    }
+
+    private JPanel buildAddCustomCandidateRow(String customName) {
+        RoundedPanel row = new RoundedPanel(8);
+        row.setBackground(new Color(0x27, 0x2A, 0x30));
+        row.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        row.setLayout(new BorderLayout(8, 0));
+        row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel icon = new JLabel(IconFactory.phosphor("user-plus.svg", 18, DiscordTheme.ACCENT_SOFT));
+        row.add(icon, BorderLayout.WEST);
+
+        JLabel label = new JLabel("+ Thêm \"" + customName + "\" làm thành viên");
+        label.setFont(DiscordTheme.semibold(12f));
+        label.setForeground(DiscordTheme.ACCENT_SOFT);
+        row.add(label, BorderLayout.CENTER);
+
+        MouseAdapter click = new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                addCustomCandidate(customName);
+            }
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                row.setBackground(new Color(0x35, 0x38, 0x40));
+                row.repaint();
+            }
+            @Override
+            public void mouseExited(MouseEvent e) {
+                row.setBackground(new Color(0x27, 0x2A, 0x30));
+                row.repaint();
+            }
+        };
+        row.addMouseListener(click);
+        icon.addMouseListener(click);
+        label.addMouseListener(click);
+        return row;
+    }
+
     private void refreshCandidates() {
         listPanel.removeAll();
         String query = searchField.getText().trim().toLowerCase();
+        boolean exactMatch = false;
         for (FriendCandidate f : candidates) {
-            if (!query.isEmpty() && !f.name().toLowerCase().contains(query) && !f.role().toLowerCase().contains(query)) {
+            if (!query.isEmpty() && !f.name().toLowerCase().contains(query) && !f.role().toLowerCase().contains(query) && !f.id().toLowerCase().contains(query)) {
                 continue;
+            }
+            if (f.name().equalsIgnoreCase(query) || f.id().equalsIgnoreCase(query)) {
+                exactMatch = true;
             }
             listPanel.add(buildCandidateRow(f));
             listPanel.add(Box.createVerticalStrut(4));
         }
+
+        if (!query.isEmpty() && !exactMatch) {
+            listPanel.add(buildAddCustomCandidateRow(searchField.getText().trim()));
+            listPanel.add(Box.createVerticalStrut(4));
+        }
+
         listPanel.revalidate();
         listPanel.repaint();
     }
@@ -214,6 +286,7 @@ public final class CreateGroupDialog extends JDialog {
         row.setBackground(selected ? new Color(0x2E, 0x30, 0x36) : DiscordTheme.SIDEBAR);
         row.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
         row.setLayout(new BorderLayout(8, 0));
+        row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         AvatarBadge avatar = new AvatarBadge(f.initials(), f.name(), 32);
         row.add(avatar, BorderLayout.WEST);
@@ -237,18 +310,62 @@ public final class CreateGroupDialog extends JDialog {
         JCheckBox check = new JCheckBox();
         check.setOpaque(false);
         check.setSelected(selected);
-        check.addActionListener(e -> {
-            if (check.isSelected()) {
-                selectedIds.add(f.id());
-            } else {
+
+        Runnable toggle = () -> {
+            if (selectedIds.contains(f.id())) {
                 selectedIds.remove(f.id());
+                check.setSelected(false);
+                row.setBackground(DiscordTheme.SIDEBAR);
+            } else {
+                selectedIds.add(f.id());
+                check.setSelected(true);
+                row.setBackground(new Color(0x2E, 0x30, 0x36));
             }
             updateSummary();
-            refreshCandidates();
-        });
+            row.repaint();
+        };
+
+        check.addActionListener(e -> toggle.run());
+
+        MouseAdapter rowClick = new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                toggle.run();
+            }
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (!selectedIds.contains(f.id())) {
+                    row.setBackground(DiscordTheme.HOVER);
+                    row.repaint();
+                }
+            }
+            @Override
+            public void mouseExited(MouseEvent e) {
+                if (!selectedIds.contains(f.id())) {
+                    row.setBackground(DiscordTheme.SIDEBAR);
+                    row.repaint();
+                }
+            }
+        };
+
+        row.addMouseListener(rowClick);
+        avatar.addMouseListener(rowClick);
+        info.addMouseListener(rowClick);
+        name.addMouseListener(rowClick);
+        role.addMouseListener(rowClick);
+
         row.add(check, BorderLayout.EAST);
 
         return row;
+    }
+
+    private static String computeInitials(String name) {
+        if (name == null || name.isBlank()) return "?";
+        String[] parts = name.trim().split("\\s+");
+        if (parts.length >= 2) {
+            return (parts[0].substring(0, 1) + parts[parts.length - 1].substring(0, 1)).toUpperCase();
+        }
+        return name.length() >= 2 ? name.substring(0, 2).toUpperCase() : name.toUpperCase();
     }
 
     private void updateSummary() {
