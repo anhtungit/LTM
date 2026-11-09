@@ -1,5 +1,6 @@
 package vn.edu.ltm.chat.presentation;
 
+import vn.edu.ltm.chat.media.ScreenCaptureEngine;
 import vn.edu.ltm.chat.theme.DiscordTheme;
 import vn.edu.ltm.chat.theme.IconFactory;
 
@@ -881,6 +882,7 @@ public final class MeetRoomPanel extends JPanel {
         dialog.setUndecorated(true);
         dialog.setBackground(DiscordTheme.SIDEBAR);
 
+        final boolean windowSupported = ScreenCaptureEngine.isWindowCaptureSupported();
         final int[] selectedSource = {1}; // 1 = Toàn màn hình, 2 = Cửa sổ ứng dụng
         final boolean[] hdQuality = {false};
 
@@ -892,21 +894,23 @@ public final class MeetRoomPanel extends JPanel {
                 BorderFactory.createEmptyBorder(20, 22, 18, 22)
         ));
 
-        JLabel title = new JLabel("Chia sẻ màn hình, cửa sổ hoặc ứng dụng", JLabel.CENTER);
+        JLabel title = new JLabel(windowSupported ? "Chia sẻ màn hình, cửa sổ hoặc ứng dụng" : "Chia sẻ toàn màn hình", JLabel.CENTER);
         title.setFont(DiscordTheme.bold(16f));
         title.setForeground(Color.WHITE);
         p.add(title, BorderLayout.NORTH);
 
-        JPanel sources = new JPanel(new GridLayout(1, 2, 14, 0));
+        JPanel sources = new JPanel(new GridLayout(1, windowSupported ? 2 : 1, 14, 0));
         sources.setOpaque(true);
         sources.setBackground(DiscordTheme.SIDEBAR);
 
         JPanel screenOpt = buildSourceOption("Chia sẻ toàn màn hình", "Hiển thị toàn bộ màn hình máy tính");
-        JPanel windowOpt = buildSourceOption("Chia sẻ cửa sổ", "Chọn một ứng dụng hoặc trò chơi đang mở");
+        JPanel windowOpt = windowSupported ? buildSourceOption("Chia sẻ cửa sổ", "Chọn một ứng dụng hoặc trò chơi đang mở") : null;
 
         Runnable updateSelection = () -> {
             styleSourceCard(screenOpt, selectedSource[0] == 1);
-            styleSourceCard(windowOpt, selectedSource[0] == 2);
+            if (windowOpt != null) {
+                styleSourceCard(windowOpt, selectedSource[0] == 2);
+            }
         };
         updateSelection.run();
 
@@ -928,19 +932,21 @@ public final class MeetRoomPanel extends JPanel {
             }
         };
         attachCardClickListener(screenOpt, screenListener);
-
-        MouseAdapter windowListener = new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                selectedSource[0] = 2;
-                updateSelection.run();
-                if (e.getClickCount() == 2) confirmShare.run();
-            }
-        };
-        attachCardClickListener(windowOpt, windowListener);
-
         sources.add(screenOpt);
-        sources.add(windowOpt);
+
+        if (windowOpt != null) {
+            MouseAdapter windowListener = new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    selectedSource[0] = 2;
+                    updateSelection.run();
+                    if (e.getClickCount() == 2) confirmShare.run();
+                }
+            };
+            attachCardClickListener(windowOpt, windowListener);
+            sources.add(windowOpt);
+        }
+
         p.add(sources, BorderLayout.CENTER);
 
         JPanel bottomBar = new JPanel(new BorderLayout());
@@ -986,7 +992,7 @@ public final class MeetRoomPanel extends JPanel {
         p.add(bottomBar, BorderLayout.SOUTH);
 
         dialog.setContentPane(p);
-        dialog.setSize(520, 270);
+        dialog.setSize(windowSupported ? 520 : 380, 270);
         dialog.setLocationRelativeTo(parent);
         dialog.setVisible(true);
     }

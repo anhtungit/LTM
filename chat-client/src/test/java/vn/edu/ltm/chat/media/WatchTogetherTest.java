@@ -20,8 +20,10 @@ class WatchTogetherTest {
         assertTrue(w.onRemoteState("host", "q=aaaaaaaaaaa;i=0;p=1;t=3;e=0;h=host"));
         assertTrue(w.isActive());
         assertFalse(w.canControl());
+        assertFalse(w.canToggleControl());
         assertFalse(w.onRemoteState("other", "q=bbbbbbbbbbb;i=0;p=0;t=0;e=1;h=other"));
         assertTrue(w.onRemoteState("host", "q=aaaaaaaaaaa;i=0;p=0;t=9;e=1;h=host"));
         assertTrue(w.canControl());
+        assertTrue(w.canToggleControl());
     }
 }

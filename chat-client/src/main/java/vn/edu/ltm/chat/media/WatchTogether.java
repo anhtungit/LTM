@@ -67,12 +67,13 @@ public final class WatchTogether {
     private boolean everyoneControls = true;
     private String hostId;
     private long seq = 1;
+    private volatile boolean stopped = false;
 
     private record VideoCard(String id, String title, String duration) {}
 
     private static final List<VideoCard> DEFAULT_TRENDING = List.of(
             new VideoCard("kJQP7kiw5Fk", "Luis Fonsi - Despacito ft. Daddy Yankee", "4:42"),
-            new VideoCard("JGwWNGJdvx8", "Ed Sheeran - Shape of You", "4:24"),
+            new VideoCard("bM7SZ5SBzyY", "Alan Walker - Fade [NCS Release]", "4:20"),
             new VideoCard("3AtDnEC4zak", "Charlie Puth - We Don't Talk Anymore (feat. Selena Gomez)", "3:50"),
             new VideoCard("fJ9rUzIMcZQ", "Queen – Bohemian Rhapsody (Official Video Remastered)", "5:59"),
             new VideoCard("dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up (Official Music Video)", "3:32"),
@@ -113,6 +114,7 @@ public final class WatchTogether {
     }
 
     public synchronized String ensureServerRunning() {
+        this.stopped = false;
         if (server == null) {
             try {
                 server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -169,8 +171,9 @@ public final class WatchTogether {
             javafx.application.Platform.runLater(() -> {
                 try {
                     javafx.scene.web.WebView webView = new javafx.scene.web.WebView();
-                    webView.getEngine().setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-                    webView.getEngine().load(url);
+                    webView.getEngine().setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 LTMApp/1.0");
+                    String appUrl = url + (url.contains("?") ? "&env=app" : "?env=app");
+                    webView.getEngine().load(appUrl);
                     javafx.scene.Scene scene = new javafx.scene.Scene(webView);
                     fxPanel.setScene(scene);
                     javax.swing.SwingUtilities.invokeLater(() -> {
@@ -207,7 +210,14 @@ public final class WatchTogether {
             try {
                 Desktop.getDesktop().browse(uri);
             } catch (Exception e) {
-                new ProcessBuilder("xdg-open", uri.toString()).start();
+                String os = System.getProperty("os.name", "").toLowerCase();
+                if (os.contains("win")) {
+                    new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start();
+                } else if (os.contains("mac")) {
+                    new ProcessBuilder("open", url).start();
+                } else {
+                    new ProcessBuilder("xdg-open", uri.toString()).start();
+                }
             }
         } catch (Exception e) {
             System.err.println("[WatchTogether] Không mở được trình duyệt: " + e.getMessage());
@@ -215,15 +225,26 @@ public final class WatchTogether {
     }
 
     public synchronized void stop() {
-        if (server != null) {
-            server.stop(0);
-            server = null;
+        this.stopped = true;
+        this.playing = false;
+        this.queue.clear();
+        this.index = -1;
+        this.hostId = null;
+        this.seq++;
+        final HttpServer s = this.server;
+        this.server = null;
+        if (s != null) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    Thread.sleep(800);
+                } catch (InterruptedException ignored) {
+                }
+                try {
+                    s.stop(0);
+                } catch (Throwable ignored) {
+                }
+            });
         }
-        queue.clear();
-        index = -1;
-        playing = false;
-        hostId = null;
-        seq++;
     }
 
     public synchronized boolean isActive() {
@@ -246,13 +267,15 @@ public final class WatchTogether {
     }
 
     public synchronized boolean canControl() {
-        return everyoneControls || selfId.equals(hostId) || hostId == null;
+        if (everyoneControls) return true;
+        return hostId != null && selfId.equals(hostId);
     }
 
     /** Áp dụng trạng thái do người khác gửi; bỏ qua nếu họ không có quyền điều khiển. */
     public synchronized boolean onRemoteState(String senderId, String data) {
         Map<String, String> m = decode(data);
-        boolean allowed = hostId == null || everyoneControls || senderId.equals(hostId);
+        String sId = senderId != null ? senderId.trim() : "";
+        boolean allowed = hostId == null || everyoneControls || sId.equals(hostId);
         if (!allowed) return false;
         queue.clear();
         String q = m.getOrDefault("q", "");
@@ -270,7 +293,7 @@ public final class WatchTogether {
         stampMs = System.currentTimeMillis();
         everyoneControls = !"0".equals(m.get("e"));
         String h = m.get("h");
-        hostId = (h != null && !h.isBlank()) ? h : null;
+        hostId = (h != null && !h.isBlank()) ? h.trim() : null;
         seq++;
         return true;
     }
@@ -384,7 +407,11 @@ public final class WatchTogether {
                 queue.add(id);
                 existing = queue.size() - 1;
             }
-            if (index < 0 || playNow) {
+            if (index < 0) {
+                index = existing;
+                pos = 0;
+                playing = true;
+            } else if (playNow && existing != index) {
                 index = existing;
                 pos = 0;
                 playing = true;
@@ -513,9 +540,17 @@ public final class WatchTogether {
         });
     }
 
+    public synchronized boolean canToggleControl() {
+        if (everyoneControls) return true;
+        return hostId != null && selfId.equals(hostId);
+    }
+
     private synchronized void toggleEveryone() {
+        if (!canToggleControl()) return;
         everyoneControls = !everyoneControls;
-        hostId = selfId;
+        if (!everyoneControls) {
+            hostId = selfId;
+        }
         stampMs = System.currentTimeMillis();
         seq++;
         broadcastLocked();
@@ -555,12 +590,14 @@ public final class WatchTogether {
     }
 
     private synchronized String stateJson() {
+        boolean isHost = everyoneControls ? (hostId == null || selfId.equals(hostId)) : (hostId != null && selfId.equals(hostId));
         StringBuilder sb = new StringBuilder("{\"seq\":").append(seq)
+                .append(",\"stopped\":").append(stopped)
                 .append(",\"i\":").append(index)
                 .append(",\"p\":").append(playing)
                 .append(",\"t\":").append(String.format(java.util.Locale.ROOT, "%.2f", effectivePos()))
                 .append(",\"e\":").append(everyoneControls)
-                .append(",\"host\":").append(hostId == null || selfId.equals(hostId))
+                .append(",\"host\":").append(isHost)
                 .append(",\"can\":").append(canControl())
                 .append(",\"q\":[");
         for (int k = 0; k < queue.size(); k++) {
@@ -681,6 +718,7 @@ public final class WatchTogether {
                 <input id="qInput" placeholder="Tìm kiếm video YouTube hoặc dán đường dẫn URL...">
                 <button id="qBtn" title="Tìm kiếm">🔍</button>
               </div>
+              <button id="stopBtn" class="host-pill" style="color:#f23f43;border-color:#5c1d24;background:#261214;cursor:pointer;margin-left:auto;" title="Dừng xem cùng nhau cho tất cả mọi người">⏹ Dừng xem chung</button>
             </div>
             <div id="stage">
               <button id="collapseBtn">⤡ Thu nhỏ / Hiện danh sách</button>
@@ -688,7 +726,16 @@ public final class WatchTogether {
                 <div id="playerWrap">
                   <div id="player"></div>
                   <button id="expandBtn">⤢ Phóng to video</button>
-                  <div id="emptyPlaceholder" style="display:none;position:absolute;inset:0;background:#0d0e10;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#949ba4;z-index:15;">
+                  <div id="controlShield" style="display:none;position:absolute;inset:0;z-index:12;cursor:not-allowed;"></div>
+                  <div id="shieldToast" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);background:rgba(20,20,24,0.92);color:#f0b232;border:1px solid #5c4314;padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:14;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+                    🔒 Chỉ chủ phòng mới có quyền điều khiển phát/dừng video
+                  </div>
+                  <div id="playPrompt" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.6);z-index:15;align-items:center;justify-content:center;cursor:pointer;">
+                    <div style="background:#5865f2;color:#fff;padding:12px 24px;border-radius:24px;font-weight:700;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.5);display:flex;align-items:center;gap:8px;">
+                      ▶ Bấm vào đây để phát video cùng phòng
+                    </div>
+                  </div>
+                  <div id="emptyPlaceholder" style="display:none;position:absolute;inset:0;background:#0d0e10;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#949ba4;z-index:16;">
                     <div style="font-size:36px;color:#5865f2;">▶</div>
                     <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Chưa có video nào trong hàng đợi</div>
                     <div style="font-size:12px;color:#949ba4;">Bấm vào một video ở danh sách bên phải để phát ngay!</div>
@@ -696,7 +743,7 @@ public final class WatchTogether {
                   <div id="errOverlay" style="display:none;position:absolute;inset:0;background:rgba(17,18,20,0.94);flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;z-index:20;">
                     <div style="font-size:32px;">⚠️</div>
                     <div style="font-weight:700;font-size:14px;color:#f2f3f5;">Video bị giới hạn bản quyền hoặc không hỗ trợ nhúng</div>
-                    <div style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">Chủ sở hữu hoặc YouTube không cho phép phát video này trên trình phát nhúng. Bạn có thể mở xem cùng nhau trên Trình duyệt hoặc mở trực tiếp trên YouTube.</div>
+                    <div id="errDesc" style="font-size:12px;color:#949ba4;max-width:380px;line-height:1.4;">Chủ sở hữu hoặc YouTube không cho phép phát video này trên trình phát nhúng. Bạn có thể mở xem cùng nhau trên Trình duyệt hoặc mở trực tiếp trên YouTube.</div>
                     <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center;">
                       <button id="errBrowserBtn" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🌐 Xem cùng nhau trên Trình duyệt</button>
                       <button id="errDirectBtn" style="background:#2b2d31;color:#f2f3f5;border:1px solid #3b3d44;border-radius:6px;padding:8px 16px;font-weight:600;font-size:12px;cursor:pointer;">🔗 Mở trên YouTube</button>
@@ -729,9 +776,15 @@ public final class WatchTogether {
             function onYouTubeIframeAPIReady(){
               player=new YT.Player('player',{
                 width:'100%',height:'100%',
-                host:'https://www.youtube-nocookie.com',
                 playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:window.location.origin},
-                events:{onReady:()=>{ready=true;apply();},onStateChange:onState,onError:onPlayerError}
+                events:{
+                  onReady:()=>{
+                    ready=true;
+                    if(st){render();apply();}
+                  },
+                  onStateChange:onState,
+                  onError:onPlayerError
+                }
               });
             }
             function onPlayerError(e){
@@ -742,28 +795,31 @@ public final class WatchTogether {
               playCheckTimer=setTimeout(()=>{
                 if(ready&&player&&player.getPlayerState&&st&&st.p&&cur>=0){
                   const s=player.getPlayerState();
-                  if(s===-1||s===5){
-                    $('errOverlay').style.display='flex';
+                  if(s===-1||s===2||s===5){
+                    if($('playPrompt')) $('playPrompt').style.display='flex';
                   }
                 }
               },3500);
             }
-            function guard(){applying=Date.now()+1200;}
+            function guard(){applying=Date.now()+2000;}
             function apply(){
               if(!ready||!st)return;
               if(st.i<0||st.i>=st.q.length){try{player.pauseVideo();}catch(e){}return;}
               if(cur!==st.i){
                 cur=st.i;guard();
                 $('errOverlay').style.display='none';
-                lastT=st.t;lastWall=Date.now();
-                player.loadVideoById(st.q[cur],st.t);
+                if($('playPrompt')) $('playPrompt').style.display='none';
+                lastT=st.t||0;lastWall=Date.now();
+                player.loadVideoById(st.q[cur],st.t||0);
                 if(st.p){
+                  try{player.playVideo();}catch(e){}
                   checkPlayHealth();
                 }else{
                   setTimeout(()=>{try{player.pauseVideo();}catch(e){}},400);
                 }
                 return;
               }
+              if(Date.now()<applying)return;
               const t=player.getCurrentTime?player.getCurrentTime():0;
               if(Math.abs(t-st.t)>3.5){
                 guard();
@@ -772,40 +828,61 @@ public final class WatchTogether {
               }
               const s=player.getPlayerState?player.getPlayerState():-1;
               if(st.p){
-                if(s!==1&&s!==3){guard();try{player.playVideo();}catch(e){}checkPlayHealth();}
+                if(s!==1&&s!==3){
+                  guard();
+                  try{player.playVideo();}catch(e){}
+                  checkPlayHealth();
+                }
               }else{
-                if(s!==2){guard();try{player.pauseVideo();}catch(e){}}
+                if(s!==2){
+                  guard();
+                  try{player.pauseVideo();}catch(e){}
+                }
               }
             }
             function onState(e){
               if(e.data===1||e.data===3){
                 if(playCheckTimer)clearTimeout(playCheckTimer);
                 $('errOverlay').style.display='none';
+                if($('playPrompt')) $('playPrompt').style.display='none';
               }
               if(e.data===0){call('ended',{i:cur});return;}
               if(e.data===1||e.data===2){
                 $('errOverlay').style.display='none';
+                if(Date.now()<applying)return;
+                if(st&&!st.can){
+                  guard();
+                  apply();
+                  return;
+                }
                 const isPlaying=(e.data===1);
                 const userToggled=st&&(isPlaying!==!!st.p);
-                if(userToggled||Date.now()>=applying){
+                if(userToggled){
                   const t=player.getCurrentTime?player.getCurrentTime():0;
                   lastT=t;lastWall=Date.now();
-                  if(st)st.p=isPlaying;
+                  if(st){st.p=isPlaying;st.t=t;}
+                  guard();
                   call('event',{p:isPlaying?1:0,t:t,i:cur});
                 }
               }
             }
             setInterval(()=>{
               if(!ready||!st||!player.getCurrentTime)return;
-              const t=player.getCurrentTime(),now=Date.now(),ps=player.getPlayerState();
+              const ps=player.getPlayerState?player.getPlayerState():-1;
+              if(ps!==1&&ps!==2)return;
+              const t=player.getCurrentTime(),now=Date.now();
               const expect=lastT+(ps===1?(now-lastWall)/1000:0);
-              if(Date.now()>=applying&&Math.abs(t-expect)>3.5){
+              const diff=Math.abs(t-expect);
+              if(Date.now()>=applying&&diff>3.0){
+                if(st&&!st.can){guard();apply();return;}
                 lastT=t;lastWall=now;
+                if(st)st.t=t;
+                guard();
                 call('event',{p:ps===1?1:0,t:t,i:cur});
               }else if(Date.now()>=applying){
                 lastT=t;lastWall=now;
               }
-            },1000);
+            },600);
             function render(){
               if(!st)return;
               const hasQ=st.q&&st.q.length>0;
@@ -816,12 +893,22 @@ public final class WatchTogether {
                 evBtn.className='host-pill';
                 evBtn.textContent='● Mọi người cùng điều khiển';
                 evBtn.title='Bấm để chuyển sang: Chỉ tôi điều khiển';
+                evBtn.style.cursor='pointer';
               }else{
                 evBtn.className='host-pill locked';
                 evBtn.textContent=st.host?'🔒 Chỉ bạn điều khiển':'🔒 Chỉ chủ phòng điều khiển';
-                evBtn.title='Bấm để mở lại quyền cho mọi người';
+                evBtn.title=st.host?'Bấm để mở lại quyền cho mọi người':'Chỉ chủ phòng mới có quyền thay đổi';
+                evBtn.style.cursor=st.host?'pointer':'not-allowed';
               }
               $('msg').textContent=st.can?'':('Chỉ xem (Chủ phòng khóa điều khiển)');
+              const sBtn=$('stopBtn');
+              if(sBtn){
+                sBtn.style.display=st.can?'inline-flex':'none';
+              }
+              const shield=$('controlShield');
+              if(shield){
+                shield.style.display=(!st.can&&hasQ)?'block':'none';
+              }
               const l=$('list');l.innerHTML='';
               const titles=st.titles||{};
               (st.q||[]).forEach((id,i)=>{
@@ -833,8 +920,10 @@ public final class WatchTogether {
                 d.querySelector('.t').textContent=t;
                 const x=document.createElement('button');
                 x.className='del';x.textContent='Xóa';
-                x.onclick=ev=>{ev.stopPropagation();call('remove',{i});};
+                if(!st.can) x.style.display='none';
+                x.onclick=ev=>{ev.stopPropagation();if(st&&st.can)call('remove',{i});};
                 d.onclick=()=>{
+                  if(!st||!st.can)return;
                   if(i===st.i){
                     const pNow=!st.p;
                     if(st)st.p=pNow;
@@ -856,7 +945,7 @@ public final class WatchTogether {
                 const p=c.querySelector('.plus');
                 const txt=c.querySelector('.ov span');
                 if(p)p.textContent=inQ?'✓':'+';
-                if(txt)txt.textContent=inQ?'Phát lại':'Phát ngay';
+                if(txt)txt.textContent=inQ?'Đã thêm':'Thêm vào danh sách';
               });
             }
             function appendCards(items){
@@ -869,12 +958,13 @@ public final class WatchTogether {
                 c.dataset.vid=v.id;
                 c.innerHTML='<div class="thumb"><img src="https://i.ytimg.com/vi/'+v.id+'/hqdefault.jpg" onerror="this.onerror=null;this.src=\\'https://i.ytimg.com/vi/'+v.id+'/mqdefault.jpg\\'">'
                   +'<span class="dur"></span>'
-                  +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Phát lại':'Phát ngay')+'</span></div></div>'
+                  +'<div class="ov"><div class="plus">'+(inQ?'✓':'+')+'</div><span>'+(inQ?'Đã thêm':'Thêm vào danh sách')+'</span></div></div>'
                   +'<div class="ctitle"></div>';
                 c.querySelector('.dur').textContent=v.dur||'';
                 c.querySelector('.ctitle').textContent=v.title;
                 c.onclick=()=>{
-                  call('add',{url:v.id,title:v.title,playNow:1});
+                  if(st&&!st.can)return;
+                  call('add',{url:v.id,title:v.title,playNow:0});
                 };
                 g.appendChild(c);
               });
@@ -882,7 +972,8 @@ public final class WatchTogether {
             async function doSearch(raw){
               const val=(raw||'').trim();
               if(/(?:youtu\\.be\\/|youtube\\.com\\/|^[A-Za-z0-9_-]{11}$)/.test(val)){
-                await call('add',{url:val,playNow:1});
+                if(st&&!st.can)return;
+                await call('add',{url:val,playNow:0});
                 $('qInput').value='';
                 return;
               }
@@ -921,21 +1012,119 @@ public final class WatchTogether {
             $('qInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value);});
             $('qBtn').onclick=()=>doSearch($('qInput').value);
             $('everyone').onclick=async()=>{
+              if(!st||(!st.e&&!st.host))return;
               const s=await call('everyone');
               if(s&&s.seq){st=s;seq=s.seq;render();}
             };
+            const isApp=new URLSearchParams(window.location.search).get('env')==='app'||/LTMApp/i.test(navigator.userAgent);
+            if(!isApp){
+              const eb=$('expandBtn');if(eb)eb.remove();
+              const cb=$('collapseBtn');if(cb)cb.remove();
+              const b=$('errBrowserBtn');if(b)b.style.display='none';
+              const d=$('errDesc');if(d)d.textContent='Chủ sở hữu hoặc YouTube đã tắt tính năng nhúng đối với video này. Bạn có thể mở trực tiếp trên YouTube.';
+            }
             $('errBrowserBtn').onclick=()=>call('browser');
             $('errDirectBtn').onclick=()=>{
               if(cur>=0&&st&&st.q&&st.q[cur]){
-                call('openUrl',{url:'https://www.youtube.com/watch?v='+st.q[cur]});
+                const u='https://www.youtube.com/watch?v='+st.q[cur];
+                if(isApp){call('openUrl',{url:u});}else{window.open(u,'_blank');}
               }
             };
-            $('expandBtn').onclick=()=>{expanded=true;render();};
-            $('collapseBtn').onclick=()=>{expanded=false;render();};
+            if($('expandBtn')) $('expandBtn').onclick=()=>{expanded=true;render();};
+            if($('collapseBtn')) $('collapseBtn').onclick=()=>{expanded=false;render();};
             $('errBackBtn').onclick=()=>{expanded=false;render();};
             window.addEventListener('keydown',e=>{if((e.key==='Escape'||e.key==='Esc')&&expanded){expanded=false;render();}});
+            let sessionEnded=false;
+            function onSessionEnded(){
+              if(sessionEnded)return;
+              sessionEnded=true;
+              try{if(player&&player.stopVideo)player.stopVideo();}catch(e){}
+              try{if(player&&player.pauseVideo)player.pauseVideo();}catch(e){}
+              const p=$('player');if(p)p.innerHTML='';
+              document.body.innerHTML=`
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#111214;color:#f2f3f5;font-family:sans-serif;text-align:center;gap:14px;padding:24px;">
+                  <div style="font-size:42px;">⏹️</div>
+                  <div style="font-size:18px;font-weight:700;">Cuộc gọi hoặc phiên xem chung đã kết thúc</div>
+                  <div style="font-size:13px;color:#949ba4;">Trình phát đã dừng và ngắt kết nối. Bạn có thể đóng tab này.</div>
+                  <button onclick="window.close()" style="background:#5865f2;color:#fff;border:0;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;margin-top:6px;">Đóng tab</button>
+                </div>
+              `;
+              try{window.close();}catch(e){}
+            }
+
+            let toastTimer=null;
+            const cs=$('controlShield');
+            if(cs){
+              cs.onclick=()=>{
+                const t=$('shieldToast');
+                if(!t)return;
+                t.style.display='block';
+                if(toastTimer)clearTimeout(toastTimer);
+                toastTimer=setTimeout(()=>{t.style.display='none';},2000);
+              };
+            }
+            if($('playPrompt')){
+              $('playPrompt').onclick=()=>{
+                $('playPrompt').style.display='none';
+                if(player&&player.playVideo){
+                  try{player.playVideo();}catch(e){}
+                }
+              };
+            }
+            if($('stopBtn')){
+              $('stopBtn').onclick=()=>{
+                if(confirm('Bạn có chắc muốn dừng xem YouTube cùng nhau cho cả phòng?')){
+                  call('stop');
+                }
+              };
+            }
+            window.addEventListener('keydown',e=>{
+              if(!st||st.can)return;
+              if(e.key===' '||e.code==='Space'||e.key==='k'||e.key==='K'){
+                e.preventDefault();
+                e.stopPropagation();
+                const t=$('shieldToast');
+                if(t){
+                  t.style.display='block';
+                  if(toastTimer)clearTimeout(toastTimer);
+                  toastTimer=setTimeout(()=>{t.style.display='none';},2000);
+                }
+              }
+            },true);
+
             doSearch('');
-            setInterval(async()=>{const s=await call('state');if(!s)return;st=s;if(s.seq!==seq){seq=s.seq;render();apply();}},500);
+            let failCount=0;
+            setInterval(async()=>{
+              if(sessionEnded)return;
+              const s=await call('state');
+              if(!s){
+                failCount++;
+                if(failCount>=3){
+                  onSessionEnded();
+                }
+                return;
+              }
+              failCount=0;
+              if(s.stopped){
+                onSessionEnded();
+                return;
+              }
+              st=s;
+              if(s.seq!==seq){
+                seq=s.seq;
+                render();
+                apply();
+              }else if(ready&&st&&cur>=0&&Date.now()>=applying){
+                const ps=player.getPlayerState?player.getPlayerState():-1;
+                if(st.p && ps!==1 && ps!==3){
+                  guard();
+                  try{player.playVideo();}catch(e){}
+                }else if(!st.p && ps===1){
+                  guard();
+                  try{player.pauseVideo();}catch(e){}
+                }
+              }
+            },500);
             </script></body></html>
             """;
 }

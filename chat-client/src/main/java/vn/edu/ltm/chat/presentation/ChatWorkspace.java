@@ -553,22 +553,60 @@ public final class ChatWorkspace extends JPanel {
             w.startSession();
             w.requestState();
         }
-        javax.swing.JComponent playerComp = w.createInAppPlayerComponent();
-        if (playerComp != null) {
-            meetRoomPanel.showWatchTogetherStage(playerComp, () -> {
-                userManuallyStoppedWatchAt = System.currentTimeMillis();
-                w.stop();
-                String cid = call.conversationId();
-                String chan = call.channel();
-                if (cid != null) {
-                    chatService.sendCallSignal(cid, chan, WatchTogether.ACTION_STOP, "");
-                }
-            }, () -> {
-                w.openBrowser();
-            });
-        } else {
+        w.openBrowser();
+        meetRoomPanel.showWatchTogetherStage(createBrowserWatchPlaceholder(w), () -> {
+            userManuallyStoppedWatchAt = System.currentTimeMillis();
+            boolean canCtrl = w.canControl();
+            w.stop();
+            String cid = call.conversationId();
+            String chan = call.channel();
+            if (canCtrl && cid != null) {
+                chatService.sendCallSignal(cid, chan, WatchTogether.ACTION_STOP, "");
+            }
+        }, () -> {
             w.openBrowser();
-        }
+        });
+    }
+
+    private javax.swing.JComponent createBrowserWatchPlaceholder(WatchTogether w) {
+        javax.swing.JPanel p = new javax.swing.JPanel(new java.awt.GridBagLayout());
+        p.setBackground(new java.awt.Color(0x11, 0x12, 0x14));
+
+        javax.swing.JPanel card = new javax.swing.JPanel();
+        card.setLayout(new javax.swing.BoxLayout(card, javax.swing.BoxLayout.Y_AXIS));
+        card.setOpaque(false);
+
+        javax.swing.JLabel iconLbl = new javax.swing.JLabel(IconFactory.phosphor("video-camera.svg", 48, DiscordTheme.ACCENT));
+        iconLbl.setAlignmentX(0.5f);
+
+        javax.swing.JLabel titleLbl = new javax.swing.JLabel("Đang xem YouTube cùng nhau trên Trình duyệt");
+        titleLbl.setFont(DiscordTheme.bold(16f));
+        titleLbl.setForeground(java.awt.Color.WHITE);
+        titleLbl.setAlignmentX(0.5f);
+        titleLbl.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 0, 4, 0));
+
+        javax.swing.JLabel descLbl = new javax.swing.JLabel("Trang xem chung đã được mở trên trình duyệt mặc định của bạn.");
+        descLbl.setFont(DiscordTheme.font(13f));
+        descLbl.setForeground(DiscordTheme.TEXT_MUTED);
+        descLbl.setAlignmentX(0.5f);
+        descLbl.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 0, 16, 0));
+
+        javax.swing.JButton openBtn = new javax.swing.JButton("Mở lại tab trình duyệt", IconFactory.phosphor("compass.svg", 16, java.awt.Color.WHITE));
+        openBtn.setFont(DiscordTheme.semibold(13f));
+        openBtn.setForeground(java.awt.Color.WHITE);
+        openBtn.setBackground(DiscordTheme.ACCENT);
+        openBtn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        openBtn.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 20, 8, 20));
+        openBtn.setAlignmentX(0.5f);
+        openBtn.addActionListener(e -> w.openBrowser());
+
+        card.add(iconLbl);
+        card.add(titleLbl);
+        card.add(descLbl);
+        card.add(openBtn);
+
+        p.add(card);
+        return p;
     }
 
     private void handleWatchSignal(ChatGateway.CallSignalEvent ev, String action) {

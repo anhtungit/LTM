@@ -54,6 +54,10 @@ public final class DiscordTheme {
         return FONT.deriveFont(size);
     }
 
+    public static Font regular(float size) {
+        return font(size);
+    }
+
     public static Font semibold(float size) {
         return SEMIBOLD.deriveFont(size);
     }
