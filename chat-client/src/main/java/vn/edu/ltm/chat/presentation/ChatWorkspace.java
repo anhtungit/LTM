@@ -182,7 +182,7 @@ public final class ChatWorkspace extends JPanel {
         this.headerPanel = new ChatHeaderPanel(
                 this::showMeetLobby,
                 this::showMeetRoom,
-                this::openInboxDialog
+                null
         );
 
         this.inputBar.setListener(new ChatInputBar.ChatInputListener() {
@@ -1112,8 +1112,6 @@ public final class ChatWorkspace extends JPanel {
         content.setBorder(BorderFactory.createEmptyBorder(12, 10, 8, 10));
 
         content.add(searchBar());
-        content.add(Box.createVerticalStrut(10));
-        content.add(inboxRow());
         content.add(Box.createVerticalStrut(14));
 
         // Group section in DM sidebar

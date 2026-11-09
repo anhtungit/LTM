@@ -107,11 +107,11 @@ final class ChatHeaderPanel extends JPanel {
         });
         actions.add(callVideo);
 
-        JButton headerInbox = iconButton("envelope-simple-open.svg", "Hộp thư thông báo");
-        headerInbox.addActionListener(e -> {
-            if (onInbox != null) onInbox.run();
-        });
-        actions.add(headerInbox);
+        if (onInbox != null) {
+            JButton headerInbox = iconButton("envelope-simple-open.svg", "Hộp thư thông báo");
+            headerInbox.addActionListener(e -> onInbox.run());
+            actions.add(headerInbox);
+        }
 
         if (onToggleInfoPane != null) {
             JButton memberToggle = iconButton("users.svg", "Ẩn/hiện thông tin chi tiết");
