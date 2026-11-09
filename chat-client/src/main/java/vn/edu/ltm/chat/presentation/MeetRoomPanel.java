@@ -169,7 +169,7 @@ public final class MeetRoomPanel extends JPanel {
             micBtn.setBackground(this.micMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
         }
         if (camBtn != null) {
-            camBtn.setBackground(this.camMuted ? new Color(0x3B, 0x3D, 0x44) : DiscordTheme.SUCCESS);
+            camBtn.setBackground(this.camMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
         }
         titleLabel.setText(roomTitle != null && !roomTitle.isBlank() ? roomTitle : "Cuộc gọi thoại");
         videoFrames.clear();
@@ -200,7 +200,7 @@ public final class MeetRoomPanel extends JPanel {
     public void setCamMuted(boolean camMuted) {
         this.camMuted = camMuted;
         if (camBtn != null) {
-            camBtn.setBackground(camMuted ? new Color(0x3B, 0x3D, 0x44) : DiscordTheme.SUCCESS);
+            camBtn.setBackground(camMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
         }
         if (camMuted && selfParticipantId != null) {
             updateParticipantVideo(selfParticipantId, null);
@@ -815,11 +815,11 @@ public final class MeetRoomPanel extends JPanel {
         bar.add(micBtn);
 
         camBtn = new JButton(IconFactory.phosphor("video-camera.svg", 18, Color.WHITE));
-        styleControlBtn(camBtn, new Color(0x3B, 0x3D, 0x44));
+        styleControlBtn(camBtn, camMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
         camBtn.setToolTipText("Bật/Tắt camera");
         camBtn.addActionListener(e -> {
             camMuted = !camMuted;
-            camBtn.setBackground(camMuted ? new Color(0x3B, 0x3D, 0x44) : DiscordTheme.SUCCESS);
+            camBtn.setBackground(camMuted ? DiscordTheme.DANGER : new Color(0x3B, 0x3D, 0x44));
             if (onCamToggle != null) {
                 onCamToggle.accept(camMuted);
             }
