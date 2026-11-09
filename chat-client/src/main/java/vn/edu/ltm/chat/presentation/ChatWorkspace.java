@@ -573,7 +573,7 @@ public final class ChatWorkspace extends JPanel {
         titleLbl.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 0, 4, 0));
 
         javax.swing.JLabel descLbl = new javax.swing.JLabel("Trang xem chung đã được mở trên trình duyệt mặc định của bạn.");
-        descLbl.setFont(DiscordTheme.regular(13f));
+        descLbl.setFont(DiscordTheme.font(13f));
         descLbl.setForeground(DiscordTheme.TEXT_MUTED);
         descLbl.setAlignmentX(0.5f);
         descLbl.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 0, 16, 0));
