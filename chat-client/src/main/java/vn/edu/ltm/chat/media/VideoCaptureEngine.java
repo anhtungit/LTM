@@ -27,11 +27,11 @@ import java.util.function.Consumer;
  * Uses native DirectShow/V4L2 via Sarxos Webcam Capture (zero external install) with FFmpeg fallback.
  */
 public final class VideoCaptureEngine {
-    // HD 720p @ 30fps (~30-38KB/frame over UDP, within 65507 byte IP payload)
-    private static final int WIDTH = 1280;
-    private static final int HEIGHT = 720;
-    private static final int FPS = 30;
-    private static final int FRAME_INTERVAL_MS = 1000 / FPS; // ~33ms
+    // 640x360 @ 15fps (~10KB/frame, lightweight, zero packet drops across VPN/LAN)
+    private static final int WIDTH = 640;
+    private static final int HEIGHT = 360;
+    private static final int FPS = 15;
+    private static final int FRAME_INTERVAL_MS = 1000 / FPS; // ~66ms
     private static final Path SHARED_FRAME_PATH = Path.of(System.getProperty("java.io.tmpdir"), "ltm_shared_webcam.jpg");
     private static volatile String selectedCameraId = "default";
 

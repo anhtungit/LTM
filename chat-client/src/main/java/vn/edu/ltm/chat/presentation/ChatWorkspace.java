@@ -135,6 +135,7 @@ public final class ChatWorkspace extends JPanel {
     private final Map<String, javax.swing.Timer> peerScreenTimers = new ConcurrentHashMap<>();
     private final Map<String, java.util.concurrent.atomic.AtomicBoolean> peerScreenDrawing = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean screenSending = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean camSending = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public ChatWorkspace(UserProfile user, ChatService chatService, Runnable onLogout) {
         this.user = user;
@@ -408,8 +409,19 @@ public final class ChatWorkspace extends JPanel {
         videoEngine.start(jpegBytes -> {
             String cid = call.conversationId();
             if (cid != null && videoEngine.isRunning() && !meetRoomPanel.isCamMuted()) {
-                String b64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
-                chatService.sendCallSignal(cid, call.channel(), "VIDEO", b64);
+                if (!camSending.compareAndSet(false, true)) {
+                    return;
+                }
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        if (call.isActive() && videoEngine.isRunning() && !meetRoomPanel.isCamMuted()) {
+                            String b64 = java.util.Base64.getEncoder().encodeToString(jpegBytes);
+                            chatService.sendCallSignal(cid, call.channel(), "VIDEO", b64);
+                        }
+                    } finally {
+                        camSending.set(false);
+                    }
+                });
             }
         }, img -> SwingUtilities.invokeLater(() -> {
             if (call.conversationId() != null && user != null && videoEngine.isRunning() && !meetRoomPanel.isCamMuted()) {
@@ -419,6 +431,7 @@ public final class ChatWorkspace extends JPanel {
     }
 
     private void stopLocalCamera(boolean notifyPeers) {
+        camSending.set(false);
         videoEngine.stop();
         if (user != null) {
             meetRoomPanel.updateParticipantVideo(user.id(), null);
@@ -630,9 +643,9 @@ public final class ChatWorkspace extends JPanel {
         if (cid == null) return;
         screenEngine.setSourceType(sourceType);
         if (hd) {
-            screenEngine.setConfig(30, 1920, 1080);
+            screenEngine.setConfig(15, 1280, 720);
         } else {
-            screenEngine.setConfig(30, 1280, 720);
+            screenEngine.setConfig(10, 960, 540);
         }
         meetRoomPanel.setScreenSharingActive(true);
         screenEngine.start(jpegBytes -> {
