@@ -210,7 +210,14 @@ public final class WatchTogether {
             try {
                 Desktop.getDesktop().browse(uri);
             } catch (Exception e) {
-                new ProcessBuilder("xdg-open", uri.toString()).start();
+                String os = System.getProperty("os.name", "").toLowerCase();
+                if (os.contains("win")) {
+                    new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start();
+                } else if (os.contains("mac")) {
+                    new ProcessBuilder("open", url).start();
+                } else {
+                    new ProcessBuilder("xdg-open", uri.toString()).start();
+                }
             }
         } catch (Exception e) {
             System.err.println("[WatchTogether] Không mở được trình duyệt: " + e.getMessage());
@@ -711,6 +718,7 @@ public final class WatchTogether {
                 <input id="qInput" placeholder="Tìm kiếm video YouTube hoặc dán đường dẫn URL...">
                 <button id="qBtn" title="Tìm kiếm">🔍</button>
               </div>
+              <button id="stopBtn" class="host-pill" style="color:#f23f43;border-color:#5c1d24;background:#261214;cursor:pointer;margin-left:auto;" title="Dừng xem cùng nhau cho tất cả mọi người">⏹ Dừng xem chung</button>
             </div>
             <div id="stage">
               <button id="collapseBtn">⤡ Thu nhỏ / Hiện danh sách</button>
@@ -893,6 +901,10 @@ public final class WatchTogether {
                 evBtn.style.cursor=st.host?'pointer':'not-allowed';
               }
               $('msg').textContent=st.can?'':('Chỉ xem (Chủ phòng khóa điều khiển)');
+              const sBtn=$('stopBtn');
+              if(sBtn){
+                sBtn.style.display=st.can?'inline-flex':'none';
+              }
               const shield=$('controlShield');
               if(shield){
                 shield.style.display=(!st.can&&hasQ)?'block':'none';
@@ -1056,6 +1068,13 @@ public final class WatchTogether {
                 $('playPrompt').style.display='none';
                 if(player&&player.playVideo){
                   try{player.playVideo();}catch(e){}
+                }
+              };
+            }
+            if($('stopBtn')){
+              $('stopBtn').onclick=()=>{
+                if(confirm('Bạn có chắc muốn dừng xem YouTube cùng nhau cho cả phòng?')){
+                  call('stop');
                 }
               };
             }
